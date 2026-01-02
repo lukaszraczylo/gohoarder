@@ -1,4 +1,7 @@
 # Application Engine - GoHoarder Server
+ARG TARGETOS
+ARG TARGETARCH
+
 FROM alpine:latest
 
 # Install runtime dependencies
@@ -15,8 +18,10 @@ RUN addgroup -g 1000 gohoarder && \
 RUN mkdir -p /data/cache /data/metadata && \
     chown -R gohoarder:gohoarder /data
 
-# Copy binary
-COPY gohoarder /usr/local/bin/gohoarder
+# Copy binary (from platform-specific path)
+ARG TARGETOS
+ARG TARGETARCH
+COPY ${TARGETOS}/${TARGETARCH}/gohoarder /usr/local/bin/gohoarder
 RUN chmod +x /usr/local/bin/gohoarder
 
 # Copy example config

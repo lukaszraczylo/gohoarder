@@ -1,4 +1,7 @@
 # Scanning Engine - Background Scanner Worker
+ARG TARGETOS
+ARG TARGETARCH
+
 FROM alpine:latest
 
 # Install scanning tools and runtime dependencies
@@ -29,8 +32,10 @@ RUN addgroup -g 1000 scanner && \
 RUN mkdir -p /data/cache /data/scans && \
     chown -R scanner:scanner /data
 
-# Copy binary
-COPY gohoarder /usr/local/bin/gohoarder
+# Copy binary (from platform-specific path)
+ARG TARGETOS
+ARG TARGETARCH
+COPY ${TARGETOS}/${TARGETARCH}/gohoarder /usr/local/bin/gohoarder
 RUN chmod +x /usr/local/bin/gohoarder
 
 # Copy example config

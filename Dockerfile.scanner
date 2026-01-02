@@ -15,14 +15,10 @@ RUN apk add --no-cache \
     && update-ca-certificates
 
 # Install Trivy for container scanning
-RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
-    wget -O /tmp/trivy.tar.gz https://github.com/aquasecurity/trivy/releases/latest/download/trivy_$(uname -s)_$(uname -m).tar.gz && \
-    tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin && \
-    rm /tmp/trivy.tar.gz && \
-    chmod +x /usr/local/bin/trivy
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
 # Install Grype for vulnerability scanning
-RUN wget -qO - https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
 
 # Create non-root user
 RUN addgroup -g 1000 scanner && \

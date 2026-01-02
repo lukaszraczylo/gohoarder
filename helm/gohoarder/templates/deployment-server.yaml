@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-server
+  labels:
+    {{- include "gohoarder.server.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount.server }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gohoarder.server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "gohoarder.server.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "gohoarder.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+      - name: init-permissions
+        image: busybox:latest
+        command: ['sh', '-c']
+        args:
+        - |
+          mkdir -p /var/cache/gohoarder /var/lib/gohoarder/metadata /tmp/gohoarder
+          chown -R 1000:1000 /var/cache/gohoarder /var/lib/gohoarder /tmp/gohoarder
+          chmod 750 /var/cache/gohoarder /var/lib/gohoarder
+        volumeMounts:
+        {{- include "gohoarder.storageVolume" . | nindent 8 }}
+        {{- include "gohoarder.metadataVolume" . | nindent 8 }}
+        - name: tmp
+          mountPath: /tmp/gohoarder
+        securityContext:
+          runAsUser: 0
+      containers:
+      - name: server
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.server.repository }}:{{ .Values.image.server.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.server.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.server.port }}
+          protocol: TCP
+        env:
+        - name: CONFIG_FILE
+          value: /etc/gohoarder/config.yaml
+        {{- if and .Values.auth.enabled .Values.auth.existingSecret }}
+        - name: ADMIN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.auth.existingSecret }}
+              key: {{ .Values.auth.secretKey }}
+        {{- else if .Values.auth.enabled }}
+        - name: ADMIN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-auth
+              key: {{ .Values.auth.secretKey }}
+        {{- end }}
+        {{- if and (eq .Values.storage.backend "s3") .Values.storage.s3.existingSecret }}
+        - name: S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.storage.s3.existingSecret }}
+              key: access-key-id
+        - name: S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.storage.s3.existingSecret }}
+              key: secret-access-key
+        {{- else if and (eq .Values.storage.backend "s3") .Values.storage.s3.accessKeyId }}
+        - name: S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-s3
+              key: access-key-id
+        - name: S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-s3
+              key: secret-access-key
+        {{- end }}
+        {{- if and (eq .Values.storage.backend "smb") .Values.storage.smb.existingSecret }}
+        - name: SMB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.storage.smb.existingSecret }}
+              key: username
+        - name: SMB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.storage.smb.existingSecret }}
+              key: password
+        {{- else if and (eq .Values.storage.backend "smb") .Values.storage.smb.username }}
+        - name: SMB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-smb
+              key: username
+        - name: SMB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-smb
+              key: password
+        {{- end }}
+        {{- if and (eq .Values.metadata.backend "postgresql") .Values.metadata.postgresql.existingSecret }}
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.metadata.postgresql.existingSecret }}
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.metadata.postgresql.existingSecret }}
+              key: password
+        {{- else if and (eq .Values.metadata.backend "postgresql") .Values.metadata.postgresql.username }}
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-postgresql
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-postgresql
+              key: password
+        {{- end }}
+        {{- if and .Values.security.scanners.ghsa.enabled .Values.security.scanners.ghsa.existingSecret }}
+        - name: GHSA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.security.scanners.ghsa.existingSecret }}
+              key: token
+        {{- else if and .Values.security.scanners.ghsa.enabled .Values.security.scanners.ghsa.token }}
+        - name: GHSA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-ghsa
+              key: token
+        {{- end }}
+        {{- with .Values.server.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        livenessProbe:
+          {{- toYaml .Values.server.livenessProbe | nindent 12 }}
+        readinessProbe:
+          {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+        resources:
+          {{- toYaml .Values.server.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gohoarder
+          readOnly: true
+        - name: storage
+          mountPath: /var/cache/gohoarder
+        - name: metadata
+          mountPath: /var/lib/gohoarder/metadata
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "gohoarder.fullname" . }}-config
+      {{- include "gohoarder.storageVolume" . | nindent 6 }}
+      {{- include "gohoarder.metadataVolume" . | nindent 6 }}
+      - name: tmp
+        emptyDir: {}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,118 @@
+{{- if .Values.ingress.enabled -}}
+{{- if .Values.ingress.frontend.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-frontend
+  labels:
+    {{- include "gohoarder.frontend.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.frontend.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.frontend.host | default (printf "%s.%s" "gohoarder" .Values.global.domain) | quote }}
+      secretName: {{ .Values.ingress.frontend.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.frontend.host | default (printf "%s.%s" "gohoarder" .Values.global.domain) | quote }}
+      http:
+        paths:
+          - path: /npm
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /pypi
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /go
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-frontend
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}
+---
+{{- if .Values.ingress.api.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-api
+  labels:
+    {{- include "gohoarder.server.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.api.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.api.host | default (printf "api.%s.%s" "gohoarder" .Values.global.domain) | quote }}
+      secretName: {{ .Values.ingress.api.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.api.host | default (printf "api.%s.%s" "gohoarder" .Values.global.domain) | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gohoarder.fullname" . }}-server
+                port:
+                  number: {{ .Values.server.service.port }}
+{{- end }}
+{{- end }}

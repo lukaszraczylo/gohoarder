@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gohoarder
+  namespace: default
+  labels:
+    app: gohoarder
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gohoarder
+  template:
+    metadata:
+      labels:
+        app: gohoarder
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+      - name: gohoarder
+        image: gohoarder:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+
+        env:
+        - name: CONFIG_FILE
+          value: /etc/gohoarder/config.yaml
+
+        volumeMounts:
+        # Configuration file
+        - name: config
+          mountPath: /etc/gohoarder/config.yaml
+          subPath: config.yaml
+          readOnly: true
+
+        # Git credentials (pattern-based)
+        - name: git-credentials
+          mountPath: /etc/gohoarder/git-credentials.json
+          subPath: credentials.json
+          readOnly: true
+
+        # Persistent storage for cache
+        - name: cache
+          mountPath: /var/lib/gohoarder/cache
+
+        # Persistent storage for metadata database
+        - name: metadata
+          mountPath: /var/lib/gohoarder
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+      volumes:
+      # ConfigMap with application configuration
+      - name: config
+        configMap:
+          name: gohoarder-config
+
+      # Secret with git credentials
+      - name: git-credentials
+        secret:
+          secretName: gohoarder-git-credentials
+          defaultMode: 0400  # Read-only for owner
+
+      # PersistentVolumeClaim for cache
+      - name: cache
+        persistentVolumeClaim:
+          claimName: gohoarder-cache-pvc
+
+      # PersistentVolumeClaim for metadata
+      - name: metadata
+        persistentVolumeClaim:
+          claimName: gohoarder-metadata-pvc

@@ -1,0 +1,502 @@
+# GoHoarder - Kubernetes Deployment (All-in-One)
+# This manifest deploys all GoHoarder services under a single ingress
+#
+# Usage:
+# kubectl create namespace gohoarder
+# kubectl apply -f deployment-all-in-one.yaml -n gohoarder
+#
+# Prerequisites:
+# - Kubernetes 1.19+
+# - Ingress controller (nginx, traefik, etc.)
+# - Persistent volume provisioner
+# - Optional: cert-manager for TLS certificates
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: namespace
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gohoarder-config
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: config
+data:
+  # Add your configuration here or mount from a file
+  # config.yaml: |
+  #   server:
+  #     port: 8080
+  #   ...
+
+---
+# PersistentVolumeClaim for cache storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gohoarder-cache
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteMany  # Multiple pods can access for scanner + server
+  resources:
+    requests:
+      storage: 100Gi
+  # storageClassName: your-storage-class  # Specify your storage class
+
+---
+# PersistentVolumeClaim for metadata storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gohoarder-metadata
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName: your-storage-class
+
+---
+# Deployment - Application Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gohoarder-server
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gohoarder
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gohoarder
+        app.kubernetes.io/component: server
+    spec:
+      containers:
+      - name: server
+        image: ghcr.io/lukaszraczylo/gohoarder-server:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: CONFIG_FILE
+          value: /config/config.yaml
+        - name: STORAGE_BACKEND
+          value: filesystem
+        - name: STORAGE_PATH
+          value: /data/cache
+        - name: DB_PATH
+          value: /data/metadata/gohoarder.db
+        - name: LOG_LEVEL
+          value: info
+        - name: LOG_FORMAT
+          value: json
+        volumeMounts:
+        - name: cache
+          mountPath: /data/cache
+        - name: metadata
+          mountPath: /data/metadata
+        - name: config
+          mountPath: /config
+          readOnly: true
+        livenessProbe:
+          exec:
+            command:
+            - /usr/local/bin/gohoarder
+            - version
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+      volumes:
+      - name: cache
+        persistentVolumeClaim:
+          claimName: gohoarder-cache
+      - name: metadata
+        persistentVolumeClaim:
+          claimName: gohoarder-metadata
+      - name: config
+        configMap:
+          name: gohoarder-config
+
+---
+# Service - Application Server
+apiVersion: v1
+kind: Service
+metadata:
+  name: gohoarder-server
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: server
+
+---
+# Deployment - Frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gohoarder-frontend
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gohoarder
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gohoarder
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ghcr.io/lukaszraczylo/gohoarder-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        env:
+        - name: API_BASE_URL
+          value: /api
+        - name: APP_VERSION
+          value: "1.0.0"
+        - name: APP_NAME
+          value: GoHoarder
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+
+---
+# Service - Frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: gohoarder-frontend
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: frontend
+
+---
+# Deployment - Scanner (Optional)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gohoarder-scanner
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: scanner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gohoarder
+      app.kubernetes.io/component: scanner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gohoarder
+        app.kubernetes.io/component: scanner
+    spec:
+      containers:
+      - name: scanner
+        image: ghcr.io/lukaszraczylo/gohoarder-scanner:latest
+        imagePullPolicy: Always
+        env:
+        - name: CONFIG_FILE
+          value: /config/config.yaml
+        - name: SCANNER_MODE
+          value: "true"
+        - name: SCANNER_WORKERS
+          value: "4"
+        - name: LOG_LEVEL
+          value: info
+        volumeMounts:
+        - name: cache
+          mountPath: /data/cache
+          readOnly: true
+        - name: metadata
+          mountPath: /data/metadata
+        - name: config
+          mountPath: /config
+          readOnly: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+      volumes:
+      - name: cache
+        persistentVolumeClaim:
+          claimName: gohoarder-cache
+      - name: metadata
+        persistentVolumeClaim:
+          claimName: gohoarder-metadata
+      - name: config
+        configMap:
+          name: gohoarder-config
+
+---
+# Deployment - Gateway (Nginx Reverse Proxy)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gohoarder-gateway
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gohoarder
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gohoarder
+        app.kubernetes.io/component: gateway
+    spec:
+      containers:
+      - name: gateway
+        image: ghcr.io/lukaszraczylo/gohoarder-gateway:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        env:
+        - name: BACKEND_HOST
+          value: gohoarder-server
+        - name: BACKEND_PORT
+          value: "8080"
+        - name: FRONTEND_HOST
+          value: gohoarder-frontend
+        - name: FRONTEND_PORT
+          value: "80"
+        - name: SERVER_NAME
+          value: hoarder.i.raczylo.com
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+
+---
+# Service - Gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: gohoarder-gateway
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: gateway
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: gateway
+
+---
+# Ingress - Expose via domain
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gohoarder
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: ingress
+  annotations:
+    # Nginx ingress annotations
+    nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # Enable CORS if needed
+    # nginx.ingress.kubernetes.io/enable-cors: "true"
+    # TLS/SSL configuration (uncomment if using cert-manager)
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx  # Adjust based on your ingress controller
+  rules:
+  - host: hoarder.i.raczylo.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gohoarder-gateway
+            port:
+              number: 80
+  # Uncomment for HTTPS/TLS
+  # tls:
+  # - hosts:
+  #   - hoarder.i.raczylo.com
+  #   secretName: gohoarder-tls
+
+---
+# HorizontalPodAutoscaler - Server
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gohoarder-server
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: server
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gohoarder-server
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# HorizontalPodAutoscaler - Gateway
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gohoarder-gateway
+  namespace: gohoarder
+  labels:
+    app.kubernetes.io/name: gohoarder
+    app.kubernetes.io/component: gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gohoarder-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-config
+  labels:
+    {{- include "gohoarder.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      host: {{ .Values.server.host | quote }}
+      port: {{ .Values.server.port }}
+      read_timeout: {{ .Values.server.readTimeout | quote }}
+      write_timeout: {{ .Values.server.writeTimeout | quote }}
+      idle_timeout: {{ .Values.server.idleTimeout | quote }}
+      tls:
+        enabled: false
+
+    storage:
+      backend: {{ .Values.storage.backend | quote }}
+      {{- if eq .Values.storage.backend "filesystem" }}
+      path: "/var/cache/gohoarder"
+      filesystem:
+        base_path: "/var/cache/gohoarder"
+      {{- else if eq .Values.storage.backend "s3" }}
+      s3:
+        endpoint: {{ .Values.storage.s3.endpoint | quote }}
+        region: {{ .Values.storage.s3.region | quote }}
+        bucket: {{ .Values.storage.s3.bucket | quote }}
+        {{- if .Values.storage.s3.existingSecret }}
+        access_key_id: "${S3_ACCESS_KEY_ID}"
+        secret_access_key: "${S3_SECRET_ACCESS_KEY}"
+        {{- else }}
+        access_key_id: {{ .Values.storage.s3.accessKeyId | quote }}
+        secret_access_key: {{ .Values.storage.s3.secretAccessKey | quote }}
+        {{- end }}
+        use_ssl: {{ .Values.storage.s3.useSSL }}
+      {{- else if eq .Values.storage.backend "smb" }}
+      smb:
+        host: {{ .Values.storage.smb.host | quote }}
+        share: {{ .Values.storage.smb.share | quote }}
+        {{- if .Values.storage.smb.existingSecret }}
+        username: "${SMB_USERNAME}"
+        password: "${SMB_PASSWORD}"
+        {{- else }}
+        username: {{ .Values.storage.smb.username | quote }}
+        password: {{ .Values.storage.smb.password | quote }}
+        {{- end }}
+        domain: {{ .Values.storage.smb.domain | quote }}
+      {{- end }}
+
+    metadata:
+      backend: {{ .Values.metadata.backend | quote }}
+      {{- if eq .Values.metadata.backend "sqlite" }}
+      connection: "file:/var/lib/gohoarder/metadata/gohoarder.db?cache=shared&mode=rwc"
+      sqlite:
+        path: "/var/lib/gohoarder/metadata/gohoarder.db"
+        wal_mode: {{ .Values.metadata.sqlite.walMode }}
+      {{- else if eq .Values.metadata.backend "postgresql" }}
+      postgresql:
+        host: {{ .Values.metadata.postgresql.host | quote }}
+        port: {{ .Values.metadata.postgresql.port }}
+        database: {{ .Values.metadata.postgresql.database | quote }}
+        {{- if .Values.metadata.postgresql.existingSecret }}
+        user: "${POSTGRES_USER}"
+        password: "${POSTGRES_PASSWORD}"
+        {{- else }}
+        user: {{ .Values.metadata.postgresql.username | quote }}
+        password: {{ .Values.metadata.postgresql.password | quote }}
+        {{- end }}
+        ssl_mode: {{ .Values.metadata.postgresql.sslMode | quote }}
+      {{- end }}
+
+    cache:
+      default_ttl: {{ .Values.cache.defaultTTL | quote }}
+      cleanup_interval: {{ .Values.cache.cleanupInterval | quote }}
+      max_size_bytes: {{ .Values.cache.maxSizeBytes }}
+      per_project_quota: {{ .Values.cache.perProjectQuota }}
+      ttl_overrides:
+        {{- range $key, $value := .Values.cache.ttlOverrides }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+
+    security:
+      enabled: {{ .Values.security.enabled }}
+      block_on_severity: {{ .Values.security.blockOnSeverity | quote }}
+      scan_on_download: {{ .Values.security.scanOnDownload }}
+      rescan_interval: {{ .Values.security.rescanInterval | quote }}
+      update_db_on_startup: {{ .Values.security.updateDbOnStartup }}
+      block_thresholds:
+        critical: {{ .Values.security.blockThresholds.critical }}
+        high: {{ .Values.security.blockThresholds.high }}
+        medium: {{ .Values.security.blockThresholds.medium }}
+        low: {{ .Values.security.blockThresholds.low }}
+      scanners:
+        trivy:
+          enabled: {{ .Values.security.scanners.trivy.enabled }}
+          timeout: {{ .Values.security.scanners.trivy.timeout | quote }}
+          cache_db: {{ .Values.security.scanners.trivy.cacheDb | quote }}
+        osv:
+          enabled: {{ .Values.security.scanners.osv.enabled }}
+          api_url: {{ .Values.security.scanners.osv.apiUrl | quote }}
+          timeout: {{ .Values.security.scanners.osv.timeout | quote }}
+        grype:
+          enabled: {{ .Values.security.scanners.grype.enabled }}
+          timeout: {{ .Values.security.scanners.grype.timeout | quote }}
+        govulncheck:
+          enabled: {{ .Values.security.scanners.govulncheck.enabled }}
+          timeout: {{ .Values.security.scanners.govulncheck.timeout | quote }}
+        npm_audit:
+          enabled: {{ .Values.security.scanners.npmAudit.enabled }}
+          timeout: {{ .Values.security.scanners.npmAudit.timeout | quote }}
+        pip_audit:
+          enabled: {{ .Values.security.scanners.pipAudit.enabled }}
+          timeout: {{ .Values.security.scanners.pipAudit.timeout | quote }}
+        ghsa:
+          enabled: {{ .Values.security.scanners.ghsa.enabled }}
+          timeout: {{ .Values.security.scanners.ghsa.timeout | quote }}
+          {{- if or .Values.security.scanners.ghsa.token .Values.security.scanners.ghsa.existingSecret }}
+          token: "${GHSA_TOKEN}"
+          {{- end }}
+        static:
+          enabled: {{ .Values.security.scanners.static.enabled }}
+          max_package_size: {{ .Values.security.scanners.static.maxPackageSize }}
+          check_checksums: {{ .Values.security.scanners.static.checkChecksums }}
+          block_suspicious: {{ .Values.security.scanners.static.blockSuspicious }}
+
+    auth:
+      enabled: {{ .Values.auth.enabled }}
+      key_expiration: {{ .Values.auth.keyExpiration | quote }}
+      bcrypt_cost: {{ .Values.auth.bcryptCost }}
+      audit_log: {{ .Values.auth.auditLog }}
+
+    network:
+      connect_timeout: {{ .Values.network.connectTimeout | quote }}
+      read_timeout: {{ .Values.network.readTimeout | quote }}
+      write_timeout: {{ .Values.network.writeTimeout | quote }}
+      max_idle_conns: {{ .Values.network.maxIdleConns }}
+      max_conns_per_host: {{ .Values.network.maxConnsPerHost }}
+      rate_limit:
+        per_api_key: {{ .Values.network.rateLimit.perApiKey }}
+        per_ip: {{ .Values.network.rateLimit.perIp }}
+        burst_size: {{ .Values.network.rateLimit.burstSize }}
+      circuit_breaker:
+        threshold: {{ .Values.network.circuitBreaker.threshold }}
+        timeout: {{ .Values.network.circuitBreaker.timeout | quote }}
+        reset_interval: {{ .Values.network.circuitBreaker.resetInterval | quote }}
+      retry:
+        max_attempts: {{ .Values.network.retry.maxAttempts }}
+        initial_backoff: {{ .Values.network.retry.initialBackoff | quote }}
+        max_backoff: {{ .Values.network.retry.maxBackoff | quote }}
+
+    logging:
+      level: {{ .Values.logging.level | quote }}
+      format: {{ .Values.logging.format | quote }}
+
+    handlers:
+      go:
+        enabled: {{ .Values.handlers.go.enabled }}
+        upstream_proxy: {{ .Values.handlers.go.upstreamProxy | quote }}
+        checksum_db: {{ .Values.handlers.go.checksumDb | quote }}
+        verify_checksums: {{ .Values.handlers.go.verifyChecksums }}
+      npm:
+        enabled: {{ .Values.handlers.npm.enabled }}
+        upstream_registry: {{ .Values.handlers.npm.upstreamRegistry | quote }}
+      pypi:
+        enabled: {{ .Values.handlers.pypi.enabled }}
+        upstream_url: {{ .Values.handlers.pypi.upstreamUrl | quote }}
+        simple_api_url: {{ .Values.handlers.pypi.simpleApiUrl | quote }}

@@ -1,0 +1,184 @@
+# GoHoarder Configuration Example
+#
+# Port Configuration:
+#   - Backend server port is configured below (server.port)
+#   - Frontend dev server uses frontend/.env (VITE_PORT and VITE_BACKEND_URL)
+#   - When running `make run`, both will start with their configured ports
+#   - The frontend automatically proxies /api and /ws requests to the backend
+
+server:
+  host: "0.0.0.0"
+  port: 8080  # Backend API server port
+  read_timeout: "5m"
+  write_timeout: "5m"
+  idle_timeout: "2m"
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+storage:
+  backend: "filesystem"  # filesystem, s3, smb, nfs
+  path: "/var/cache/gohoarder"
+
+  filesystem:
+    base_path: "/var/cache/gohoarder"
+
+  s3:
+    endpoint: "s3.amazonaws.com"
+    region: "us-east-1"
+    bucket: "gohoarder-cache"
+    access_key_id: ""
+    secret_access_key: ""
+    use_ssl: true
+
+  smb:
+    host: ""
+    share: ""
+    username: ""
+    password: ""
+    domain: ""
+
+metadata:
+  backend: "sqlite"  # sqlite, postgresql, file
+  connection: "file:gohoarder.db?cache=shared&mode=rwc"
+
+  sqlite:
+    path: "gohoarder.db"
+    wal_mode: true
+
+  postgresql:
+    host: "localhost"
+    port: 5432
+    database: "gohoarder"
+    user: "gohoarder"
+    password: ""
+    ssl_mode: "disable"
+
+cache:
+  default_ttl: "168h"  # 7 days
+  cleanup_interval: "1h"
+  max_size_bytes: 536870912000  # 500GB
+  per_project_quota: 53687091200  # 50GB
+  ttl_overrides:
+    npm: "168h"
+    pip: "168h"
+    go: "168h"
+
+security:
+  enabled: false
+  block_on_severity: "high"  # none, low, medium, high, critical
+  scan_on_download: true  # Scan packages on first download
+  rescan_interval: "24h"  # How often to re-scan packages (e.g., 24h, 168h for weekly)
+  update_db_on_startup: false  # Update vulnerability databases on startup
+  allowed_packages: []  # Packages that bypass security checks (format: "registry/name@version")
+  ignored_cves: []  # CVE IDs to ignore globally (e.g., "CVE-2021-23337")
+
+  block_thresholds:
+    critical: 0  # Max critical vulns (0 = block any)
+    high: -1  # Max high vulns (-1 = unlimited)
+    medium: -1  # Max medium vulns
+    low: -1  # Max low vulns
+
+  scanners:
+    # Trivy - Comprehensive vulnerability scanner from Aqua Security
+    # Supports: containers, OS packages, language packages
+    trivy:
+      enabled: false
+      timeout: "5m"
+      cache_db: "/var/lib/trivy"
+
+    # OSV - Google's Open Source Vulnerabilities database
+    # Supports: npm, PyPI, Go, Maven, NuGet, etc.
+    osv:
+      enabled: false
+      api_url: "https://api.osv.dev"
+      timeout: "30s"
+
+    # Grype - Multi-ecosystem vulnerability scanner from Anchore
+    # Supports: all package types, containers, SBOMs
+    grype:
+      enabled: false
+      timeout: "5m"
+
+    # govulncheck - Official Go vulnerability scanner from the Go team
+    # Supports: Go modules only
+    govulncheck:
+      enabled: false
+      timeout: "5m"
+
+    # npm-audit - npm's built-in vulnerability scanner
+    # Supports: npm packages only
+    npm_audit:
+      enabled: false
+      timeout: "2m"
+
+    # pip-audit - Python package vulnerability scanner
+    # Supports: PyPI packages only
+    pip_audit:
+      enabled: false
+      timeout: "2m"
+
+    # GitHub Advisory Database - GitHub's security advisory database
+    # Supports: npm, pip, go, maven, nuget, cargo, pub
+    # Optional: Set token for higher API rate limits (60 req/hour unauthenticated, 5000 req/hour authenticated)
+    ghsa:
+      enabled: false
+      timeout: "30s"
+      token: ""  # Optional: GitHub personal access token (ghp_...)
+
+    # Static Analysis - Basic static analysis and package validation
+    static:
+      enabled: true
+      max_package_size: 2147483648  # 2GB
+      check_checksums: true
+      block_suspicious: false
+      allowed_licenses: []
+
+auth:
+  enabled: true
+  key_expiration: "0"  # Never expire (0), or duration like "8760h" for 1 year
+  bcrypt_cost: 10
+  audit_log: true
+
+network:
+  connect_timeout: "10s"
+  read_timeout: "5m"
+  write_timeout: "5m"
+  max_idle_conns: 100
+  max_conns_per_host: 10
+
+  rate_limit:
+    per_api_key: 1000
+    per_ip: 100
+    burst_size: 50
+
+  circuit_breaker:
+    threshold: 5
+    timeout: "30s"
+    reset_interval: "60s"
+
+  retry:
+    max_attempts: 3
+    initial_backoff: "1s"
+    max_backoff: "30s"
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, pretty
+
+handlers:
+  go:
+    enabled: true
+    upstream_proxy: "https://proxy.golang.org"
+    checksum_db: "https://sum.golang.org"
+    verify_checksums: true
+
+  npm:
+    enabled: true
+    upstream_registry: "https://registry.npmjs.org"
+
+  pypi:
+    enabled: true
+    upstream_url: "https://pypi.org"
+    simple_api_url: "https://pypi.org/simple"

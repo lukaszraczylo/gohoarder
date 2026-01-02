@@ -1,0 +1,44 @@
+# Application Engine - GoHoarder Server
+ARG TARGETOS
+ARG TARGETARCH
+
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    && update-ca-certificates
+
+# Create non-root user
+RUN addgroup -g 1000 gohoarder && \
+    adduser -D -u 1000 -G gohoarder gohoarder
+
+# Create necessary directories
+RUN mkdir -p /data/cache /data/metadata && \
+    chown -R gohoarder:gohoarder /data
+
+# Copy binary (from platform-specific path)
+ARG TARGETOS
+ARG TARGETARCH
+COPY ${TARGETOS}/${TARGETARCH}/gohoarder /usr/local/bin/gohoarder
+RUN chmod +x /usr/local/bin/gohoarder
+
+# Copy example config
+COPY config.yaml.example /etc/gohoarder/config.yaml.example
+
+WORKDIR /data
+USER gohoarder
+
+# Expose ports
+# 8080: Main proxy port
+# 9090: Metrics/health port
+EXPOSE 8080 9090
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/gohoarder", "version"] || exit 1
+
+# Run the server
+ENTRYPOINT ["/usr/local/bin/gohoarder"]
+CMD ["serve"]

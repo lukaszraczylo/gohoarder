@@ -1,0 +1,416 @@
+<template>
+  <div class="max-w-7xl mx-auto px-4 py-8">
+    <!-- Header with Back Button -->
+    <div class="mb-6">
+      <Button @click="goBack" variant="ghost" class="mb-4">
+        <i class="fas fa-arrow-left mr-2"></i>
+        Back to Packages
+      </Button>
+      <div class="flex items-center gap-3">
+        <i class="fas fa-box text-3xl text-primary-600"></i>
+        <div>
+          <h1 class="text-3xl font-bold text-gray-900">{{ packageName }}</h1>
+          <div class="flex items-center gap-2 mt-2">
+            <Badge :class="getRegistryBadgeClass(registry)">{{ registry }}</Badge>
+            <Badge variant="outline" class="font-mono">v{{ version }}</Badge>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div v-if="loading" class="text-center py-12">
+      <i class="fas fa-spinner fa-spin text-4xl text-primary-600"></i>
+      <p class="mt-4 text-gray-600">Loading vulnerability details...</p>
+    </div>
+
+    <!-- Error State -->
+    <Alert v-else-if="error" variant="destructive" class="mb-4">
+      <i class="fas fa-exclamation-circle mr-2"></i>
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
+
+    <!-- Vulnerability Details -->
+    <div v-else-if="vulnerabilities" class="space-y-6">
+      <!-- Summary Card -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2">
+            <i class="fas fa-shield-virus text-red-600"></i>
+            Security Scan Summary
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div class="text-center p-4 bg-red-50 rounded-lg border border-red-200">
+              <p class="text-3xl font-bold text-red-600">{{ severityCounts.critical }}</p>
+              <p class="text-sm text-gray-600 mt-1">Critical</p>
+            </div>
+            <div class="text-center p-4 bg-orange-50 rounded-lg border border-orange-200">
+              <p class="text-3xl font-bold text-orange-600">{{ severityCounts.high }}</p>
+              <p class="text-sm text-gray-600 mt-1">High</p>
+            </div>
+            <div class="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+              <p class="text-3xl font-bold text-yellow-600">{{ severityCounts.moderate }}</p>
+              <p class="text-sm text-gray-600 mt-1">Moderate</p>
+            </div>
+            <div class="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <p class="text-3xl font-bold text-blue-600">{{ severityCounts.low }}</p>
+              <p class="text-sm text-gray-600 mt-1">Low</p>
+            </div>
+          </div>
+          <Separator class="my-4" />
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex flex-col gap-3">
+              <span class="text-gray-600">
+                <i class="fas fa-search mr-1"></i>
+                Scanned: {{ formatDate(vulnerabilities.scanned_at) }}
+              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-gray-600">
+                  <i class="fas fa-cog mr-1"></i>
+                  Scanners:
+                </span>
+                <div class="flex flex-wrap gap-1">
+                  <Badge
+                    v-for="scanner in scannerList"
+                    :key="scanner"
+                    variant="secondary"
+                    class="text-xs"
+                  >
+                    {{ scanner }}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+            <div v-if="bypassedCount > 0" class="flex items-center gap-2 text-green-600">
+              <i class="fas fa-check-circle"></i>
+              <span>{{ bypassedCount }} bypassed</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- No Vulnerabilities -->
+      <Card v-if="vulnerabilityList.length === 0">
+        <CardContent class="text-center py-12">
+          <i class="fas fa-check-circle text-6xl text-green-500 mb-4"></i>
+          <p class="text-xl font-semibold text-gray-900">No Vulnerabilities Found</p>
+          <p class="mt-2 text-gray-600">This package is clean and safe to use</p>
+        </CardContent>
+      </Card>
+
+      <!-- Vulnerability List -->
+      <Card v-else>
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2">
+            <i class="fas fa-list text-gray-600"></i>
+            Detected Vulnerabilities ({{ vulnerabilityList.length }})
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div class="border-t overflow-x-auto">
+            <Table class="min-w-[800px]">
+              <TableHeader>
+                <TableRow class="bg-gray-50 hover:bg-gray-50">
+                  <TableHead class="w-[100px]">Severity</TableHead>
+                  <TableHead class="w-[180px]">CVE ID</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead class="w-[120px]">Fix Version</TableHead>
+                  <TableHead class="w-[100px] text-center">Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <template v-for="(vuln, index) in vulnerabilityList" :key="vuln.id">
+                  <!-- Main Row -->
+                  <TableRow
+                    :class="getRowClass(index, vuln.severity)"
+                    @click="toggleRow(index)"
+                  >
+                    <TableCell>
+                      <Badge :class="getSeverityBadgeClass(vuln.severity)">
+                        {{ formatSeverityName(vuln.severity) }}
+                      </Badge>
+                      <span
+                        v-if="vuln.bypassed"
+                        class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800"
+                        title="Bypassed"
+                      >
+                        <i class="fas fa-unlock text-xs"></i>
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span class="font-mono text-sm font-medium">{{ vuln.id }}</span>
+                    </TableCell>
+                    <TableCell>
+                      <p class="text-sm text-gray-900 line-clamp-2 break-words">{{ vuln.title || vuln.description }}</p>
+                    </TableCell>
+                    <TableCell>
+                      <span v-if="vuln.fixed_in" class="inline-flex items-center text-sm text-green-700">
+                        <i class="fas fa-arrow-up text-xs mr-1"></i>
+                        v{{ vuln.fixed_in }}
+                      </span>
+                      <span v-else class="text-sm text-gray-400">-</span>
+                    </TableCell>
+                    <TableCell class="text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        class="h-8 w-8 p-0"
+                        @click.stop="toggleRow(index)"
+                      >
+                        <i
+                          :class="[
+                            'fas transition-transform',
+                            expandedRows.has(index) ? 'fa-chevron-up' : 'fa-chevron-down'
+                          ]"
+                        ></i>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+
+                  <!-- Expanded Details Row -->
+                  <TableRow v-if="expandedRows.has(index)" class="bg-gray-50 hover:bg-gray-50">
+                    <TableCell colspan="5" class="p-0">
+                      <div class="px-6 py-4 space-y-3">
+                        <!-- Full Description -->
+                        <div>
+                          <h5 class="font-semibold text-gray-900 mb-2">Description</h5>
+                          <div
+                            class="text-sm text-gray-700 leading-relaxed prose prose-sm max-w-none break-words overflow-hidden"
+                            v-html="renderMarkdown(vuln.description)"
+                          ></div>
+                        </div>
+
+                        <!-- Bypass Information -->
+                        <div v-if="vuln.bypassed && vuln.bypass" class="bg-green-50 border border-green-200 rounded-lg p-3">
+                          <h5 class="font-semibold text-green-900 mb-2 flex items-center gap-2">
+                            <i class="fas fa-info-circle"></i>
+                            Bypass Active
+                          </h5>
+                          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-green-800">
+                            <div class="break-words">
+                              <span class="font-medium">Reason:</span> {{ vuln.bypass.reason }}
+                            </div>
+                            <div class="break-words">
+                              <span class="font-medium">By:</span> {{ vuln.bypass.created_by }}
+                            </div>
+                            <div class="break-words">
+                              <span class="font-medium">Expires:</span> {{ formatDate(vuln.bypass.expires_at) }}
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Fix Information -->
+                        <div v-if="vuln.fixed_in" class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <div class="flex items-center gap-2">
+                            <i class="fas fa-wrench text-blue-700"></i>
+                            <span class="text-sm text-blue-900">
+                              <span class="font-semibold">Fix Available:</span> Upgrade to version <strong>{{ vuln.fixed_in }}</strong> or later
+                            </span>
+                          </div>
+                        </div>
+
+                        <!-- References -->
+                        <div v-if="vuln.references && vuln.references.length > 0">
+                          <h5 class="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            <i class="fas fa-link"></i>
+                            References ({{ vuln.references.length }})
+                          </h5>
+                          <div class="space-y-1.5">
+                            <div
+                              v-for="(ref, refIndex) in vuln.references"
+                              :key="refIndex"
+                              class="flex items-start gap-2 text-sm"
+                            >
+                              <i class="fas fa-external-link-alt text-gray-400 text-xs mt-0.5"></i>
+                              <a
+                                :href="ref"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="text-blue-600 hover:text-blue-800 hover:underline break-all"
+                              >
+                                {{ ref }}
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                </template>
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import axios from 'axios'
+import { marked } from 'marked'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Separator } from '@/components/ui/separator'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  getSeverityBadgeClass,
+  getRegistryBadgeClass,
+  getVulnerabilityBorderClass,
+  formatSeverityName,
+} from '@/composables/useBadgeStyles'
+
+// Configure marked
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+})
+
+const router = useRouter()
+const route = useRoute()
+
+const registry = computed(() => route.params.registry as string)
+const packageName = computed(() => {
+  // Handle package names with slashes (e.g., Go packages like github.com/user/repo)
+  const nameParam = route.params.name
+  if (Array.isArray(nameParam)) {
+    return nameParam.join('/')
+  }
+  return nameParam as string
+})
+const version = computed(() => route.params.version as string)
+
+interface BypassInfo {
+  id: string
+  reason: string
+  created_by: string
+  expires_at: string
+}
+
+interface Vulnerability {
+  id: string
+  severity: string
+  title: string
+  description: string
+  references: string[]
+  fixed_in: string
+  bypassed: boolean
+  bypass?: BypassInfo
+}
+
+interface VulnerabilityResponse {
+  scanned: boolean
+  scanner: string
+  scanned_at: string
+  status: string
+  vulnerabilities: Vulnerability[]
+  vulnerability_count: number
+  severity_counts: {
+    critical: number
+    high: number
+    moderate: number
+    low: number
+  }
+  bypassed_count: number
+}
+
+const loading = ref(false)
+const error = ref<string | null>(null)
+const vulnerabilities = ref<VulnerabilityResponse | null>(null)
+const expandedRows = ref<Set<number>>(new Set())
+
+// Severity order for sorting (higher values = more severe)
+const severityOrder: Record<string, number> = {
+  CRITICAL: 4,
+  HIGH: 3,
+  MEDIUM: 2,
+  MODERATE: 2,  // Treat MODERATE same as MEDIUM
+  LOW: 1,
+  UNKNOWN: 0,
+}
+
+const vulnerabilityList = computed(() => {
+  const vulns = vulnerabilities.value?.vulnerabilities || []
+  // Sort by severity (most severe first)
+  return [...vulns].sort((a, b) => {
+    const severityA = severityOrder[a.severity.toUpperCase()] || 0
+    const severityB = severityOrder[b.severity.toUpperCase()] || 0
+    return severityB - severityA  // Descending order
+  })
+})
+
+const severityCounts = computed(() => vulnerabilities.value?.severity_counts || { critical: 0, high: 0, moderate: 0, low: 0 })
+const bypassedCount = computed(() => vulnerabilities.value?.bypassed_count || 0)
+
+// Parse scanner string into array of scanner names
+const scannerList = computed(() => {
+  if (!vulnerabilities.value?.scanner) return []
+  return vulnerabilities.value.scanner.split('+').map((s: string) => s.trim())
+})
+
+onMounted(() => {
+  fetchVulnerabilities()
+})
+
+async function fetchVulnerabilities() {
+  loading.value = true
+  error.value = null
+  vulnerabilities.value = null
+
+  try {
+    const response = await axios.get(
+      `/api/packages/${registry.value}/${packageName.value}/${version.value}/vulnerabilities`
+    )
+    // Store the response data
+    vulnerabilities.value = response.data
+  } catch (err: any) {
+    console.error('Failed to fetch vulnerabilities:', err)
+    error.value = err.response?.data?.error || err.message || 'Failed to load vulnerability details'
+  } finally {
+    loading.value = false
+  }
+}
+
+function goBack() {
+  router.push('/packages')
+}
+
+function toggleRow(index: number) {
+  if (expandedRows.value.has(index)) {
+    expandedRows.value.delete(index)
+  } else {
+    expandedRows.value.add(index)
+  }
+}
+
+function getRowClass(index: number, severity: string): string {
+  const classes = ['cursor-pointer']
+  if (expandedRows.value.has(index)) {
+    classes.push('bg-gray-50')
+  }
+  classes.push(getVulnerabilityBorderClass(severity))
+  return classes.join(' ')
+}
+
+function formatDate(date: string): string {
+  return new Date(date).toLocaleString()
+}
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  return marked.parse(text) as string
+}
+</script>

@@ -1,0 +1,83 @@
+@import '@fortawesome/fontawesome-free/css/all.min.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Tailwind slate-50 for background */
+    --background: 210 40% 98%;
+    /* Tailwind slate-900 for foreground */
+    --foreground: 222 47% 11%;
+    /* White for cards */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    /* Tailwind slate-700 for primary */
+    --primary: 215 25% 27%;
+    --primary-foreground: 0 0% 100%;
+    /* Tailwind slate-100 for secondary */
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    /* Tailwind slate-100 for muted */
+    --muted: 210 40% 96%;
+    /* Tailwind slate-500 for muted-foreground */
+    --muted-foreground: 215 20% 65%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    /* Tailwind red-500 for destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    /* Tailwind slate-200 for border */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    /* Tailwind slate-700 for ring */
+    --ring: 215 25% 27%;
+    /* Chart colors using Tailwind palette with slate base */
+    --chart-1: 215 25% 27%;
+    --chart-2: 200 98% 39%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 25 95% 53%;
+    --chart-5: 262 83% 58%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 200 98% 39%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 200 98% 39%;
+    --chart-1: 200 98% 39%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 262 83% 58%;
+    --chart-4: 25 95% 53%;
+    --chart-5: 340 82% 52%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom component styles have been replaced with shadcn-vue components */

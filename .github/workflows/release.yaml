@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "**/release.yaml"
+      - "frontend/**"
+      - "deployments/**"
+      - "docs/**"
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: write
+  packages: write
+  deployments: write
+
+jobs:
+  release:
+    uses: lukaszraczylo/shared-actions/.github/workflows/go-release.yaml@main
+    with:
+      go-version: "1.25"
+      docker-enabled: true
+    secrets: inherit
+
+  benchmark:
+    name: Publish Benchmarks
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem ./... -run=^# | tee output.txt
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "go"
+          output-file-path: output.txt
+          fail-on-alert: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment-on-alert: true
+          summary-always: true
+          auto-push: false
+          benchmark-data-dir-path: "docs/bench"
+
+      - name: Push benchmark results
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/bench
+          git diff --staged --quiet || git commit -m "Update benchmark results"
+          git push origin main
+
+  publish-helm-chart:
+    name: Publish Helm Chart
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get release version
+        id: version
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Trigger helm-charts release
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          gh api repos/lukaszraczylo/helm-charts/dispatches \
+            -f event_type=release-chart \
+            -f client_payload[chart_name]=gohoarder \
+            -f client_payload[version]=${{ steps.version.outputs.version }} \
+            -f client_payload[source_repo]=lukaszraczylo/gohoarder \
+            -f client_payload[chart_path]=helm/gohoarder

@@ -1,0 +1,475 @@
+# Default values for gohoarder
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Override the name of the chart
+nameOverride: ""
+# Override the full name of the chart
+fullnameOverride: ""
+
+# Global configuration
+global:
+  # Base domain for the deployment
+  domain: "gohoarder.local"
+
+  # Image pull secrets for private registries
+  # Reference existing secrets by name:
+  # imagePullSecrets:
+  #   - name: ghcr-secret
+  #   - name: dockerhub-secret
+  imagePullSecrets: []
+
+# Auto-create image pull secrets from credentials (optional)
+# If you want the chart to create the secrets for you, use this instead:
+# imageCredentials:
+#   ghcr-secret:
+#     registry: ghcr.io
+#     username: myusername
+#     password: mytoken
+#     email: myemail@example.com
+#   dockerhub-secret:
+#     registry: https://index.docker.io/v1/
+#     username: myusername
+#     password: mytoken
+#     email: myemail@example.com
+# Then reference them in global.imagePullSecrets:
+#   - name: ghcr-secret
+imageCredentials: {}
+
+# Deployment replicas
+# NOTE: When running multiple server replicas (>1):
+#   - Use S3 or SMB for storage.backend (not filesystem with local storage)
+#   - Use PostgreSQL for metadata.backend (SQLite has limited concurrency)
+#   - See "High Availability & Scaling" section in README
+replicaCount:
+  server: 1
+  frontend: 1
+  scanner: 1
+
+# Image configuration
+image:
+  server:
+    repository: ghcr.io/lukaszraczylo/gohoarder-server
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  frontend:
+    repository: ghcr.io/lukaszraczylo/gohoarder-frontend
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  scanner:
+    repository: ghcr.io/lukaszraczylo/gohoarder-scanner
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  readTimeout: "5m"
+  writeTimeout: "5m"
+  idleTimeout: "2m"
+
+  # Additional environment variables for server container
+  # Use this to override config via environment variables
+  # Format: GOHOARDER_<CONFIG_KEY> (dots replaced with underscores)
+  # Examples:
+  #   GOHOARDER_STORAGE_BACKEND: s3
+  #   GOHOARDER_METADATA_BACKEND: postgresql
+  # env:
+  #   - name: GOHOARDER_STORAGE_BACKEND
+  #     value: "s3"
+  #   - name: GOHOARDER_STORAGE_S3_BUCKET
+  #     value: "my-bucket"
+  #   - name: GOHOARDER_METADATA_POSTGRESQL_PASSWORD
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: postgres-secret
+  #         key: password
+  env: []
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+    annotations: {}
+
+  # Resource limits
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity
+  affinity: {}
+
+# Frontend configuration
+frontend:
+  # Backend URL for API calls
+  backendUrl: ""  # Auto-configured if empty
+
+  # Additional environment variables for frontend container
+  # env:
+  #   - name: API_BASE_URL
+  #     value: "https://api.example.com"
+  env: []
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+    annotations: {}
+
+  # Resource limits
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Scanner configuration
+scanner:
+  # Additional environment variables for scanner container
+  # env:
+  #   - name: GOHOARDER_SECURITY_SCANNERS_TRIVY_ENABLED
+  #     value: "true"
+  env: []
+
+  # Resource limits
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Storage configuration
+storage:
+  # Storage backend: filesystem, s3, smb
+  # For multiple server replicas:
+  #   - S3 or SMB (recommended)
+  #   - Filesystem with ReadWriteMany (RWX) storage class (Longhorn, NFS, CephFS)
+  #   - NOT filesystem with ReadWriteOnce (RWO) or local storage
+  backend: "filesystem"
+
+  # Filesystem storage
+  filesystem:
+    # Storage class for PVC
+    # For multiple replicas: use RWX-capable storage class (longhorn, nfs-client, cephfs, etc.)
+    storageClass: ""
+    # Storage size
+    size: "100Gi"
+    # Access mode:
+    #   ReadWriteOnce (RWO) - Single replica only
+    #   ReadWriteMany (RWX) - Multiple replicas (requires RWX storage class)
+    accessMode: "ReadWriteOnce"
+    # Use hostPath instead of PVC (for single-node testing only)
+    useHostPath: false
+    hostPath: "/var/lib/gohoarder"
+    # Existing PVC name (if you want to use existing PVC)
+    existingClaim: ""
+
+  # S3 storage
+  s3:
+    endpoint: "s3.amazonaws.com"
+    region: "us-east-1"
+    bucket: "gohoarder-cache"
+    accessKeyId: ""
+    secretAccessKey: ""
+    # Use existing secret for S3 credentials
+    existingSecret: ""
+    useSSL: true
+
+  # SMB storage
+  smb:
+    host: ""
+    share: ""
+    username: ""
+    password: ""
+    domain: ""
+    # Use existing secret for SMB credentials
+    existingSecret: ""
+
+# Metadata storage configuration
+metadata:
+  # Backend: sqlite, postgresql
+  # For multiple server replicas: postgresql is recommended (sqlite has concurrency limitations)
+  backend: "sqlite"
+
+  # SQLite configuration
+  sqlite:
+    # Use PVC for SQLite database
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: "10Gi"
+      accessMode: "ReadWriteOnce"
+      existingClaim: ""
+    walMode: true
+
+  # PostgreSQL configuration
+  postgresql:
+    # Use bundled PostgreSQL (sets up postgresql subchart)
+    enabled: false
+    host: "localhost"
+    port: 5432
+    database: "gohoarder"
+    username: "gohoarder"
+    password: ""
+    sslMode: "disable"
+    # Use existing secret for PostgreSQL credentials
+    existingSecret: ""
+
+# Cache configuration
+cache:
+  defaultTTL: "168h"  # 7 days
+  cleanupInterval: "1h"
+  maxSizeBytes: 536870912000  # 500GB
+  perProjectQuota: 53687091200  # 50GB
+  ttlOverrides:
+    npm: "168h"
+    pip: "168h"
+    go: "168h"
+
+# Security scanning configuration
+security:
+  enabled: false
+  blockOnSeverity: "high"  # none, low, medium, high, critical
+  scanOnDownload: true
+  rescanInterval: "24h"
+  updateDbOnStartup: false
+
+  blockThresholds:
+    critical: 0
+    high: -1
+    medium: -1
+    low: -1
+
+  scanners:
+    trivy:
+      enabled: false
+      timeout: "5m"
+      cacheDb: "/var/lib/trivy"
+
+    osv:
+      enabled: false
+      apiUrl: "https://api.osv.dev"
+      timeout: "30s"
+
+    grype:
+      enabled: false
+      timeout: "5m"
+
+    govulncheck:
+      enabled: false
+      timeout: "5m"
+
+    npmAudit:
+      enabled: false
+      timeout: "2m"
+
+    pipAudit:
+      enabled: false
+      timeout: "2m"
+
+    ghsa:
+      enabled: false
+      timeout: "30s"
+      # GitHub token for higher rate limits
+      token: ""
+      existingSecret: ""
+
+    static:
+      enabled: true
+      maxPackageSize: 2147483648  # 2GB
+      checkChecksums: true
+      blockSuspicious: false
+
+# Authentication configuration
+auth:
+  enabled: true
+  keyExpiration: "0"  # Never expire
+  bcryptCost: 10
+  auditLog: true
+
+  # Admin API key - will be auto-generated if not provided
+  adminApiKey: ""
+  # Use existing secret for admin API key
+  existingSecret: ""
+  # Secret key name for admin API key
+  secretKey: "admin-api-key"
+
+# Network configuration
+network:
+  connectTimeout: "10s"
+  readTimeout: "5m"
+  writeTimeout: "5m"
+  maxIdleConns: 100
+  maxConnsPerHost: 10
+
+  rateLimit:
+    perApiKey: 1000
+    perIp: 100
+    burstSize: 50
+
+  circuitBreaker:
+    threshold: 5
+    timeout: "30s"
+    resetInterval: "60s"
+
+  retry:
+    maxAttempts: 3
+    initialBackoff: "1s"
+    maxBackoff: "30s"
+
+# Logging configuration
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, pretty
+
+# Package handlers configuration
+handlers:
+  go:
+    enabled: true
+    upstreamProxy: "https://proxy.golang.org"
+    checksumDb: "https://sum.golang.org"
+    verifyChecksums: true
+
+  npm:
+    enabled: true
+    upstreamRegistry: "https://registry.npmjs.org"
+
+  pypi:
+    enabled: true
+    upstreamUrl: "https://pypi.org"
+    simpleApiUrl: "https://pypi.org/simple"
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2048m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+
+  # Ingress for frontend
+  frontend:
+    enabled: true
+    host: "gohoarder.local"
+    tls:
+      enabled: false
+      secretName: "gohoarder-frontend-tls"
+
+  # Ingress for API (if you want separate ingress)
+  api:
+    enabled: false
+    host: "api.gohoarder.local"
+    tls:
+      enabled: false
+      secretName: "gohoarder-api-tls"
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Network Policy
+networkPolicy:
+  enabled: false
+  # Allow external access to server
+  ingress:
+    - from:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 8080

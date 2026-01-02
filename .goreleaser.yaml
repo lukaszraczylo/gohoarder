@@ -1,0 +1,205 @@
+version: 2
+
+# Project metadata
+project_name: gohoarder
+
+# Pre-release hooks
+before:
+  hooks:
+    - go mod tidy
+    # Generate semantic version if not provided via git tag
+    # This script can be used by CI/CD to inject custom versions
+    # Usage: export GORELEASER_CURRENT_TAG=$(./script/generate-version.sh)
+    # - ./script/generate-version.sh
+
+# Build configuration
+builds:
+  - id: gohoarder
+    main: ./cmd/gohoarder
+    binary: gohoarder
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/lukaszraczylo/gohoarder/internal/version.Version={{.Version}}
+      - -X github.com/lukaszraczylo/gohoarder/internal/version.GitCommit={{.ShortCommit}}
+      - -X github.com/lukaszraczylo/gohoarder/internal/version.BuildTime={{.Date}}
+
+# Archives for releases
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    formats:
+      - tar.gz
+      - zip
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - config.yaml.example
+
+# Checksum
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# Snapshot configuration
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Changelog
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^Merge'
+      - '^WIP'
+      - '^Update go.mod'
+      - 'README'
+
+# GitHub release configuration
+release:
+  github:
+    owner: lukaszraczylo
+    name: gohoarder
+  name_template: "version {{.Version}}"
+  draft: false
+  prerelease: auto
+
+# Docker images (v2 - modern syntax)
+dockers_v2:
+  # 1. Application Engine - Main GoHoarder server
+  - id: gohoarder-server
+    ids:
+      - gohoarder
+    images:
+      - ghcr.io/lukaszraczylo/gohoarder-server
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.server
+    labels:
+      org.opencontainers.image.title: GoHoarder Server
+      org.opencontainers.image.description: Universal package cache proxy server
+      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+    extra_files:
+      - config.yaml.example
+
+  # 2. Website - Frontend Dashboard
+  - id: gohoarder-frontend
+    ids:
+      - gohoarder
+    images:
+      - ghcr.io/lukaszraczylo/gohoarder-frontend
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.frontend
+    labels:
+      org.opencontainers.image.title: GoHoarder Frontend
+      org.opencontainers.image.description: GoHoarder web dashboard
+      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+    extra_files:
+      - frontend
+
+  # 3. Scanning Engine - Background scanner worker
+  - id: gohoarder-scanner
+    ids:
+      - gohoarder
+    images:
+      - ghcr.io/lukaszraczylo/gohoarder-scanner
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.scanner
+    labels:
+      org.opencontainers.image.title: GoHoarder Scanner
+      org.opencontainers.image.description: GoHoarder vulnerability scanning engine
+      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+    extra_files:
+      - config.yaml.example
+
+  # 4. Gateway - Nginx reverse proxy for unified deployment
+  - id: gohoarder-gateway
+    ids:
+      - gohoarder
+    images:
+      - ghcr.io/lukaszraczylo/gohoarder-gateway
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.gateway
+    labels:
+      org.opencontainers.image.title: GoHoarder Gateway
+      org.opencontainers.image.description: Nginx reverse proxy for unified GoHoarder deployment
+      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+
+# Artifact signing with cosign
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# Docker image signing with cosign
+docker_signs:
+  - cmd: cosign
+    artifacts: manifests
+    output: true
+    args:
+      - sign
+      - "${artifact}@${digest}"
+      - "--yes"

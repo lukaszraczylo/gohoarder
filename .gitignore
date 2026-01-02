@@ -1,0 +1,82 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/gohoarder
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files (keep example)
+config.yaml
+*.local.yaml
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+
+# Cache
+/var/cache/gohoarder/
+/cache/
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Security
+.env
+*.pem
+*.key
+*.crt
+
+# Build artifacts
+dist/
+build/
+
+# Node modules (for frontend)
+web/node_modules/
+web/dist/
+
+# Test fixtures
+tests/fixtures/temp/
+
+# Markdown files (except README.md)
+*.md
+!README.md
+
+/gohoarder
+*.log
+*.out
+test-go-proxy
+frontend/node_modules
+data/storage
+*.pid

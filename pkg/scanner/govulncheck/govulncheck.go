@@ -75,7 +75,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 
 	// Run govulncheck
 	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "-mode=binary", tmpDir)
-	output, err := cmd.CombinedOutput()
+	output, _ := cmd.CombinedOutput()
 
 	// govulncheck returns non-zero when vulnerabilities are found
 	// Parse output regardless of error
@@ -94,7 +94,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 			}
 			if entry.Finding != nil && entry.Finding.OSV != "" {
 				vulns = append(vulns, GovulncheckVuln{
-					OSV:         entry.Finding.OSV,
+					OSV:          entry.Finding.OSV,
 					FixedVersion: entry.Finding.FixedVersion,
 				})
 			}

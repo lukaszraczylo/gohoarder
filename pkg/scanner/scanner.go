@@ -36,10 +36,10 @@ type DatabaseUpdater interface {
 
 // Manager manages multiple security scanners
 type Manager struct {
-	scanners        []Scanner
-	enabled         bool
-	config          config.SecurityConfig
-	metadataStore   metadata.MetadataStore
+	scanners      []Scanner
+	enabled       bool
+	config        config.SecurityConfig
+	metadataStore metadata.MetadataStore
 }
 
 // New creates a new scanner manager with configured scanners
@@ -217,15 +217,15 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 
 	// Use first result as base
 	merged := &metadata.ScanResult{
-		ID:             results[0].ID,
-		Registry:       results[0].Registry,
-		PackageName:    results[0].PackageName,
-		PackageVersion: results[0].PackageVersion,
-		Scanner:        strings.Join(scannerNames, "+"), // Combined scanner name
-		ScannedAt:      results[0].ScannedAt,
-		Status:         metadata.ScanStatusClean,
+		ID:              results[0].ID,
+		Registry:        results[0].Registry,
+		PackageName:     results[0].PackageName,
+		PackageVersion:  results[0].PackageVersion,
+		Scanner:         strings.Join(scannerNames, "+"), // Combined scanner name
+		ScannedAt:       results[0].ScannedAt,
+		Status:          metadata.ScanStatusClean,
 		Vulnerabilities: make([]metadata.Vulnerability, 0),
-		Details:        make(map[string]interface{}),
+		Details:         make(map[string]interface{}),
 	}
 
 	// Use map for deduplication - key is CVE ID in uppercase
@@ -431,20 +431,20 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 		switch severity {
 		case "CRITICAL":
 			if severityCounts["CRITICAL"] > 0 {
-				return true, fmt.Sprintf("Package has CRITICAL vulnerabilities"), nil
+				return true, "Package has CRITICAL vulnerabilities", nil
 			}
 		case "HIGH":
 			if severityCounts["CRITICAL"] > 0 || severityCounts["HIGH"] > 0 {
-				return true, fmt.Sprintf("Package has HIGH or CRITICAL vulnerabilities"), nil
+				return true, "Package has HIGH or CRITICAL vulnerabilities", nil
 			}
 		case "MODERATE", "MEDIUM":
 			moderateCount := severityCounts["MODERATE"] + severityCounts["MEDIUM"]
 			if severityCounts["CRITICAL"] > 0 || severityCounts["HIGH"] > 0 || moderateCount > 0 {
-				return true, fmt.Sprintf("Package has MODERATE, HIGH, or CRITICAL vulnerabilities"), nil
+				return true, "Package has MODERATE, HIGH, or CRITICAL vulnerabilities", nil
 			}
 		case "LOW":
 			if len(result.Vulnerabilities) > 0 {
-				return true, fmt.Sprintf("Package has vulnerabilities"), nil
+				return true, "Package has vulnerabilities", nil
 			}
 		}
 	}

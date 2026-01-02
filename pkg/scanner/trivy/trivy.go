@@ -25,18 +25,18 @@ type Scanner struct {
 
 // TrivyResult represents Trivy JSON output structure
 type TrivyResult struct {
-	SchemaVersion int                  `json:"SchemaVersion"`
-	ArtifactName  string               `json:"ArtifactName"`
-	ArtifactType  string               `json:"ArtifactType"`
-	Metadata      TrivyMetadata        `json:"Metadata"`
-	Results       []TrivyVulnResult    `json:"Results"`
+	SchemaVersion int               `json:"SchemaVersion"`
+	ArtifactName  string            `json:"ArtifactName"`
+	ArtifactType  string            `json:"ArtifactType"`
+	Metadata      TrivyMetadata     `json:"Metadata"`
+	Results       []TrivyVulnResult `json:"Results"`
 }
 
 type TrivyMetadata struct {
-	OS           *TrivyOS          `json:"OS,omitempty"`
-	RepoTags     []string          `json:"RepoTags,omitempty"`
-	RepoDigests  []string          `json:"RepoDigests,omitempty"`
-	ImageConfig  *TrivyImageConfig `json:"ImageConfig,omitempty"`
+	OS          *TrivyOS          `json:"OS,omitempty"`
+	RepoTags    []string          `json:"RepoTags,omitempty"`
+	RepoDigests []string          `json:"RepoDigests,omitempty"`
+	ImageConfig *TrivyImageConfig `json:"ImageConfig,omitempty"`
 }
 
 type TrivyOS struct {
@@ -131,13 +131,13 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		// Check if it's a timeout
 		if ctx.Err() == context.DeadlineExceeded {
 			return &metadata.ScanResult{
-				ID:              uuid.New().String(),
-				Registry:        registry,
-				PackageName:     packageName,
-				PackageVersion:  version,
-				Scanner:         s.Name(),
-				ScannedAt:       time.Now(),
-				Status:          metadata.ScanStatusError,
+				ID:             uuid.New().String(),
+				Registry:       registry,
+				PackageName:    packageName,
+				PackageVersion: version,
+				Scanner:        s.Name(),
+				ScannedAt:      time.Now(),
+				Status:         metadata.ScanStatusError,
 				Details: map[string]interface{}{
 					"error": "scan timeout",
 				},
@@ -222,8 +222,8 @@ func (s *Scanner) convertTrivyResult(trivyResult *TrivyResult, registry, package
 		VulnerabilityCount: len(vulnerabilities),
 		Vulnerabilities:    vulnerabilities,
 		Details: map[string]interface{}{
-			"artifact_name": trivyResult.ArtifactName,
-			"artifact_type": trivyResult.ArtifactType,
+			"artifact_name":   trivyResult.ArtifactName,
+			"artifact_type":   trivyResult.ArtifactType,
 			"severity_counts": severityCounts,
 		},
 	}

@@ -43,7 +43,7 @@ config.yaml
 
 # Cache
 /var/cache/gohoarder/
-cache/
+/cache/
 
 # Logs
 *.log

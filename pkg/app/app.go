@@ -249,7 +249,7 @@ func (a *App) setupServer() error {
 	a.app.Get("/api/info", a.handleInfo)
 
 	// Admin endpoints (bypass management)
-	a.app.All("/api/admin/bypasses/:id?", a.handleAdminBypasses)
+	a.app.All("/api/admin/bypasses/:id?", a.requireAdmin, a.handleAdminBypasses)
 
 	// Proxy handlers (adapted from net/http)
 	// Load git credentials if configured

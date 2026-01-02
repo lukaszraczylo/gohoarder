@@ -32,9 +32,9 @@ type Handler struct {
 
 // Config holds Go proxy configuration
 type Config struct {
-	Upstream  string                // Upstream Go proxy (e.g., proxy.golang.org)
-	SumDBURL  string                // Checksum database URL
-	CredStore *vcs.CredentialStore  // Optional credential store for git access
+	Upstream  string               // Upstream Go proxy (e.g., proxy.golang.org)
+	SumDBURL  string               // Checksum database URL
+	CredStore *vcs.CredentialStore // Optional credential store for git access
 }
 
 // New creates a new Go proxy handler

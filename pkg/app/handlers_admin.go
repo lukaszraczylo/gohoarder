@@ -110,13 +110,13 @@ func (a *App) handleListBypasses(c *fiber.Ctx) error {
 
 // CreateBypassRequest represents the request body for creating a bypass
 type CreateBypassRequest struct {
-	Type           metadata.BypassType `json:"type"`                     // "cve" or "package"
-	Target         string              `json:"target"`                   // CVE ID or package name
-	Reason         string              `json:"reason"`                   // Why this bypass is needed
-	CreatedBy      string              `json:"created_by"`               // Admin username
-	ExpiresInHours int                 `json:"expires_in_hours"`         // How many hours until expiration
-	AppliesTo      string              `json:"applies_to,omitempty"`     // Optional: limit CVE bypass to specific package
-	NotifyOnExpiry bool                `json:"notify_on_expiry"`         // Send notification when expired
+	Type           metadata.BypassType `json:"type"`                 // "cve" or "package"
+	Target         string              `json:"target"`               // CVE ID or package name
+	Reason         string              `json:"reason"`               // Why this bypass is needed
+	CreatedBy      string              `json:"created_by"`           // Admin username
+	ExpiresInHours int                 `json:"expires_in_hours"`     // How many hours until expiration
+	AppliesTo      string              `json:"applies_to,omitempty"` // Optional: limit CVE bypass to specific package
+	NotifyOnExpiry bool                `json:"notify_on_expiry"`     // Send notification when expired
 }
 
 // handleCreateBypass creates a new CVE bypass

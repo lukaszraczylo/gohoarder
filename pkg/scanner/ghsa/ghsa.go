@@ -163,15 +163,11 @@ func (s *Scanner) queryAdvisories(ctx context.Context, ecosystem, packageName st
 
 // filterAffectedAdvisories filters advisories that affect the given version
 func (s *Scanner) filterAffectedAdvisories(advisories []GHSAAdvisory, version string) []GHSAAdvisory {
-	affected := make([]GHSAAdvisory, 0)
-
-	for _, advisory := range advisories {
-		// Check if this version is affected
-		// GitHub API already filters by package, but we need to check version ranges
-		// For now, we'll include all advisories that match the package
-		// A more sophisticated implementation would parse version ranges
-		affected = append(affected, advisory)
-	}
+	// Check if this version is affected
+	// GitHub API already filters by package, but we need to check version ranges
+	// For now, we'll include all advisories that match the package
+	// A more sophisticated implementation would parse version ranges
+	affected := append([]GHSAAdvisory(nil), advisories...)
 
 	return affected
 }
@@ -255,16 +251,16 @@ func (s *Scanner) convertResult(advisories []GHSAAdvisory, registry, packageName
 
 // GHSAAdvisory represents a GitHub Security Advisory
 type GHSAAdvisory struct {
-	GHSAID          string                `json:"ghsa_id"`
-	CVEID           string                `json:"cve_id"`
-	Summary         string                `json:"summary"`
-	Description     string                `json:"description"`
-	Severity        string                `json:"severity"`
-	HTMLURL         string                `json:"html_url"`
-	References      []GHSAReference       `json:"references"`
-	Vulnerabilities []GHSAVulnerability   `json:"vulnerabilities"`
-	PublishedAt     string                `json:"published_at"`
-	UpdatedAt       string                `json:"updated_at"`
+	GHSAID          string              `json:"ghsa_id"`
+	CVEID           string              `json:"cve_id"`
+	Summary         string              `json:"summary"`
+	Description     string              `json:"description"`
+	Severity        string              `json:"severity"`
+	HTMLURL         string              `json:"html_url"`
+	References      []GHSAReference     `json:"references"`
+	Vulnerabilities []GHSAVulnerability `json:"vulnerabilities"`
+	PublishedAt     string              `json:"published_at"`
+	UpdatedAt       string              `json:"updated_at"`
 }
 
 type GHSAReference struct {
@@ -272,9 +268,9 @@ type GHSAReference struct {
 }
 
 type GHSAVulnerability struct {
-	Package              GHSAPackage       `json:"package"`
-	VulnerableVersions   string            `json:"vulnerable_version_range"`
-	FirstPatchedVersion  *GHSAPatchVersion `json:"first_patched_version"`
+	Package             GHSAPackage       `json:"package"`
+	VulnerableVersions  string            `json:"vulnerable_version_range"`
+	FirstPatchedVersion *GHSAPatchVersion `json:"first_patched_version"`
 }
 
 type GHSAPackage struct {

@@ -183,7 +183,7 @@ func (v *GoValidator) validateGitHub(ctx context.Context, modulePath, credential
 	// Run git ls-remote (lightweight, just checks access)
 	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD")
 	cmd.Env = append(os.Environ(),
-		"HOME="+tempDir, // Use temp .netrc
+		"HOME="+tempDir,         // Use temp .netrc
 		"GIT_TERMINAL_PROMPT=0", // Disable prompts
 	)
 

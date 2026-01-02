@@ -14,9 +14,9 @@ import (
 
 // GitFetcher handles git repository operations
 type GitFetcher struct {
-	workDir     string
-	timeout     time.Duration
-	credStore   *CredentialStore
+	workDir   string
+	timeout   time.Duration
+	credStore *CredentialStore
 }
 
 // NewGitFetcher creates a new git fetcher
@@ -98,8 +98,9 @@ func (g *GitFetcher) FetchModule(ctx context.Context, modulePath, version, crede
 
 // modulePathToRepoURL converts a Go module path to a git repository URL
 // Examples:
-//   github.com/user/repo → https://github.com/user/repo.git
-//   gitlab.com/group/project → https://gitlab.com/group/project.git
+//
+//	github.com/user/repo → https://github.com/user/repo.git
+//	gitlab.com/group/project → https://gitlab.com/group/project.git
 func (g *GitFetcher) modulePathToRepoURL(modulePath string) (string, error) {
 	// Remove any path components after the repository
 	// e.g., github.com/user/repo/v2 → github.com/user/repo
@@ -116,10 +117,6 @@ func (g *GitFetcher) modulePathToRepoURL(modulePath string) (string, error) {
 
 	// Remove version suffix if present (e.g., /v2, /v3)
 	repo = strings.TrimPrefix(repo, "v")
-	if strings.HasPrefix(repo, "2") || strings.HasPrefix(repo, "3") {
-		// This might be a version suffix, but we need to be careful
-		// For now, keep it as-is
-	}
 
 	repoURL := fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo)
 	return repoURL, nil

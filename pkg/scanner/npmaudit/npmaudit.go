@@ -199,20 +199,20 @@ func (s *Scanner) convertResult(auditResult *NpmAuditResult, registry, packageNa
 
 // NpmAuditResult represents npm audit JSON output
 type NpmAuditResult struct {
-	AuditReportVersion int                           `json:"auditReportVersion"`
-	Vulnerabilities    map[string]NpmVulnerability   `json:"vulnerabilities"`
-	Metadata           NpmAuditMetadata              `json:"metadata"`
+	AuditReportVersion int                         `json:"auditReportVersion"`
+	Vulnerabilities    map[string]NpmVulnerability `json:"vulnerabilities"`
+	Metadata           NpmAuditMetadata            `json:"metadata"`
 }
 
 type NpmVulnerability struct {
-	Name         string                 `json:"name"`
-	Severity     string                 `json:"severity"`
-	Via          string                 `json:"via"`
-	Effects      []string               `json:"effects"`
-	Range        string                 `json:"range"`
-	FixAvailable interface{}            `json:"fixAvailable"`
-	URL          string                 `json:"url"`
-	References   []NpmReference         `json:"references"`
+	Name         string         `json:"name"`
+	Severity     string         `json:"severity"`
+	Via          string         `json:"via"`
+	Effects      []string       `json:"effects"`
+	Range        string         `json:"range"`
+	FixAvailable interface{}    `json:"fixAvailable"`
+	URL          string         `json:"url"`
+	References   []NpmReference `json:"references"`
 }
 
 type NpmReference struct {
@@ -225,10 +225,10 @@ type NpmAuditMetadata struct {
 }
 
 type NpmVulnCounts struct {
-	Info      int `json:"info"`
-	Low       int `json:"low"`
-	Moderate  int `json:"moderate"`
-	High      int `json:"high"`
-	Critical  int `json:"critical"`
-	Total     int `json:"total"`
+	Info     int `json:"info"`
+	Low      int `json:"low"`
+	Moderate int `json:"moderate"`
+	High     int `json:"high"`
+	Critical int `json:"critical"`
+	Total    int `json:"total"`
 }

@@ -48,12 +48,12 @@ type OSVResponse struct {
 
 // OSVVulnerability represents a vulnerability in OSV format
 type OSVVulnerability struct {
-	ID         string          `json:"id"`
-	Summary    string          `json:"summary"`
-	Details    string          `json:"details"`
-	Severity   []OSVSeverity   `json:"severity,omitempty"`
-	References []OSVReference  `json:"references,omitempty"`
-	Affected   []OSVAffected   `json:"affected"`
+	ID               string                 `json:"id"`
+	Summary          string                 `json:"summary"`
+	Details          string                 `json:"details"`
+	Severity         []OSVSeverity          `json:"severity,omitempty"`
+	References       []OSVReference         `json:"references,omitempty"`
+	Affected         []OSVAffected          `json:"affected"`
 	DatabaseSpecific map[string]interface{} `json:"database_specific,omitempty"`
 }
 
@@ -71,23 +71,23 @@ type OSVReference struct {
 
 // OSVAffected represents affected package versions
 type OSVAffected struct {
-	Package           PackageInfo        `json:"package"`
-	Ranges            []OSVRange         `json:"ranges,omitempty"`
-	Versions          []string           `json:"versions,omitempty"`
+	Package           PackageInfo            `json:"package"`
+	Ranges            []OSVRange             `json:"ranges,omitempty"`
+	Versions          []string               `json:"versions,omitempty"`
 	DatabaseSpecific  map[string]interface{} `json:"database_specific,omitempty"`
 	EcosystemSpecific map[string]interface{} `json:"ecosystem_specific,omitempty"`
 }
 
 // OSVRange represents version ranges
 type OSVRange struct {
-	Type   string      `json:"type"` // SEMVER, GIT, etc.
-	Events []OSVEvent  `json:"events"`
+	Type   string     `json:"type"` // SEMVER, GIT, etc.
+	Events []OSVEvent `json:"events"`
 }
 
 // OSVEvent represents version range events
 type OSVEvent struct {
-	Introduced string `json:"introduced,omitempty"`
-	Fixed      string `json:"fixed,omitempty"`
+	Introduced   string `json:"introduced,omitempty"`
+	Fixed        string `json:"fixed,omitempty"`
 	LastAffected string `json:"last_affected,omitempty"`
 }
 

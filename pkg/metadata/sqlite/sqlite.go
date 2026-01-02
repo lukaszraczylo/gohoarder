@@ -533,8 +533,8 @@ func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, reg
 	case "1h":
 		startTime = now.Add(-1 * time.Hour)
 		timeFormat = "%Y-%m-%d %H:%M:00" // 5-minute buckets
-		bucketCount = 12 // 12 x 5min = 60min
-		useRawEvents = true // Use raw events for last hour
+		bucketCount = 12                 // 12 x 5min = 60min
+		useRawEvents = true              // Use raw events for last hour
 	case "1day":
 		startTime = now.Add(-24 * time.Hour)
 		timeFormat = "%Y-%m-%d %H:00:00" // hourly buckets

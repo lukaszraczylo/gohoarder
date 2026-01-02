@@ -15,13 +15,13 @@ const (
 	ErrCodeInvalidConfig   = "INVALID_CONFIG"
 
 	// Package-specific errors
-	ErrCodePackageNotFound     = "PACKAGE_NOT_FOUND"
-	ErrCodeVersionNotFound     = "VERSION_NOT_FOUND"
-	ErrCodeChecksumMismatch    = "CHECKSUM_MISMATCH"
-	ErrCodeCorruptPackage      = "CORRUPT_PACKAGE"
-	ErrCodeSecurityBlocked     = "SECURITY_BLOCKED"
-	ErrCodeSecurityViolation   = "SECURITY_VIOLATION" // Package has vulnerabilities exceeding thresholds
-	ErrCodeUpstreamError       = "UPSTREAM_ERROR"
+	ErrCodePackageNotFound   = "PACKAGE_NOT_FOUND"
+	ErrCodeVersionNotFound   = "VERSION_NOT_FOUND"
+	ErrCodeChecksumMismatch  = "CHECKSUM_MISMATCH"
+	ErrCodeCorruptPackage    = "CORRUPT_PACKAGE"
+	ErrCodeSecurityBlocked   = "SECURITY_BLOCKED"
+	ErrCodeSecurityViolation = "SECURITY_VIOLATION" // Package has vulnerabilities exceeding thresholds
+	ErrCodeUpstreamError     = "UPSTREAM_ERROR"
 
 	// Server errors (5xx)
 	ErrCodeInternalServer     = "INTERNAL_SERVER_ERROR"

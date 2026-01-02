@@ -105,13 +105,13 @@ type CacheConfig struct {
 // SecurityConfig contains security scanning configuration
 type SecurityConfig struct {
 	Enabled           bool                    `mapstructure:"enabled" json:"enabled"`
-	ScanOnDownload    bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`       // Scan packages on first download
-	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`         // How often to re-scan (e.g., 24h, 168h for weekly)
-	BlockOnSeverity   string                  `mapstructure:"block_on_severity" json:"block_on_severity"`     // none, low, medium, high, critical
-	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`       // Max vulns per severity before blocking
+	ScanOnDownload    bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`         // Scan packages on first download
+	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`           // How often to re-scan (e.g., 24h, 168h for weekly)
+	BlockOnSeverity   string                  `mapstructure:"block_on_severity" json:"block_on_severity"`       // none, low, medium, high, critical
+	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`         // Max vulns per severity before blocking
 	UpdateDBOnStartup bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"` // Update vulnerability databases on startup
-	AllowedPackages   []string                `mapstructure:"allowed_packages" json:"allowed_packages"`       // Packages that bypass security checks (format: "registry/name@version" or "registry/name")
-	IgnoredCVEs       []string                `mapstructure:"ignored_cves" json:"ignored_cves"`               // CVE IDs to ignore globally (e.g., "CVE-2021-23337")
+	AllowedPackages   []string                `mapstructure:"allowed_packages" json:"allowed_packages"`         // Packages that bypass security checks (format: "registry/name@version" or "registry/name")
+	IgnoredCVEs       []string                `mapstructure:"ignored_cves" json:"ignored_cves"`                 // CVE IDs to ignore globally (e.g., "CVE-2021-23337")
 	Scanners          ScannersConfig          `mapstructure:"scanners" json:"scanners"`
 }
 
@@ -125,14 +125,14 @@ type VulnerabilityThresholds struct {
 
 // ScannersConfig contains individual scanner configurations
 type ScannersConfig struct {
-	Trivy        TrivyConfig        `mapstructure:"trivy" json:"trivy"`
-	OSV          OSVConfig          `mapstructure:"osv" json:"osv"`
-	Static       StaticConfig       `mapstructure:"static" json:"static"`
-	Grype        GrypeConfig        `mapstructure:"grype" json:"grype"`
-	Govulncheck  GovulncheckConfig  `mapstructure:"govulncheck" json:"govulncheck"`
-	NpmAudit     NpmAuditConfig     `mapstructure:"npm_audit" json:"npm_audit"`
-	PipAudit     PipAuditConfig     `mapstructure:"pip_audit" json:"pip_audit"`
-	GHSA         GHSAConfig         `mapstructure:"ghsa" json:"ghsa"`
+	Trivy       TrivyConfig       `mapstructure:"trivy" json:"trivy"`
+	OSV         OSVConfig         `mapstructure:"osv" json:"osv"`
+	Static      StaticConfig      `mapstructure:"static" json:"static"`
+	Grype       GrypeConfig       `mapstructure:"grype" json:"grype"`
+	Govulncheck GovulncheckConfig `mapstructure:"govulncheck" json:"govulncheck"`
+	NpmAudit    NpmAuditConfig    `mapstructure:"npm_audit" json:"npm_audit"`
+	PipAudit    PipAuditConfig    `mapstructure:"pip_audit" json:"pip_audit"`
+	GHSA        GHSAConfig        `mapstructure:"ghsa" json:"ghsa"`
 }
 
 // TrivyConfig contains Trivy scanner configuration

@@ -196,9 +196,9 @@ type PipAuditResult struct {
 }
 
 type PipDependency struct {
-	Name    string        `json:"name"`
-	Version string        `json:"version"`
-	Vulns   []PipVuln     `json:"vulns"`
+	Name    string    `json:"name"`
+	Version string    `json:"version"`
+	Vulns   []PipVuln `json:"vulns"`
 }
 
 type PipVuln struct {

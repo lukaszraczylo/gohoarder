@@ -108,7 +108,7 @@ type Vulnerability struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	References  []string `json:"references"`
-	FixedIn     string   `json:"fixed_in"` // Version where fixed
+	FixedIn     string   `json:"fixed_in"`              // Version where fixed
 	DetectedBy  []string `json:"detected_by,omitempty"` // List of scanners that detected this vulnerability
 }
 
@@ -160,23 +160,23 @@ type TimeSeriesDataPoint struct {
 
 // TimeSeriesStats represents time-series download statistics
 type TimeSeriesStats struct {
-	Period     string                  `json:"period"`      // 1h, 1day, 7day, 30day
-	Registry   string                  `json:"registry"`    // empty string for all registries
+	Period     string                 `json:"period"`   // 1h, 1day, 7day, 30day
+	Registry   string                 `json:"registry"` // empty string for all registries
 	DataPoints []*TimeSeriesDataPoint `json:"data_points"`
 }
 
 // CVEBypass represents a temporary bypass for a CVE or package
 type CVEBypass struct {
-	ID             string     `json:"id"`                        // Unique bypass ID
-	Type           BypassType `json:"type"`                      // cve, package
-	Target         string     `json:"target"`                    // CVE ID (e.g., "CVE-2021-23337") or package (e.g., "npm/lodash@4.17.20")
-	Reason         string     `json:"reason"`                    // Why this bypass was created
-	CreatedBy      string     `json:"created_by"`                // Admin user who created it
-	CreatedAt      time.Time  `json:"created_at"`                // When created
-	ExpiresAt      time.Time  `json:"expires_at"`                // When it expires
-	AppliesTo      string     `json:"applies_to,omitempty"`      // Optional: limit to specific package (for CVE bypasses)
-	NotifyOnExpiry bool       `json:"notify_on_expiry"`          // Send notification when expired
-	Active         bool       `json:"active"`                    // Can be deactivated without deletion
+	ID             string     `json:"id"`                   // Unique bypass ID
+	Type           BypassType `json:"type"`                 // cve, package
+	Target         string     `json:"target"`               // CVE ID (e.g., "CVE-2021-23337") or package (e.g., "npm/lodash@4.17.20")
+	Reason         string     `json:"reason"`               // Why this bypass was created
+	CreatedBy      string     `json:"created_by"`           // Admin user who created it
+	CreatedAt      time.Time  `json:"created_at"`           // When created
+	ExpiresAt      time.Time  `json:"expires_at"`           // When it expires
+	AppliesTo      string     `json:"applies_to,omitempty"` // Optional: limit to specific package (for CVE bypasses)
+	NotifyOnExpiry bool       `json:"notify_on_expiry"`     // Send notification when expired
+	Active         bool       `json:"active"`               // Can be deactivated without deletion
 }
 
 // BypassType represents the type of bypass
@@ -189,11 +189,11 @@ const (
 
 // BypassListOptions contains options for listing CVE bypasses
 type BypassListOptions struct {
-	Type          BypassType // Filter by type
+	Type           BypassType // Filter by type
 	IncludeExpired bool       // Include expired bypasses
-	ActiveOnly    bool       // Only active bypasses
-	Limit         int        // Max results
-	Offset        int        // Pagination offset
+	ActiveOnly     bool       // Only active bypasses
+	Limit          int        // Max results
+	Offset         int        // Pagination offset
 }
 
 // ListOptions contains options for listing packages

@@ -1,0 +1,111 @@
+{{- if .Values.security.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-scanner
+  labels:
+    {{- include "gohoarder.scanner.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.scanner }}
+  selector:
+    matchLabels:
+      {{- include "gohoarder.scanner.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "gohoarder.scanner.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "gohoarder.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+      - name: init-permissions
+        image: busybox:latest
+        command: ['sh', '-c']
+        args:
+        - |
+          mkdir -p /var/cache/gohoarder /var/lib/gohoarder/metadata /tmp/gohoarder
+          {{- if .Values.security.scanners.trivy.enabled }}
+          mkdir -p {{ .Values.security.scanners.trivy.cacheDb }}
+          chown -R 1000:1000 {{ .Values.security.scanners.trivy.cacheDb }}
+          {{- end }}
+          chown -R 1000:1000 /var/cache/gohoarder /var/lib/gohoarder /tmp/gohoarder
+          chmod 750 /var/cache/gohoarder /var/lib/gohoarder
+        volumeMounts:
+        {{- include "gohoarder.storageVolume" . | nindent 8 }}
+        {{- include "gohoarder.metadataVolume" . | nindent 8 }}
+        {{- include "gohoarder.trivyCacheVolume" . | nindent 8 }}
+        - name: tmp
+          mountPath: /tmp/gohoarder
+        securityContext:
+          runAsUser: 0
+      containers:
+      - name: scanner
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.scanner.repository }}:{{ .Values.image.scanner.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.scanner.pullPolicy }}
+        env:
+        - name: CONFIG_FILE
+          value: /etc/gohoarder/config.yaml
+        {{- if and .Values.security.scanners.ghsa.enabled .Values.security.scanners.ghsa.existingSecret }}
+        - name: GHSA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.security.scanners.ghsa.existingSecret }}
+              key: token
+        {{- else if and .Values.security.scanners.ghsa.enabled .Values.security.scanners.ghsa.token }}
+        - name: GHSA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-ghsa
+              key: token
+        {{- end }}
+        resources:
+          {{- toYaml .Values.scanner.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gohoarder
+          readOnly: true
+        - name: storage
+          mountPath: /var/cache/gohoarder
+        - name: metadata
+          mountPath: /var/lib/gohoarder/metadata
+        {{- if .Values.security.scanners.trivy.enabled }}
+        - name: trivy-cache
+          mountPath: {{ .Values.security.scanners.trivy.cacheDb }}
+        {{- end }}
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "gohoarder.fullname" . }}-config
+      {{- include "gohoarder.storageVolume" . | nindent 6 }}
+      {{- include "gohoarder.metadataVolume" . | nindent 6 }}
+      {{- include "gohoarder.trivyCacheVolume" . | nindent 6 }}
+      - name: tmp
+        emptyDir: {}
+      {{- with .Values.scanner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scanner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scanner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

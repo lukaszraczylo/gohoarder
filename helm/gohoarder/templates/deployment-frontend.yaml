@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-frontend
+  labels:
+    {{- include "gohoarder.frontend.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount.frontend }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gohoarder.frontend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "gohoarder.frontend.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "gohoarder.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: frontend
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.frontend.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.frontend.port }}
+          protocol: TCP
+        env:
+        - name: VITE_BACKEND_URL
+          value: "http://{{ include "gohoarder.fullname" . }}-server:{{ .Values.server.service.port }}"
+        - name: VITE_PORT
+          value: "{{ .Values.frontend.port }}"
+        livenessProbe:
+          {{- toYaml .Values.frontend.livenessProbe | nindent 12 }}
+        readinessProbe:
+          {{- toYaml .Values.frontend.readinessProbe | nindent 12 }}
+        resources:
+          {{- toYaml .Values.frontend.resources | nindent 12 }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- with .Values.frontend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

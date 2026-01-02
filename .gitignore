@@ -68,7 +68,11 @@ web/dist/
 
 # Test fixtures
 tests/fixtures/temp/
+
+# Markdown files (except README.md)
 *.md
+!README.md
+
 /gohoarder
 *.log
 *.out

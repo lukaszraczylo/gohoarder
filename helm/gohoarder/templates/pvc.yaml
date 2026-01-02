@@ -1,0 +1,37 @@
+{{- if and (eq .Values.storage.backend "filesystem") (not .Values.storage.filesystem.useHostPath) (not .Values.storage.filesystem.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-storage
+  labels:
+    {{- include "gohoarder.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - {{ .Values.storage.filesystem.accessMode }}
+  {{- if .Values.storage.filesystem.storageClass }}
+  storageClassName: {{ .Values.storage.filesystem.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.filesystem.size | quote }}
+{{- end }}
+---
+{{- if and (eq .Values.metadata.backend "sqlite") .Values.metadata.sqlite.persistence.enabled (not .Values.metadata.sqlite.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-metadata
+  labels:
+    {{- include "gohoarder.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metadata
+spec:
+  accessModes:
+    - {{ .Values.metadata.sqlite.persistence.accessMode }}
+  {{- if .Values.metadata.sqlite.persistence.storageClass }}
+  storageClassName: {{ .Values.metadata.sqlite.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.metadata.sqlite.persistence.size | quote }}
+{{- end }}

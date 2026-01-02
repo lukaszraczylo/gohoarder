@@ -1,0 +1,130 @@
+# GoHoarder Configuration Example
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: "5m"
+  write_timeout: "5m"
+  idle_timeout: "2m"
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+storage:
+  backend: "filesystem"  # filesystem, s3, smb, nfs
+  path: "/var/cache/gohoarder"
+
+  filesystem:
+    base_path: "/var/cache/gohoarder"
+
+  s3:
+    endpoint: "s3.amazonaws.com"
+    region: "us-east-1"
+    bucket: "gohoarder-cache"
+    access_key_id: ""
+    secret_access_key: ""
+    use_ssl: true
+
+  smb:
+    host: ""
+    share: ""
+    username: ""
+    password: ""
+    domain: ""
+
+metadata:
+  backend: "sqlite"  # sqlite, postgresql, file
+  connection: "file:gohoarder.db?cache=shared&mode=rwc"
+
+  sqlite:
+    path: "gohoarder.db"
+    wal_mode: true
+
+  postgresql:
+    host: "localhost"
+    port: 5432
+    database: "gohoarder"
+    user: "gohoarder"
+    password: ""
+    ssl_mode: "disable"
+
+cache:
+  default_ttl: "168h"  # 7 days
+  cleanup_interval: "1h"
+  max_size_bytes: 536870912000  # 500GB
+  per_project_quota: 53687091200  # 50GB
+  ttl_overrides:
+    npm: "168h"
+    pip: "168h"
+    go: "168h"
+
+security:
+  enabled: false
+  block_on_severity: "high"  # none, low, medium, high, critical
+
+  scanners:
+    trivy:
+      enabled: false
+      timeout: "5m"
+      cache_db: "/var/lib/trivy"
+
+    osv:
+      enabled: false
+      api_url: "https://api.osv.dev"
+      timeout: "30s"
+
+    static:
+      enabled: true
+      max_package_size: 2147483648  # 2GB
+      check_checksums: true
+      block_suspicious: false
+      allowed_licenses: []
+
+auth:
+  enabled: true
+  key_expiration: "0"  # Never expire (0), or duration like "8760h" for 1 year
+  bcrypt_cost: 10
+  audit_log: true
+
+network:
+  connect_timeout: "10s"
+  read_timeout: "5m"
+  write_timeout: "5m"
+  max_idle_conns: 100
+  max_conns_per_host: 10
+
+  rate_limit:
+    per_api_key: 1000
+    per_ip: 100
+    burst_size: 50
+
+  circuit_breaker:
+    threshold: 5
+    timeout: "30s"
+    reset_interval: "60s"
+
+  retry:
+    max_attempts: 3
+    initial_backoff: "1s"
+    max_backoff: "30s"
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, pretty
+
+handlers:
+  go:
+    enabled: true
+    upstream_proxy: "https://proxy.golang.org"
+    checksum_db: "https://sum.golang.org"
+    verify_checksums: true
+
+  npm:
+    enabled: true
+    upstream_registry: "https://registry.npmjs.org"
+
+  pypi:
+    enabled: true
+    upstream_url: "https://pypi.org"
+    simple_api_url: "https://pypi.org/simple"

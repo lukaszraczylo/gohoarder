@@ -258,6 +258,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
+import { getRegistryBadgeClass } from '@/composables/useBadgeStyles'
 
 // Props from router
 const props = defineProps<{
@@ -380,15 +381,6 @@ async function deletePackage() {
     showDeleteModal.value = false
     packageToDelete.value = null
   }
-}
-
-function getRegistryBadgeClass(registry: string): string {
-  const classes: Record<string, string> = {
-    npm: 'bg-blue-100 text-blue-800 border-blue-200',
-    pypi: 'bg-green-100 text-green-800 border-green-200',
-    go: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  }
-  return classes[registry] || 'bg-gray-100 text-gray-800 border-gray-200'
 }
 
 function formatNumber(num: number): string {

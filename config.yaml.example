@@ -1,8 +1,14 @@
 # GoHoarder Configuration Example
+#
+# Port Configuration:
+#   - Backend server port is configured below (server.port)
+#   - Frontend dev server uses frontend/.env (VITE_PORT and VITE_BACKEND_URL)
+#   - When running `make run`, both will start with their configured ports
+#   - The frontend automatically proxies /api and /ws requests to the backend
 
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8080  # Backend API server port
   read_timeout: "5m"
   write_timeout: "5m"
   idle_timeout: "2m"
@@ -62,18 +68,66 @@ cache:
 security:
   enabled: false
   block_on_severity: "high"  # none, low, medium, high, critical
+  scan_on_download: true  # Scan packages on first download
+  rescan_interval: "24h"  # How often to re-scan packages (e.g., 24h, 168h for weekly)
+  update_db_on_startup: false  # Update vulnerability databases on startup
+  allowed_packages: []  # Packages that bypass security checks (format: "registry/name@version")
+  ignored_cves: []  # CVE IDs to ignore globally (e.g., "CVE-2021-23337")
+
+  block_thresholds:
+    critical: 0  # Max critical vulns (0 = block any)
+    high: -1  # Max high vulns (-1 = unlimited)
+    medium: -1  # Max medium vulns
+    low: -1  # Max low vulns
 
   scanners:
+    # Trivy - Comprehensive vulnerability scanner from Aqua Security
+    # Supports: containers, OS packages, language packages
     trivy:
       enabled: false
       timeout: "5m"
       cache_db: "/var/lib/trivy"
 
+    # OSV - Google's Open Source Vulnerabilities database
+    # Supports: npm, PyPI, Go, Maven, NuGet, etc.
     osv:
       enabled: false
       api_url: "https://api.osv.dev"
       timeout: "30s"
 
+    # Grype - Multi-ecosystem vulnerability scanner from Anchore
+    # Supports: all package types, containers, SBOMs
+    grype:
+      enabled: false
+      timeout: "5m"
+
+    # govulncheck - Official Go vulnerability scanner from the Go team
+    # Supports: Go modules only
+    govulncheck:
+      enabled: false
+      timeout: "5m"
+
+    # npm-audit - npm's built-in vulnerability scanner
+    # Supports: npm packages only
+    npm_audit:
+      enabled: false
+      timeout: "2m"
+
+    # pip-audit - Python package vulnerability scanner
+    # Supports: PyPI packages only
+    pip_audit:
+      enabled: false
+      timeout: "2m"
+
+    # GitHub Advisory Database - GitHub's security advisory database
+    # Supports: npm, pip, go, maven, nuget, cargo, pub
+    # Optional: Set token for higher API rate limits (60 req/hour unauthenticated, 5000 req/hour authenticated)
+    ghsa:
+      enabled: false
+      timeout: "30s"
+      token: ""  # Optional: GitHub personal access token (ghp_...)
+
+    # Static Analysis - Basic static analysis and package validation
     static:
       enabled: true
       max_package_size: 2147483648  # 2GB

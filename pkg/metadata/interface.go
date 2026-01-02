@@ -56,6 +56,12 @@ type MetadataStore interface {
 	// Health checks metadata store health
 	Health(ctx context.Context) error
 
+	// GetTimeSeriesStats returns time-series download statistics
+	GetTimeSeriesStats(ctx context.Context, period string, registry string) (*TimeSeriesStats, error)
+
+	// AggregateDownloadData aggregates raw download events and cleans up old data
+	AggregateDownloadData(ctx context.Context) error
+
 	// Close closes the metadata store
 	Close() error
 }
@@ -142,6 +148,19 @@ type Stats struct {
 	ScannedPackages    int64     `json:"scanned_packages"`
 	VulnerablePackages int64     `json:"vulnerable_packages"`
 	LastUpdated        time.Time `json:"last_updated"`
+}
+
+// TimeSeriesDataPoint represents a single data point in time-series
+type TimeSeriesDataPoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	Value     int64     `json:"value"`
+}
+
+// TimeSeriesStats represents time-series download statistics
+type TimeSeriesStats struct {
+	Period     string                  `json:"period"`      // 1h, 1day, 7day, 30day
+	Registry   string                  `json:"registry"`    // empty string for all registries
+	DataPoints []*TimeSeriesDataPoint `json:"data_points"`
 }
 
 // CVEBypass represents a temporary bypass for a CVE or package

@@ -47,7 +47,22 @@ bench: ## Run benchmarks
 	@echo "Running benchmarks..."
 	@go test -bench=. -benchmem ./...
 
-run: build ## Build and run the server
+run: build ## Build and run both backend and frontend for development
+	@echo "Starting $(BINARY_NAME) and frontend in development mode..."
+	@echo ""
+	@echo "Backend will run on: http://localhost:8080 (configured in config.yaml)"
+	@echo "Frontend will run on: http://localhost:5173 (configured in frontend/.env)"
+	@echo ""
+	@echo "To change ports:"
+	@echo "  - Backend: Edit 'server.port' in config.yaml"
+	@echo "  - Frontend: Edit 'VITE_PORT' and 'VITE_BACKEND_URL' in frontend/.env"
+	@echo ""
+	@trap 'kill 0' SIGINT; \
+	$(BINARY_PATH) serve & \
+	cd frontend && pnpm dev & \
+	wait
+
+run-backend: build ## Build and run only the backend server
 	@echo "Starting $(BINARY_NAME)..."
 	@$(BINARY_PATH) serve
 
@@ -61,6 +76,20 @@ clean: ## Clean build artifacts
 	@rm -f coverage.out coverage.html
 	@rm -f *.db *.db-shm *.db-wal
 	@echo "Clean complete"
+
+clean-db: ## Clean all local cache and database files (from config.yaml paths)
+	@echo "WARNING: This will delete all cached packages and scan results!"
+	@echo "Paths from config.yaml:"
+	@echo "  - ./data/storage (package cache)"
+	@echo "  - ./data/gohoarder.db (metadata database)"
+	@echo "  - /tmp/trivy (Trivy cache)"
+	@echo ""
+	@read -p "Are you sure you want to continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo "Cleaning database and cache..."
+	@rm -rf ./data/storage
+	@rm -f ./data/gohoarder.db ./data/gohoarder.db-shm ./data/gohoarder.db-wal
+	@rm -rf /tmp/trivy
+	@echo "Database and cache cleaned successfully"
 
 install: build ## Install the binary
 	@echo "Installing $(BINARY_NAME)..."
@@ -91,5 +120,12 @@ docker-build: ## Build Docker image
 docker-run: docker-build ## Run Docker container
 	@echo "Running Docker container..."
 	@docker run -p 8080:8080 $(BINARY_NAME):$(VERSION)
+
+test-packages: ## Download test packages through gohoarder proxy (clean + vulnerable packages)
+	@echo "Reading backend port from config.yaml..."
+	@PORT=$$(grep "^  port:" config.yaml | awk '{print $$2}'); \
+	if [ -z "$$PORT" ]; then PORT=8080; fi; \
+	export GOHOARDER_URL="http://localhost:$$PORT"; \
+	./script/test-packages.sh
 
 .DEFAULT_GOAL := help

@@ -1,111 +1,94 @@
 package app
 
 import (
-	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
-	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
 
 // requireAdmin middleware checks for admin authentication
-func (a *App) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Get API key from Authorization header
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			errors.WriteErrorSimple(w, errors.New(errors.ErrCodeUnauthorized, "missing authorization header"))
-			return
-		}
-
-		// Extract bearer token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			errors.WriteErrorSimple(w, errors.New(errors.ErrCodeUnauthorized, "invalid authorization header format, expected: Bearer <token>"))
-			return
-		}
-
-		apiKey := parts[1]
-
-		// Validate API key
-		key, err := a.authManager.ValidateAPIKey(r.Context(), apiKey)
-		if err != nil {
-			errors.WriteErrorSimple(w, errors.New(errors.ErrCodeUnauthorized, "invalid or expired API key"))
-			return
-		}
-
-		// Check if user has admin role or bypass management permission
-		if key.Role != auth.RoleAdmin && !key.HasPermission(auth.PermissionManageBypasses) {
-			errors.WriteErrorSimple(w, errors.New(errors.ErrCodeForbidden, "insufficient permissions, admin role required"))
-			return
-		}
-
-		// Store user info in request context for handlers to use
-		// For now, we'll just proceed - could enhance with context.WithValue
-		next(w, r)
+func (a *App) requireAdmin(c *fiber.Ctx) error {
+	// Get API key from Authorization header
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "missing authorization header",
+		})
 	}
+
+	// Extract bearer token
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid authorization header format, expected: Bearer <token>",
+		})
+	}
+
+	apiKey := parts[1]
+
+	// Validate API key
+	key, err := a.authManager.ValidateAPIKey(c.Context(), apiKey)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid or expired API key",
+		})
+	}
+
+	// Check if user has admin role or bypass management permission
+	if key.Role != auth.RoleAdmin && !key.HasPermission(auth.PermissionManageBypasses) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "insufficient permissions, admin role required",
+		})
+	}
+
+	// Continue to next handler
+	return c.Next()
 }
 
 // handleAdminBypasses handles /api/admin/bypasses endpoint
-func (a *App) handleAdminBypasses(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+func (a *App) handleAdminBypasses(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
 	}
 
-	switch r.Method {
+	// Check if there's an ID parameter
+	id := c.Params("id")
+
+	switch c.Method() {
 	case "GET":
-		a.requireAdmin(a.handleListBypasses)(w, r)
+		if id != "" {
+			return a.handleGetBypass(c)
+		}
+		return a.handleListBypasses(c)
 	case "POST":
-		a.requireAdmin(a.handleCreateBypass)(w, r)
-	default:
-		errors.WriteErrorSimple(w, errors.BadRequest("method not allowed"))
-	}
-}
-
-// handleBypassByID handles /api/admin/bypasses/{id} endpoint
-func (a *App) handleBypassByID(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, PATCH, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	switch r.Method {
-	case "GET":
-		a.requireAdmin(a.handleGetBypass)(w, r)
-	case "DELETE":
-		a.requireAdmin(a.handleDeleteBypass)(w, r)
+		return a.handleCreateBypass(c)
 	case "PATCH":
-		a.requireAdmin(a.handleUpdateBypass)(w, r)
+		return a.handleUpdateBypass(c)
+	case "DELETE":
+		return a.handleDeleteBypass(c)
 	default:
-		errors.WriteErrorSimple(w, errors.BadRequest("method not allowed"))
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
 	}
 }
 
 // handleListBypasses lists all CVE bypasses
-func (a *App) handleListBypasses(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (a *App) handleListBypasses(c *fiber.Ctx) error {
+	ctx := c.Context()
 
 	// Parse query parameters
-	includeExpired := r.URL.Query().Get("include_expired") == "true"
-	activeOnly := r.URL.Query().Get("active_only") == "true"
-	bypassType := metadata.BypassType(r.URL.Query().Get("type"))
+	includeExpired := c.Query("include_expired") == "true"
+	activeOnly := c.Query("active_only") == "true"
+	bypassType := metadata.BypassType(c.Query("type"))
 
 	opts := &metadata.BypassListOptions{
 		IncludeExpired: includeExpired,
@@ -116,11 +99,10 @@ func (a *App) handleListBypasses(w http.ResponseWriter, r *http.Request) {
 	bypasses, err := a.metadata.ListCVEBypasses(ctx, opts)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list CVE bypasses")
-		errors.WriteErrorSimple(w, errors.InternalServer("failed to list bypasses"))
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list bypasses"})
 	}
 
-	errors.WriteJSONSimple(w, http.StatusOK, map[string]interface{}{
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"bypasses": bypasses,
 		"total":    len(bypasses),
 	})
@@ -128,57 +110,43 @@ func (a *App) handleListBypasses(w http.ResponseWriter, r *http.Request) {
 
 // CreateBypassRequest represents the request body for creating a bypass
 type CreateBypassRequest struct {
-	Type           metadata.BypassType `json:"type"`            // "cve" or "package"
-	Target         string              `json:"target"`          // CVE ID or package name
-	Reason         string              `json:"reason"`          // Why this bypass is needed
-	CreatedBy      string              `json:"created_by"`      // Admin username
-	ExpiresInHours int                 `json:"expires_in_hours"` // How many hours until expiration
-	AppliesTo      string              `json:"applies_to,omitempty"` // Optional: limit CVE bypass to specific package
-	NotifyOnExpiry bool                `json:"notify_on_expiry"` // Send notification when expired
+	Type           metadata.BypassType `json:"type"`                     // "cve" or "package"
+	Target         string              `json:"target"`                   // CVE ID or package name
+	Reason         string              `json:"reason"`                   // Why this bypass is needed
+	CreatedBy      string              `json:"created_by"`               // Admin username
+	ExpiresInHours int                 `json:"expires_in_hours"`         // How many hours until expiration
+	AppliesTo      string              `json:"applies_to,omitempty"`     // Optional: limit CVE bypass to specific package
+	NotifyOnExpiry bool                `json:"notify_on_expiry"`         // Send notification when expired
 }
 
 // handleCreateBypass creates a new CVE bypass
-func (a *App) handleCreateBypass(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Parse request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		errors.WriteErrorSimple(w, errors.BadRequest("failed to read request body"))
-		return
-	}
-	defer r.Body.Close()
+func (a *App) handleCreateBypass(c *fiber.Ctx) error {
+	ctx := c.Context()
 
 	var req CreateBypassRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		errors.WriteErrorSimple(w, errors.BadRequest("invalid JSON in request body"))
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON in request body"})
 	}
 
 	// Validate request
 	if req.Type != metadata.BypassTypeCVE && req.Type != metadata.BypassTypePackage {
-		errors.WriteErrorSimple(w, errors.BadRequest("type must be 'cve' or 'package'"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "type must be 'cve' or 'package'"})
 	}
 
 	if req.Target == "" {
-		errors.WriteErrorSimple(w, errors.BadRequest("target is required"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "target is required"})
 	}
 
 	if req.Reason == "" {
-		errors.WriteErrorSimple(w, errors.BadRequest("reason is required"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
 	}
 
 	if req.CreatedBy == "" {
-		errors.WriteErrorSimple(w, errors.BadRequest("created_by is required"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "created_by is required"})
 	}
 
 	if req.ExpiresInHours <= 0 {
-		errors.WriteErrorSimple(w, errors.BadRequest("expires_in_hours must be greater than 0"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "expires_in_hours must be greater than 0"})
 	}
 
 	// Create bypass
@@ -201,8 +169,7 @@ func (a *App) handleCreateBypass(w http.ResponseWriter, r *http.Request) {
 	// Save to database
 	if err := a.metadata.SaveCVEBypass(ctx, bypass); err != nil {
 		log.Error().Err(err).Msg("Failed to save CVE bypass")
-		errors.WriteErrorSimple(w, errors.InternalServer("failed to create bypass"))
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create bypass"})
 	}
 
 	log.Info().
@@ -213,23 +180,21 @@ func (a *App) handleCreateBypass(w http.ResponseWriter, r *http.Request) {
 		Time("expires_at", bypass.ExpiresAt).
 		Msg("CVE bypass created")
 
-	errors.WriteJSONSimple(w, http.StatusCreated, map[string]interface{}{
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"bypass":  bypass,
 		"message": "Bypass created successfully",
 	})
 }
 
 // handleGetBypass gets a specific bypass by ID
-func (a *App) handleGetBypass(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (a *App) handleGetBypass(c *fiber.Ctx) error {
+	ctx := c.Context()
 
-	// Extract ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/admin/bypasses/")
-	bypassID := path
+	// Extract ID from parameter
+	bypassID := c.Params("id")
 
 	if bypassID == "" {
-		errors.WriteErrorSimple(w, errors.BadRequest("bypass ID is required"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bypass ID is required"})
 	}
 
 	// Get all bypasses and find the one with matching ID
@@ -238,20 +203,18 @@ func (a *App) handleGetBypass(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list bypasses")
-		errors.WriteErrorSimple(w, errors.InternalServer("failed to get bypass"))
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get bypass"})
 	}
 
 	for _, bypass := range bypasses {
 		if bypass.ID == bypassID {
-			errors.WriteJSONSimple(w, http.StatusOK, map[string]interface{}{
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"bypass": bypass,
 			})
-			return
 		}
 	}
 
-	errors.WriteErrorSimple(w, errors.NotFound("bypass not found"))
+	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "bypass not found"})
 }
 
 // UpdateBypassRequest represents the request body for updating a bypass
@@ -262,30 +225,19 @@ type UpdateBypassRequest struct {
 }
 
 // handleUpdateBypass updates a bypass (activate/deactivate or extend expiration)
-func (a *App) handleUpdateBypass(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (a *App) handleUpdateBypass(c *fiber.Ctx) error {
+	ctx := c.Context()
 
-	// Extract ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/admin/bypasses/")
-	bypassID := path
+	// Extract ID from parameter
+	bypassID := c.Params("id")
 
 	if bypassID == "" {
-		errors.WriteErrorSimple(w, errors.BadRequest("bypass ID is required"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bypass ID is required"})
 	}
-
-	// Parse request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		errors.WriteErrorSimple(w, errors.BadRequest("failed to read request body"))
-		return
-	}
-	defer r.Body.Close()
 
 	var req UpdateBypassRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		errors.WriteErrorSimple(w, errors.BadRequest("invalid JSON in request body"))
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON in request body"})
 	}
 
 	// Get current bypass
@@ -294,8 +246,7 @@ func (a *App) handleUpdateBypass(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list bypasses")
-		errors.WriteErrorSimple(w, errors.InternalServer("failed to get bypass"))
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get bypass"})
 	}
 
 	var currentBypass *metadata.CVEBypass
@@ -307,8 +258,7 @@ func (a *App) handleUpdateBypass(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if currentBypass == nil {
-		errors.WriteErrorSimple(w, errors.NotFound("bypass not found"))
-		return
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "bypass not found"})
 	}
 
 	// Update fields
@@ -327,8 +277,7 @@ func (a *App) handleUpdateBypass(w http.ResponseWriter, r *http.Request) {
 	// Save updated bypass
 	if err := a.metadata.SaveCVEBypass(ctx, currentBypass); err != nil {
 		log.Error().Err(err).Msg("Failed to update bypass")
-		errors.WriteErrorSimple(w, errors.InternalServer("failed to update bypass"))
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update bypass"})
 	}
 
 	log.Info().
@@ -336,43 +285,39 @@ func (a *App) handleUpdateBypass(w http.ResponseWriter, r *http.Request) {
 		Bool("active", currentBypass.Active).
 		Msg("CVE bypass updated")
 
-	errors.WriteJSONSimple(w, http.StatusOK, map[string]interface{}{
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"bypass":  currentBypass,
 		"message": "Bypass updated successfully",
 	})
 }
 
 // handleDeleteBypass deletes a bypass
-func (a *App) handleDeleteBypass(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (a *App) handleDeleteBypass(c *fiber.Ctx) error {
+	ctx := c.Context()
 
-	// Extract ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/admin/bypasses/")
-	bypassID := path
+	// Extract ID from parameter
+	bypassID := c.Params("id")
 
 	if bypassID == "" {
-		errors.WriteErrorSimple(w, errors.BadRequest("bypass ID is required"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bypass ID is required"})
 	}
 
 	// Delete bypass
 	if err := a.metadata.DeleteCVEBypass(ctx, bypassID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			errors.WriteErrorSimple(w, errors.NotFound("bypass not found"))
-		} else {
-			log.Error().Err(err).Msg("Failed to delete bypass")
-			errors.WriteErrorSimple(w, errors.InternalServer("failed to delete bypass"))
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "bypass not found"})
 		}
-		return
+		log.Error().Err(err).Msg("Failed to delete bypass")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete bypass"})
 	}
 
 	log.Info().
 		Str("bypass_id", bypassID).
 		Msg("CVE bypass deleted")
 
-	errors.WriteJSONSimple(w, http.StatusOK, map[string]interface{}{
-		"deleted": true,
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"deleted":   true,
 		"bypass_id": bypassID,
-		"message": "Bypass deleted successfully",
+		"message":   "Bypass deleted successfully",
 	})
 }

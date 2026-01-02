@@ -104,6 +104,11 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 		}
 
 		if !needsRescan {
+			log.Debug().
+				Str("package", pkg.Name).
+				Str("version", pkg.Version).
+				Bool("security_scanned", pkg.SecurityScanned).
+				Msg("Package does not need rescanning, skipping")
 			skipped++
 			continue
 		}

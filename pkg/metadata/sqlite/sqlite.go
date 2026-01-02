@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,6 +90,32 @@ CREATE INDEX IF NOT EXISTS idx_cve_bypasses_type ON cve_bypasses(type);
 CREATE INDEX IF NOT EXISTS idx_cve_bypasses_target ON cve_bypasses(target);
 CREATE INDEX IF NOT EXISTS idx_cve_bypasses_expires_at ON cve_bypasses(expires_at);
 CREATE INDEX IF NOT EXISTS idx_cve_bypasses_active ON cve_bypasses(active);
+
+CREATE TABLE IF NOT EXISTS download_events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	registry TEXT NOT NULL,
+	package_name TEXT NOT NULL,
+	package_version TEXT NOT NULL,
+	downloaded_at DATETIME NOT NULL,
+	FOREIGN KEY(registry, package_name, package_version) REFERENCES packages(registry, name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_download_events_registry ON download_events(registry);
+CREATE INDEX IF NOT EXISTS idx_download_events_downloaded_at ON download_events(downloaded_at);
+CREATE INDEX IF NOT EXISTS idx_download_events_package ON download_events(registry, package_name, package_version);
+
+CREATE TABLE IF NOT EXISTS aggregated_download_stats (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	registry TEXT NOT NULL,
+	time_bucket DATETIME NOT NULL,
+	resolution TEXT NOT NULL,
+	download_count INTEGER NOT NULL,
+	UNIQUE(registry, time_bucket, resolution)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aggregated_stats_registry ON aggregated_download_stats(registry);
+CREATE INDEX IF NOT EXISTS idx_aggregated_stats_time_bucket ON aggregated_download_stats(time_bucket);
+CREATE INDEX IF NOT EXISTS idx_aggregated_stats_resolution ON aggregated_download_stats(resolution);
 `
 
 // New creates a new SQLite metadata store
@@ -340,21 +367,45 @@ func (s *SQLiteStore) ListPackages(ctx context.Context, opts *metadata.ListOptio
 	return packages, nil
 }
 
-// UpdateDownloadCount increments download counter
+// UpdateDownloadCount increments download counter and records download event
 func (s *SQLiteStore) UpdateDownloadCount(ctx context.Context, registry, name, version string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `
+	now := time.Now()
+
+	// Start transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to start transaction")
+	}
+	defer tx.Rollback()
+
+	// Update download count
+	updateQuery := `
 		UPDATE packages
 		SET download_count = download_count + 1,
 			last_accessed = ?
 		WHERE registry = ? AND name = ? AND version = ?
 	`
-
-	_, err := s.db.ExecContext(ctx, query, time.Now(), registry, name, version)
+	_, err = tx.ExecContext(ctx, updateQuery, now, registry, name, version)
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to update download count")
+	}
+
+	// Record download event for time-series statistics
+	insertQuery := `
+		INSERT INTO download_events (registry, package_name, package_version, downloaded_at)
+		VALUES (?, ?, ?, ?)
+	`
+	_, err = tx.ExecContext(ctx, insertQuery, registry, name, version, now)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to record download event")
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to commit transaction")
 	}
 
 	return nil
@@ -372,11 +423,12 @@ func (s *SQLiteStore) GetStats(ctx context.Context, registry string) (*metadata.
 			COALESCE(SUM(download_count), 0) as total_downloads,
 			COALESCE(SUM(CASE WHEN security_scanned = 1 THEN 1 ELSE 0 END), 0) as scanned_packages
 		FROM packages
+		WHERE version NOT IN ('list', 'latest', 'metadata', 'page')
 	`
 
 	args := []interface{}{}
 	if registry != "" {
-		query += " WHERE registry = ?"
+		query += " AND registry = ?"
 		args = append(args, registry)
 	}
 
@@ -406,6 +458,257 @@ func (s *SQLiteStore) GetStats(ctx context.Context, registry string) (*metadata.
 	s.db.QueryRowContext(ctx, vulnQuery, vulnArgs...).Scan(&stats.VulnerablePackages)
 
 	return &stats, nil
+}
+
+// GetTimeSeriesStats returns time-series download statistics
+// Uses different data sources based on period for efficiency:
+// - 1h: raw download_events (last hour only)
+// - 1day: hourly aggregates
+// - 7day, 30day: daily aggregates
+func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, registry string) (*metadata.TimeSeriesStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var (
+		timeFormat    string
+		startTime     time.Time
+		bucketCount   int
+		useRawEvents  bool
+		useResolution string
+	)
+
+	now := time.Now()
+
+	// Determine time range, bucket size, and data source based on period
+	switch period {
+	case "1h":
+		startTime = now.Add(-1 * time.Hour)
+		timeFormat = "%Y-%m-%d %H:%M:00" // 5-minute buckets
+		bucketCount = 12 // 12 x 5min = 60min
+		useRawEvents = true // Use raw events for last hour
+	case "1day":
+		startTime = now.Add(-24 * time.Hour)
+		timeFormat = "%Y-%m-%d %H:00:00" // hourly buckets
+		bucketCount = 24
+		useResolution = "hourly" // Use hourly aggregates
+	case "7day":
+		startTime = now.Add(-7 * 24 * time.Hour)
+		timeFormat = "%Y-%m-%d 00:00:00" // daily buckets
+		bucketCount = 7
+		useResolution = "daily" // Use daily aggregates
+	case "30day":
+		startTime = now.Add(-30 * 24 * time.Hour)
+		timeFormat = "%Y-%m-%d 00:00:00" // daily buckets
+		bucketCount = 30
+		useResolution = "daily" // Use daily aggregates
+	default:
+		return nil, errors.New(errors.ErrCodeBadRequest, "invalid period, must be one of: 1h, 1day, 7day, 30day")
+	}
+
+	var query string
+	var args []interface{}
+
+	if useRawEvents {
+		// Query raw download_events for 1h period
+		query = `
+			SELECT
+				strftime(?, downloaded_at) as time_bucket,
+				COUNT(*) as download_count
+			FROM download_events
+			WHERE downloaded_at >= ?
+		`
+		args = []interface{}{timeFormat, startTime}
+
+		if registry != "" {
+			query += " AND registry = ?"
+			args = append(args, registry)
+		}
+
+		query += `
+			GROUP BY time_bucket
+			ORDER BY time_bucket ASC
+		`
+	} else {
+		// Query aggregated_download_stats for longer periods
+		query = `
+			SELECT
+				time_bucket,
+				SUM(download_count) as download_count
+			FROM aggregated_download_stats
+			WHERE resolution = ? AND time_bucket >= ?
+		`
+		args = []interface{}{useResolution, startTime}
+
+		if registry != "" {
+			query += " AND registry = ?"
+			args = append(args, registry)
+		}
+
+		query += `
+			GROUP BY time_bucket
+			ORDER BY time_bucket ASC
+		`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to query time-series stats")
+	}
+	defer rows.Close()
+
+	// Collect data points
+	dataMap := make(map[string]int64)
+	for rows.Next() {
+		var bucket string
+		var count int64
+		if err := rows.Scan(&bucket, &count); err != nil {
+			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to scan time-series data")
+		}
+		dataMap[bucket] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "error iterating time-series data")
+	}
+
+	// Create complete data points array with zeros for missing buckets
+	dataPoints := make([]*metadata.TimeSeriesDataPoint, 0, bucketCount)
+
+	// Generate all expected buckets
+	currentTime := startTime
+	var increment time.Duration
+	switch period {
+	case "1h":
+		increment = 5 * time.Minute
+	case "1day":
+		increment = time.Hour
+	case "7day", "30day":
+		increment = 24 * time.Hour
+	}
+
+	for i := 0; i < bucketCount; i++ {
+		var bucket string
+		if useRawEvents {
+			bucket = currentTime.Format(convertGoTimeFormat(timeFormat))
+		} else {
+			// For aggregated data, time_bucket is already in the right format
+			bucket = currentTime.Format("2006-01-02 15:04:05")
+		}
+		count := dataMap[bucket]
+
+		dataPoints = append(dataPoints, &metadata.TimeSeriesDataPoint{
+			Timestamp: currentTime,
+			Value:     count,
+		})
+
+		currentTime = currentTime.Add(increment)
+	}
+
+	return &metadata.TimeSeriesStats{
+		Period:     period,
+		Registry:   registry,
+		DataPoints: dataPoints,
+	}, nil
+}
+
+// convertGoTimeFormat converts SQLite strftime format to Go time format
+func convertGoTimeFormat(sqliteFormat string) string {
+	// SQLite strftime to Go time.Format mapping
+	format := sqliteFormat
+	format = strings.ReplaceAll(format, "%Y", "2006")
+	format = strings.ReplaceAll(format, "%m", "01")
+	format = strings.ReplaceAll(format, "%d", "02")
+	format = strings.ReplaceAll(format, "%H", "15")
+	format = strings.ReplaceAll(format, "%M", "04")
+	format = strings.ReplaceAll(format, "%S", "05")
+	return format
+}
+
+// AggregateDownloadData aggregates raw download events into hourly/daily buckets and cleans up old data
+// This should be called periodically (e.g., every hour) as a background job
+func (s *SQLiteStore) AggregateDownloadData(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	log.Info().Msg("Starting download data aggregation")
+
+	// Start transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to start aggregation transaction")
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+	oneHourAgo := now.Add(-1 * time.Hour)
+	oneDayAgo := now.Add(-24 * time.Hour)
+
+	// Step 1: Aggregate raw events older than 1 hour into hourly buckets
+	// Group by registry and hour, then insert into aggregated_download_stats
+	hourlyAggQuery := `
+		INSERT OR REPLACE INTO aggregated_download_stats (registry, time_bucket, resolution, download_count)
+		SELECT
+			registry,
+			strftime('%Y-%m-%d %H:00:00', downloaded_at) as time_bucket,
+			'hourly' as resolution,
+			COUNT(*) as download_count
+		FROM download_events
+		WHERE downloaded_at < ?
+		GROUP BY registry, time_bucket
+	`
+	_, err = tx.ExecContext(ctx, hourlyAggQuery, oneHourAgo)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to aggregate hourly data")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to aggregate hourly download data")
+	}
+
+	// Step 2: Delete raw events older than 1 hour (they're now aggregated)
+	deleteRawQuery := `DELETE FROM download_events WHERE downloaded_at < ?`
+	result, err := tx.ExecContext(ctx, deleteRawQuery, oneHourAgo)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to delete old raw events")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to delete old download events")
+	}
+	rawDeleted, _ := result.RowsAffected()
+
+	// Step 3: Aggregate hourly stats older than 24 hours into daily buckets
+	dailyAggQuery := `
+		INSERT OR REPLACE INTO aggregated_download_stats (registry, time_bucket, resolution, download_count)
+		SELECT
+			registry,
+			strftime('%Y-%m-%d 00:00:00', time_bucket) as time_bucket,
+			'daily' as resolution,
+			SUM(download_count) as download_count
+		FROM aggregated_download_stats
+		WHERE resolution = 'hourly' AND time_bucket < ?
+		GROUP BY registry, strftime('%Y-%m-%d 00:00:00', time_bucket)
+	`
+	_, err = tx.ExecContext(ctx, dailyAggQuery, oneDayAgo)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to aggregate daily data")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to aggregate daily download data")
+	}
+
+	// Step 4: Delete hourly stats older than 24 hours (they're now aggregated into daily)
+	deleteHourlyQuery := `DELETE FROM aggregated_download_stats WHERE resolution = 'hourly' AND time_bucket < ?`
+	result, err = tx.ExecContext(ctx, deleteHourlyQuery, oneDayAgo)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to delete old hourly aggregates")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to delete old hourly aggregates")
+	}
+	hourlyDeleted, _ := result.RowsAffected()
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to commit aggregation transaction")
+	}
+
+	log.Info().
+		Int64("raw_events_deleted", rawDeleted).
+		Int64("hourly_aggregates_deleted", hourlyDeleted).
+		Msg("Download data aggregation completed successfully")
+
+	return nil
 }
 
 // SaveScanResult saves security scan result

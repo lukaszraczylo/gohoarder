@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
+	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/network"
 	"github.com/rs/zerolog/log"
 )
@@ -43,6 +44,8 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	path := strings.TrimPrefix(r.URL.Path, "/pypi")
+	// Also trim /simple prefix since upstream already includes it
+	path = strings.TrimPrefix(path, "/simple")
 
 	log.Debug().Str("path", path).Str("method", r.Method).Msg("PyPI proxy request")
 
@@ -163,6 +166,14 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 
 	if err != nil {
 		log.Error().Err(err).Str("url", originalURL).Msg("Failed to fetch package file")
+
+		// Check if error is a security violation - return 403 Forbidden
+		if ghErr, ok := err.(*errors.Error); ok && ghErr.Code == errors.ErrCodeSecurityViolation {
+			http.Error(w, fmt.Sprintf("Package blocked: %s", ghErr.Message), http.StatusForbidden)
+			return
+		}
+
+		// All other errors return 502 Bad Gateway (upstream issues)
 		http.Error(w, "Failed to fetch package file", http.StatusBadGateway)
 		return
 	}

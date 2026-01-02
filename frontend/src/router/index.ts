@@ -3,6 +3,7 @@ import Dashboard from '../components/Dashboard.vue'
 import PackageList from '../components/PackageList.vue'
 import PackageDetails from '../components/PackageDetails.vue'
 import Stats from '../components/Stats.vue'
+import VulnerablePackages from '../components/VulnerablePackages.vue'
 import BypassManagementPanel from '../components/BypassManagementPanel.vue'
 
 const router = createRouter({
@@ -30,6 +31,11 @@ const router = createRouter({
       path: '/stats',
       name: 'stats',
       component: Stats,
+    },
+    {
+      path: '/vulnerable-packages',
+      name: 'vulnerable-packages',
+      component: VulnerablePackages,
     },
     {
       path: '/admin/bypasses',

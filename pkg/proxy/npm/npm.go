@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
+	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/network"
 	"github.com/rs/zerolog/log"
 )
@@ -148,6 +149,14 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 
 	if err != nil {
 		log.Error().Err(err).Str("url", url).Msg("Failed to fetch package tarball")
+
+		// Check if error is a security violation - return 403 Forbidden
+		if ghErr, ok := err.(*errors.Error); ok && ghErr.Code == errors.ErrCodeSecurityViolation {
+			http.Error(w, fmt.Sprintf("Package blocked: %s", ghErr.Message), http.StatusForbidden)
+			return
+		}
+
+		// All other errors return 502 Bad Gateway (upstream issues)
 		http.Error(w, "Failed to fetch package tarball", http.StatusBadGateway)
 		return
 	}

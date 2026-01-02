@@ -1,48 +1,45 @@
 package app
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/lukaszraczylo/gohoarder/internal/version"
-	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/rs/zerolog/log"
 )
 
 // handlePackages handles /api/packages endpoint
-func (a *App) handlePackages(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+func (a *App) handlePackages(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
 	}
 
 	// Check if this is a vulnerability endpoint request
-	if strings.HasSuffix(r.URL.Path, "/vulnerabilities") {
-		a.handleVulnerabilities(w, r)
-		return
+	if strings.HasSuffix(c.Path(), "/vulnerabilities") {
+		return a.handleVulnerabilities(c)
 	}
 
-	switch r.Method {
+	switch c.Method() {
 	case "GET":
-		a.handleListPackages(w, r)
+		return a.handleListPackages(c)
 	case "DELETE":
-		a.handleDeletePackage(w, r)
+		return a.handleDeletePackage(c)
 	default:
-		errors.WriteErrorSimple(w, errors.BadRequest("method not allowed"))
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
 	}
 }
 
 // handleListPackages returns list of cached packages
-func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (a *App) handleListPackages(c *fiber.Ctx) error {
+	ctx := c.Context()
 
 	// Get packages from metadata store
 	allPackages, err := a.metadata.ListPackages(ctx, &metadata.ListOptions{
@@ -51,19 +48,33 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list packages")
-		errors.WriteErrorSimple(w, errors.InternalServer("failed to list packages"))
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list packages"})
 	}
 
+	log.Debug().Int("total_packages_from_db", len(allPackages)).Msg("Retrieved packages from database")
+
 	// Filter, clean, and deduplicate packages
-	seen := make(map[string]*metadata.Package)
+	// Map stores both cleaned package and original name for scan lookups
+	type packageEntry struct {
+		pkg          *metadata.Package
+		originalName string
+	}
+	seen := make(map[string]*packageEntry)
+	skippedCount := 0
 	for _, pkg := range allPackages {
 		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
 		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
+			skippedCount++
+			log.Debug().
+				Str("name", pkg.Name).
+				Str("version", pkg.Version).
+				Str("registry", pkg.Registry).
+				Msg("Skipping metadata entry")
 			continue
 		}
 
 		// Clean the package name (remove /@v/version.ext suffix)
+		originalName := pkg.Name
 		cleanName := pkg.Name
 		if idx := strings.Index(cleanName, "/@v/"); idx != -1 {
 			cleanName = cleanName[:idx]
@@ -73,25 +84,41 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 		key := cleanName + "@" + pkg.Version
 
 		// Keep the entry with the largest size (typically .zip files)
-		if existing, ok := seen[key]; !ok || pkg.Size > existing.Size {
+		if existing, ok := seen[key]; !ok || pkg.Size > existing.pkg.Size {
 			// Create a copy with cleaned name
 			cleanPkg := *pkg
 			cleanPkg.Name = cleanName
-			seen[key] = &cleanPkg
+			seen[key] = &packageEntry{
+				pkg:          &cleanPkg,
+				originalName: originalName,
+			}
 		}
 	}
 
-	// Convert map to slice
-	packages := make([]*metadata.Package, 0, len(seen))
-	for _, pkg := range seen {
-		packages = append(packages, pkg)
+	log.Debug().
+		Int("skipped_metadata", skippedCount).
+		Int("unique_packages", len(seen)).
+		Msg("Filtered and deduplicated packages")
+
+	// Convert map to slice, keeping track of original names
+	type packageWithOriginalName struct {
+		pkg          *metadata.Package
+		originalName string
+	}
+	packagesWithNames := make([]packageWithOriginalName, 0, len(seen))
+	for _, entry := range seen {
+		packagesWithNames = append(packagesWithNames, packageWithOriginalName{
+			pkg:          entry.pkg,
+			originalName: entry.originalName,
+		})
 	}
 
 	// Enhance packages with vulnerability information if security scanning is enabled
 	var response map[string]interface{}
 	if a.config.Security.Enabled {
-		enhancedPackages := make([]map[string]interface{}, 0, len(packages))
-		for _, pkg := range packages {
+		enhancedPackages := make([]map[string]interface{}, 0, len(packagesWithNames))
+		for _, entry := range packagesWithNames {
+			pkg := entry.pkg
 			pkgMap := map[string]interface{}{
 				"id":              pkg.ID,
 				"registry":        pkg.Registry,
@@ -106,7 +133,8 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 
 			// Add vulnerability info if scanned
 			if pkg.SecurityScanned {
-				scanResult, err := a.metadata.GetScanResult(ctx, pkg.Registry, pkg.Name, pkg.Version)
+				// Use original name for scan result lookup (handles Go packages with /@v/ suffix)
+				scanResult, err := a.metadata.GetScanResult(ctx, pkg.Registry, entry.originalName, pkg.Version)
 				if err == nil && scanResult != nil {
 					// Count vulnerabilities by severity
 					severityCounts := make(map[string]int)
@@ -115,8 +143,8 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 					}
 
 					pkgMap["vulnerabilities"] = map[string]interface{}{
-						"scanned": true,
-						"status":  scanResult.Status,
+						"scanned":   true,
+						"status":    scanResult.Status,
 						"scannedAt": scanResult.ScannedAt.Format(time.RFC3339),
 						"counts": map[string]int{
 							"critical": severityCounts["CRITICAL"],
@@ -147,6 +175,11 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 			"total":    len(enhancedPackages),
 		}
 	} else {
+		// Non-enhanced mode - just return the packages
+		packages := make([]*metadata.Package, 0, len(packagesWithNames))
+		for _, entry := range packagesWithNames {
+			packages = append(packages, entry.pkg)
+		}
 		response = map[string]interface{}{
 			"packages": packages,
 			"total":    len(packages),
@@ -154,21 +187,22 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Success response
-	errors.WriteJSONSimple(w, http.StatusOK, response)
+	return c.Status(fiber.StatusOK).JSON(response)
 }
 
 // handleDeletePackage deletes a cached package
-func (a *App) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (a *App) handleDeletePackage(c *fiber.Ctx) error {
+	ctx := c.Context()
 
 	// Parse path: /api/packages/{registry}/{name}/{version}
 	// For Go packages, name can contain slashes (e.g., github.com/user/repo)
 	// Version is always the last segment
-	path := strings.TrimPrefix(r.URL.Path, "/api/packages/")
+	path := strings.TrimPrefix(c.Path(), "/api/packages/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		errors.WriteErrorSimple(w, errors.BadRequest("invalid path format, expected /api/packages/{registry}/{name}/{version}"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid path format, expected /api/packages/{registry}/{name}/{version}",
+		})
 	}
 
 	registry := parts[0]
@@ -187,8 +221,7 @@ func (a *App) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to list packages for deletion")
-			errors.WriteErrorSimple(w, errors.InternalServer("failed to list packages"))
-			return
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list packages"})
 		}
 
 		log.Debug().
@@ -242,13 +275,11 @@ func (a *App) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
 			Msg("Delete operation completed")
 
 		if deletedCount == 0 {
-			errors.WriteErrorSimple(w, errors.NotFound("package not found"))
-			return
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "package not found"})
 		}
 
 		if lastErr != nil && deletedCount == 0 {
-			errors.WriteErrorSimple(w, errors.InternalServer("failed to delete package"))
-			return
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete package"})
 		}
 	} else {
 		// For NPM and PyPI, delete directly
@@ -259,8 +290,7 @@ func (a *App) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
 				Str("name", name).
 				Str("version", version).
 				Msg("Failed to delete package")
-			errors.WriteErrorSimple(w, errors.InternalServer("failed to delete package"))
-			return
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete package"})
 		}
 		deletedCount = 1
 	}
@@ -287,46 +317,41 @@ func (a *App) handleDeletePackage(w http.ResponseWriter, r *http.Request) {
 		response["deleted_count"] = deletedCount
 	}
 
-	errors.WriteJSONSimple(w, http.StatusOK, response)
+	return c.Status(fiber.StatusOK).JSON(response)
 }
 
 // handleStats handles /api/stats endpoint
-func (a *App) handleStats(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+func (a *App) handleStats(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
 	}
 
-	if r.Method != "GET" {
-		errors.WriteErrorSimple(w, errors.BadRequest("method not allowed"))
-		return
+	if c.Method() != "GET" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
 	}
 
-	ctx := r.Context()
+	ctx := c.Context()
 
-	// Get cache statistics for all registries
+	// Get cache statistics for all registries from database
 	cacheStats, err := a.cache.GetStats(ctx, "")
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get cache stats")
 		cacheStats = &metadata.Stats{}
 	}
 
-	// Get all packages to calculate total size and downloads
+	// Get all packages to calculate per-registry breakdown
 	packages, err := a.metadata.ListPackages(ctx, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list packages")
 		packages = []*metadata.Package{}
 	}
 
-	// Calculate totals and registry breakdown from actual packages (exclude metadata entries like "list", "latest")
-	var totalSize int64
-	var totalDownloads int64
-	var actualPackageCount int
+	// Calculate per-registry breakdown (exclude metadata entries like "list", "latest")
 	registryStats := make(map[string]map[string]interface{})
 
 	for _, pkg := range packages {
@@ -334,9 +359,6 @@ func (a *App) handleStats(w http.ResponseWriter, r *http.Request) {
 		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
 			continue
 		}
-		totalSize += pkg.Size
-		totalDownloads += int64(pkg.DownloadCount)
-		actualPackageCount++
 
 		// Track per-registry stats
 		if _, ok := registryStats[pkg.Registry]; !ok {
@@ -351,11 +373,11 @@ func (a *App) handleStats(w http.ResponseWriter, r *http.Request) {
 		registryStats[pkg.Registry]["downloads"] = registryStats[pkg.Registry]["downloads"].(int64) + int64(pkg.DownloadCount)
 	}
 
-	// Combine statistics
+	// Combine statistics using database stats for accuracy
 	stats := map[string]interface{}{
-		"total_packages":      actualPackageCount,
-		"total_downloads":     totalDownloads,
-		"total_size":          totalSize,
+		"total_packages":      cacheStats.TotalPackages,
+		"total_downloads":     cacheStats.TotalDownloads,
+		"total_size":          cacheStats.TotalSize,
 		"cache_hits":          cacheStats.TotalDownloads,
 		"cache_misses":        0, // TODO: Track cache misses
 		"cache_evictions":     0, // TODO: Track evictions
@@ -370,27 +392,102 @@ func (a *App) handleStats(w http.ResponseWriter, r *http.Request) {
 		registries[registry] = regStats
 	}
 
-	errors.WriteJSONSimple(w, http.StatusOK, map[string]interface{}{
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"stats":      stats,
 		"registries": registries,
 	})
 }
 
-// handleInfo handles /api/info endpoint
-func (a *App) handleInfo(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+// handleTimeSeriesStats handles /api/stats/timeseries endpoint
+// Returns time-series download statistics for charts
+func (a *App) handleTimeSeriesStats(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
 	}
 
-	if r.Method != "GET" {
-		errors.WriteErrorSimple(w, errors.BadRequest("method not allowed"))
-		return
+	if c.Method() != "GET" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
+	}
+
+	ctx := c.Context()
+
+	// Get query parameters
+	period := c.Query("period", "1day") // Default to 1 day
+	registry := c.Query("registry")     // Optional registry filter
+
+	// Validate period
+	validPeriods := map[string]bool{"1h": true, "1day": true, "7day": true, "30day": true}
+	if !validPeriods[period] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid period, must be one of: 1h, 1day, 7day, 30day",
+		})
+	}
+
+	// Get time-series stats
+	stats, err := a.metadata.GetTimeSeriesStats(ctx, period, registry)
+	if err != nil {
+		log.Error().Err(err).Str("period", period).Str("registry", registry).Msg("Failed to get time-series stats")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to get time-series statistics",
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(stats)
+}
+
+// handleConfig handles /api/config endpoint
+// Returns runtime configuration for the frontend
+func (a *App) handleConfig(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
+	}
+
+	if c.Method() != "GET" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
+	}
+
+	// Build server URL from request
+	scheme := "http"
+	if c.Protocol() == "https" {
+		scheme = "https"
+	}
+	serverURL := scheme + "://" + c.Hostname()
+
+	config := map[string]interface{}{
+		"server_url": serverURL,
+		"version":    version.Version,
+		"features": map[string]bool{
+			"security_scanning": a.config.Security.Enabled,
+			"websockets":        true,
+		},
+	}
+
+	return c.Status(fiber.StatusOK).JSON(config)
+}
+
+// handleInfo handles /api/info endpoint
+func (a *App) handleInfo(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
+	}
+
+	if c.Method() != "GET" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
 	}
 
 	info := map[string]interface{}{
@@ -411,5 +508,5 @@ func (a *App) handleInfo(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	errors.WriteJSONSimple(w, http.StatusOK, info)
+	return c.Status(fiber.StatusOK).JSON(info)
 }

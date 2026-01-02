@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
@@ -16,7 +18,6 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/health"
 	"github.com/lukaszraczylo/gohoarder/pkg/lock"
-	"github.com/lukaszraczylo/gohoarder/pkg/logger"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	metafile "github.com/lukaszraczylo/gohoarder/pkg/metadata/file"
 	metasqlite "github.com/lukaszraczylo/gohoarder/pkg/metadata/sqlite"
@@ -36,7 +37,7 @@ import (
 // App represents the main application
 type App struct {
 	config          *config.Config
-	server          *http.Server
+	app             *fiber.App
 	healthChecker   *health.Checker
 	cache           *cache.Manager
 	storage         storage.StorageBackend
@@ -163,7 +164,7 @@ func (a *App) initializeComponents() error {
 	a.wsServer = websocket.NewServer(websocket.Config{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
+		CheckOrigin: func(_ *http.Request) bool {
 			return true // Allow all origins in development
 		},
 	})
@@ -221,55 +222,60 @@ func (a *App) initializeComponents() error {
 	return nil
 }
 
-// setupServer sets up the HTTP server and routes
+// setupServer sets up the Fiber server and routes
 func (a *App) setupServer() error {
-	mux := http.NewServeMux()
+	// Create Fiber app
+	a.app = fiber.New(fiber.Config{
+		ReadTimeout:  a.config.Server.ReadTimeout,
+		WriteTimeout: a.config.Server.WriteTimeout,
+		ServerHeader: "GoHoarder",
+		AppName:      "GoHoarder v1.0",
+	})
 
-	// Health and metrics endpoints
-	mux.HandleFunc("/health", a.healthChecker.HealthHandler())
-	mux.HandleFunc("/health/ready", a.healthChecker.ReadyHandler())
-	mux.Handle("/metrics", metrics.Handler())
+	// Health and metrics endpoints (adapted from net/http)
+	a.app.Get("/health", adaptor.HTTPHandlerFunc(a.healthChecker.HealthHandler()))
+	a.app.Get("/health/ready", adaptor.HTTPHandlerFunc(a.healthChecker.ReadyHandler()))
+	a.app.Get("/metrics", adaptor.HTTPHandler(metrics.Handler()))
 
-	// WebSocket endpoint
-	mux.HandleFunc("/ws", a.wsServer.HandleWebSocket)
+	// WebSocket endpoint (adapted from net/http)
+	a.app.Get("/ws", adaptor.HTTPHandlerFunc(a.wsServer.HandleWebSocket))
 
 	// API endpoints
-	mux.HandleFunc("/api/packages/", a.handlePackages) // Handles packages and vulnerabilities
-	mux.HandleFunc("/api/stats", a.handleStats)
-	mux.HandleFunc("/api/info", a.handleInfo)
+	a.app.Get("/api/config", a.handleConfig)
+	a.app.All("/api/packages/*", a.handlePackages) // Handles packages and vulnerabilities
+	a.app.Get("/api/stats", a.handleStats)
+	a.app.Get("/api/stats/timeseries", a.handleTimeSeriesStats)
+	a.app.Get("/api/info", a.handleInfo)
 
 	// Admin endpoints (bypass management)
-	mux.HandleFunc("/api/admin/bypasses/", a.handleBypassByID)  // Must come before /api/admin/bypasses
-	mux.HandleFunc("/api/admin/bypasses", a.handleAdminBypasses)
+	a.app.All("/api/admin/bypasses/:id?", a.handleAdminBypasses)
 
-	// Proxy handlers
+	// Proxy handlers (adapted from net/http)
 	goProxyHandler := goproxy.New(a.cache, a.networkClient, goproxy.Config{
 		Upstream: "https://proxy.golang.org",
 		SumDBURL: "https://sum.golang.org",
 	})
-	mux.Handle("/go/", http.StripPrefix("/go", goProxyHandler))
+	a.app.All("/go/*", adaptor.HTTPHandler(http.StripPrefix("/go", goProxyHandler)))
 
 	npmProxyHandler := npm.New(a.cache, a.networkClient, npm.Config{
 		Upstream: "https://registry.npmjs.org",
 	})
-	mux.Handle("/npm/", http.StripPrefix("/npm", npmProxyHandler))
+	a.app.All("/npm/*", adaptor.HTTPHandler(http.StripPrefix("/npm", npmProxyHandler)))
 
 	pypiProxyHandler := pypi.New(a.cache, a.networkClient, pypi.Config{
 		Upstream: "https://pypi.org/simple",
 	})
-	mux.Handle("/pypi/", http.StripPrefix("/pypi", pypiProxyHandler))
+	a.app.All("/pypi/*", adaptor.HTTPHandler(http.StripPrefix("/pypi", pypiProxyHandler)))
 
 	// Serve frontend static files
 	frontendDir := "frontend/dist"
 	if _, err := os.Stat(frontendDir); err == nil {
 		log.Info().Str("dir", frontendDir).Msg("Serving frontend static files")
-		fs := http.FileServer(http.Dir(frontendDir))
-		mux.Handle("/", fs)
+		a.app.Static("/", frontendDir)
 	} else {
 		log.Warn().Msg("Frontend dist directory not found, frontend won't be served")
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `
+		a.app.Get("/", func(c *fiber.Ctx) error {
+			return c.Type("html").SendString(`
 				<html>
 				<head><title>GoHoarder</title></head>
 				<body>
@@ -287,20 +293,9 @@ func (a *App) setupServer() error {
 		})
 	}
 
-	// Wrap with logging middleware
-	handler := logger.Middleware(mux)
-
-	// Create HTTP server
-	a.server = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port),
-		Handler:      handler,
-		ReadTimeout:  a.config.Server.ReadTimeout,
-		WriteTimeout: a.config.Server.WriteTimeout,
-	}
-
 	log.Info().
-		Str("addr", a.server.Addr).
-		Msg("HTTP server configured")
+		Str("addr", fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port)).
+		Msg("Fiber server configured")
 
 	return nil
 }
@@ -320,13 +315,17 @@ func (a *App) Run() error {
 		go a.rescanWorker.Start(ctx)
 	}
 
-	// Start HTTP server in goroutine
+	// Start download data aggregation worker (runs every hour)
+	go a.startAggregationWorker(ctx)
+
+	// Start Fiber server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
+		addr := fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port)
 		log.Info().
-			Str("addr", a.server.Addr).
-			Msg("Starting HTTP server")
-		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			Str("addr", addr).
+			Msg("Starting Fiber server")
+		if err := a.app.Listen(addr); err != nil {
 			errChan <- err
 		}
 	}()
@@ -352,12 +351,9 @@ func (a *App) Run() error {
 func (a *App) Shutdown() error {
 	log.Info().Msg("Starting graceful shutdown")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Stop HTTP server
-	if err := a.server.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("Error shutting down HTTP server")
+	// Stop Fiber server
+	if err := a.app.Shutdown(); err != nil {
+		log.Error().Err(err).Msg("Error shutting down Fiber server")
 	}
 
 	// Stop pre-warming worker
@@ -390,4 +386,30 @@ func (a *App) Shutdown() error {
 
 	log.Info().Msg("Shutdown complete")
 	return nil
+}
+
+// startAggregationWorker runs download data aggregation periodically
+func (a *App) startAggregationWorker(ctx context.Context) {
+	log.Info().Msg("Starting download data aggregation worker (runs every hour)")
+
+	// Run immediately on startup
+	if err := a.metadata.AggregateDownloadData(ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to run initial download data aggregation")
+	}
+
+	// Then run every hour
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Aggregation worker stopped")
+			return
+		case <-ticker.C:
+			if err := a.metadata.AggregateDownloadData(ctx); err != nil {
+				log.Error().Err(err).Msg("Failed to aggregate download data")
+			}
+		}
+	}
 }

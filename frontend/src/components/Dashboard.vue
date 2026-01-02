@@ -110,10 +110,10 @@
             <span class="text-xs text-muted-foreground">{{ getChartLabel(index) }}</span>
           </div>
         </div>
-        <div class="mt-4 text-center">
+        <div v-if="chartLoading || chartData.length === 0" class="mt-4 text-center">
           <p class="text-sm text-muted-foreground">
             <i class="fas fa-info-circle mr-1"></i>
-            Chart data will be available once backend API exposes time-series statistics
+            {{ chartLoading ? 'Loading chart data...' : 'No download activity in this period' }}
           </p>
         </div>
       </CardContent>
@@ -121,7 +121,7 @@
 
     <!-- Recent Packages -->
     <Card><CardContent class="p-6">
-      <h3 class="text-xl font-bold text-gray-900 mb-4">
+      <h3 class="text-xl font-semibold text-gray-900 mb-4">
         <i class="fas fa-clock mr-2"></i>Recent Packages
       </h3>
       <div v-if="packages.length === 0" class="text-center py-8 text-gray-500">
@@ -178,13 +178,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import axios from 'axios'
 import { usePackageStore } from '../stores/packages'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { getRegistryBadgeClass } from '@/composables/useBadgeStyles'
 
 const store = usePackageStore()
 const { packages, stats, loading, error } = storeToRefs(store)
@@ -198,21 +200,69 @@ const chartPeriods = [
   { value: '30day', label: '30 Days' },
 ]
 
-// Mock chart data - will be replaced with real API data
-const chartData = computed(() => {
-  // Generate sample data based on selected period
-  const periods: Record<string, number[]> = {
-    '1h': [12, 19, 15, 25, 22, 30, 28, 32, 35, 30, 28, 25],
-    '1day': Array.from({ length: 24 }, () => Math.floor(Math.random() * 50) + 10),
-    '7day': Array.from({ length: 7 }, () => Math.floor(Math.random() * 100) + 20),
-    '30day': Array.from({ length: 30 }, () => Math.floor(Math.random() * 80) + 15),
+// Time-series data from API
+interface TimeSeriesDataPoint {
+  timestamp: string
+  value: number
+}
+
+interface TimeSeriesStats {
+  period: string
+  registry: string
+  data_points: TimeSeriesDataPoint[]
+}
+
+const timeSeriesData = ref<TimeSeriesStats | null>(null)
+const chartLoading = ref(false)
+
+// Fetch time-series data from API
+async function fetchTimeSeriesData() {
+  chartLoading.value = true
+  try {
+    const response = await axios.get(`/api/stats/timeseries?period=${selectedPeriod.value}`)
+    timeSeriesData.value = response.data
+  } catch (err) {
+    console.error('Failed to fetch time-series data:', err)
+    timeSeriesData.value = null
+  } finally {
+    chartLoading.value = false
   }
-  return periods[selectedPeriod.value] || periods['1day']
+}
+
+// Extract chart values from time-series data
+const chartData = computed(() => {
+  if (!timeSeriesData.value || !timeSeriesData.value.data_points) {
+    return []
+  }
+  return timeSeriesData.value.data_points.map(point => point.value)
 })
 
-const maxChartValue = computed(() => Math.max(...chartData.value))
+const maxChartValue = computed(() => {
+  if (chartData.value.length === 0) return 100
+  const max = Math.max(...chartData.value)
+  return max === 0 ? 100 : max
+})
 
 function getChartLabel(index: number): string {
+  // Use timestamp from data if available
+  if (timeSeriesData.value && timeSeriesData.value.data_points[index]) {
+    const date = new Date(timeSeriesData.value.data_points[index].timestamp)
+
+    switch (selectedPeriod.value) {
+      case '1h':
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      case '1day':
+        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      case '7day':
+        return date.toLocaleDateString('en-US', { weekday: 'short' })
+      case '30day':
+        return date.toLocaleDateString('en-US', { day: 'numeric' })
+      default:
+        return `${index}`
+    }
+  }
+
+  // Fallback to index-based labels
   const labels: Record<string, (i: number) => string> = {
     '1h': (i) => `${i * 5}m`,
     '1day': (i) => `${i}:00`,
@@ -230,19 +280,16 @@ const recentPackages = computed(() => {
     .slice(0, 10)
 })
 
+// Watch for period changes and fetch new data
+watch(selectedPeriod, () => {
+  fetchTimeSeriesData()
+})
+
 onMounted(async () => {
   await store.fetchStats()
   await store.fetchPackages()
+  await fetchTimeSeriesData()
 })
-
-function getRegistryBadgeClass(registry: string): string {
-  const classes: Record<string, string> = {
-    npm: 'bg-blue-100 text-blue-800 border-blue-200',
-    pypi: 'bg-green-100 text-green-800 border-green-200',
-    go: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  }
-  return classes[registry] || 'bg-gray-100 text-gray-800 border-gray-200'
-}
 
 function formatNumber(num: number): string {
   return new Intl.NumberFormat().format(num)

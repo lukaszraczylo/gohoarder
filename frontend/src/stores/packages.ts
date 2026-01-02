@@ -51,8 +51,8 @@ export const usePackageStore = defineStore('packages', () => {
     try {
       const response = await axios.get('/api/packages')
       // Only update packages if we got valid data
-      if (response.data && response.data.data && Array.isArray(response.data.data.packages)) {
-        packages.value = response.data.data.packages
+      if (response.data && Array.isArray(response.data.packages)) {
+        packages.value = response.data.packages
       } else {
         console.warn('Unexpected API response format:', response.data)
         error.value = 'Unexpected response format from server'
@@ -73,9 +73,9 @@ export const usePackageStore = defineStore('packages', () => {
       const url = registry ? `/api/stats?registry=${registry}` : '/api/stats'
       const response = await axios.get(url)
       // Only update stats if we got valid data
-      if (response.data && response.data.data && response.data.data.stats) {
-        stats.value = response.data.data.stats
-        registries.value = response.data.data.registries || {}
+      if (response.data && response.data.stats) {
+        stats.value = response.data.stats
+        registries.value = response.data.registries || {}
       } else {
         console.warn('Unexpected stats response format:', response.data)
         error.value = 'Unexpected stats response format from server'

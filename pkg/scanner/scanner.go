@@ -7,7 +7,12 @@ import (
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/ghsa"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/govulncheck"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/grype"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/npmaudit"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/osv"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/pipaudit"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/trivy"
 	"github.com/rs/zerolog/log"
 )
@@ -72,6 +77,48 @@ func New(cfg config.SecurityConfig, metadataStore metadata.MetadataStore) (*Mana
 		log.Info().Msg("OSV scanner enabled")
 	}
 
+	// Initialize Grype scanner
+	if cfg.Scanners.Grype.Enabled {
+		grypeScanner := grype.New(cfg.Scanners.Grype)
+		manager.RegisterScanner(grypeScanner)
+		log.Info().Msg("Grype scanner enabled")
+
+		// Update database on startup if configured
+		if cfg.UpdateDBOnStartup {
+			if err := grypeScanner.UpdateDatabase(context.Background()); err != nil {
+				log.Warn().Err(err).Msg("Failed to update Grype database on startup")
+			}
+		}
+	}
+
+	// Initialize govulncheck scanner
+	if cfg.Scanners.Govulncheck.Enabled {
+		govulncheckScanner := govulncheck.New(cfg.Scanners.Govulncheck)
+		manager.RegisterScanner(govulncheckScanner)
+		log.Info().Msg("govulncheck scanner enabled")
+	}
+
+	// Initialize npm-audit scanner
+	if cfg.Scanners.NpmAudit.Enabled {
+		npmAuditScanner := npmaudit.New(cfg.Scanners.NpmAudit)
+		manager.RegisterScanner(npmAuditScanner)
+		log.Info().Msg("npm-audit scanner enabled")
+	}
+
+	// Initialize pip-audit scanner
+	if cfg.Scanners.PipAudit.Enabled {
+		pipAuditScanner := pipaudit.New(cfg.Scanners.PipAudit)
+		manager.RegisterScanner(pipAuditScanner)
+		log.Info().Msg("pip-audit scanner enabled")
+	}
+
+	// Initialize GitHub Advisory Database scanner
+	if cfg.Scanners.GHSA.Enabled {
+		ghsaScanner := ghsa.New(cfg.Scanners.GHSA)
+		manager.RegisterScanner(ghsaScanner)
+		log.Info().Msg("GitHub Advisory Database scanner enabled")
+	}
+
 	if len(manager.scanners) == 0 {
 		log.Warn().Msg("Security scanning enabled but no scanners configured")
 	}
@@ -101,6 +148,15 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 	scannerNames := make([]string, 0)
 
 	for _, scanner := range m.scanners {
+		// Skip scanners that don't support this registry
+		if !m.shouldRunScanner(scanner.Name(), registry) {
+			log.Debug().
+				Str("scanner", scanner.Name()).
+				Str("registry", registry).
+				Msg("Skipping scanner - not compatible with registry")
+			continue
+		}
+
 		result, err := scanner.Scan(ctx, registry, packageName, version, filePath)
 		if err != nil {
 			log.Error().
@@ -432,4 +488,28 @@ func (m *Manager) Health(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// shouldRunScanner determines if a scanner should run for a given registry
+// Language-specific scanners only run for their target ecosystems
+func (m *Manager) shouldRunScanner(scannerName, registry string) bool {
+	registry = strings.ToLower(registry)
+
+	// Language-specific scanners - only run for their target registry
+	switch scannerName {
+	case "govulncheck":
+		return registry == "go"
+	case "npm-audit":
+		return registry == "npm"
+	case "pip-audit":
+		return registry == "pypi"
+
+	// Multi-ecosystem scanners - run for all registries
+	case "trivy", "osv", "grype", "github-advisory-database":
+		return true
+
+	// Default: allow scanner to run (for future scanners)
+	default:
+		return true
+	}
 }

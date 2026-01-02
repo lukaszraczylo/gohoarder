@@ -19,7 +19,7 @@
       <!-- Overall Stats -->
       <Card class="mb-8">
         <CardContent class="p-6">
-          <h3 class="text-xl font-bold text-gray-900 mb-6">
+          <h3 class="text-xl font-semibold text-gray-900 mb-6">
             <i class="fas fa-chart-bar mr-2"></i>Overall Statistics
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -48,7 +48,7 @@
       <!-- Security Stats -->
       <Card class="mb-8">
         <CardContent class="p-6">
-          <h3 class="text-xl font-bold text-gray-900 mb-6">
+          <h3 class="text-xl font-semibold text-gray-900 mb-6">
             <i class="fas fa-shield-alt mr-2"></i>Security Scanning
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -61,12 +61,19 @@
               </div>
               <i class="fas fa-check-circle text-5xl text-green-400"></i>
             </div>
-            <div class="flex items-center justify-between p-6 bg-red-50 rounded-lg border border-red-200">
+            <div
+              @click="showVulnerablePackages"
+              class="flex items-center justify-between p-6 bg-red-50 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors"
+              :class="{ 'opacity-50': (stats?.vulnerable_packages || 0) === 0 }"
+            >
               <div>
                 <p class="text-3xl font-bold text-red-600">
                   {{ formatNumber(stats?.vulnerable_packages || 0) }}
                 </p>
-                <p class="text-sm text-gray-600 mt-1">Vulnerable Packages</p>
+                <p class="text-sm text-gray-600 mt-1">
+                  Vulnerable Packages
+                  <span v-if="(stats?.vulnerable_packages || 0) > 0" class="text-xs ml-1">(click to view)</span>
+                </p>
               </div>
               <i class="fas fa-exclamation-triangle text-5xl text-red-400"></i>
             </div>
@@ -77,7 +84,7 @@
       <!-- Registry Breakdown -->
       <Card>
         <CardContent class="p-6">
-          <h3 class="text-xl font-bold text-gray-900 mb-6">
+          <h3 class="text-xl font-semibold text-gray-900 mb-6">
             <i class="fas fa-server mr-2"></i>Registry Breakdown
           </h3>
           <div class="space-y-4">
@@ -113,16 +120,26 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import { usePackageStore } from '../stores/packages'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
 
 const store = usePackageStore()
 const { stats, loading, error } = storeToRefs(store)
+const router = useRouter()
 
 onMounted(async () => {
   await store.fetchStats()
 })
+
+function showVulnerablePackages() {
+  if ((stats.value?.vulnerable_packages || 0) === 0) {
+    return
+  }
+
+  router.push('/vulnerable-packages')
+}
 
 // Registry configuration for icons and colors
 const registryConfig: Record<string, {label: string, icon: string, color: string}> = {

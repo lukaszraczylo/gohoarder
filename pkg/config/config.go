@@ -125,9 +125,14 @@ type VulnerabilityThresholds struct {
 
 // ScannersConfig contains individual scanner configurations
 type ScannersConfig struct {
-	Trivy  TrivyConfig  `mapstructure:"trivy" json:"trivy"`
-	OSV    OSVConfig    `mapstructure:"osv" json:"osv"`
-	Static StaticConfig `mapstructure:"static" json:"static"`
+	Trivy        TrivyConfig        `mapstructure:"trivy" json:"trivy"`
+	OSV          OSVConfig          `mapstructure:"osv" json:"osv"`
+	Static       StaticConfig       `mapstructure:"static" json:"static"`
+	Grype        GrypeConfig        `mapstructure:"grype" json:"grype"`
+	Govulncheck  GovulncheckConfig  `mapstructure:"govulncheck" json:"govulncheck"`
+	NpmAudit     NpmAuditConfig     `mapstructure:"npm_audit" json:"npm_audit"`
+	PipAudit     PipAuditConfig     `mapstructure:"pip_audit" json:"pip_audit"`
+	GHSA         GHSAConfig         `mapstructure:"ghsa" json:"ghsa"`
 }
 
 // TrivyConfig contains Trivy scanner configuration
@@ -151,6 +156,37 @@ type StaticConfig struct {
 	CheckChecksums  bool     `mapstructure:"check_checksums" json:"check_checksums"`
 	BlockSuspicious bool     `mapstructure:"block_suspicious" json:"block_suspicious"`
 	AllowedLicenses []string `mapstructure:"allowed_licenses" json:"allowed_licenses"`
+}
+
+// GrypeConfig contains Grype scanner configuration
+type GrypeConfig struct {
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+}
+
+// GovulncheckConfig contains govulncheck scanner configuration
+type GovulncheckConfig struct {
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+}
+
+// NpmAuditConfig contains npm audit scanner configuration
+type NpmAuditConfig struct {
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+}
+
+// PipAuditConfig contains pip-audit scanner configuration
+type PipAuditConfig struct {
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+}
+
+// GHSAConfig contains GitHub Advisory Database scanner configuration
+type GHSAConfig struct {
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+	Token   string        `mapstructure:"token" json:"-"` // GitHub token for higher rate limits (don't serialize)
 }
 
 // AuthConfig contains authentication configuration
@@ -286,6 +322,27 @@ func Default() *Config {
 					MaxPackageSize:  2 * 1024 * 1024 * 1024, // 2GB
 					CheckChecksums:  true,
 					BlockSuspicious: false,
+				},
+				Grype: GrypeConfig{
+					Enabled: false,
+					Timeout: 5 * time.Minute,
+				},
+				Govulncheck: GovulncheckConfig{
+					Enabled: false,
+					Timeout: 5 * time.Minute,
+				},
+				NpmAudit: NpmAuditConfig{
+					Enabled: false,
+					Timeout: 2 * time.Minute,
+				},
+				PipAudit: PipAuditConfig{
+					Enabled: false,
+					Timeout: 2 * time.Minute,
+				},
+				GHSA: GHSAConfig{
+					Enabled: false,
+					Timeout: 30 * time.Second,
+					Token:   "",
 				},
 			},
 		},

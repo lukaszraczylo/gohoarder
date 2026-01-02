@@ -61,15 +61,27 @@
           </div>
           <Separator class="my-4" />
           <div class="flex items-center justify-between text-sm">
-            <div class="flex items-center gap-4">
+            <div class="flex flex-col gap-3">
               <span class="text-gray-600">
                 <i class="fas fa-search mr-1"></i>
                 Scanned: {{ formatDate(vulnerabilities.scanned_at) }}
               </span>
-              <span class="text-gray-600">
-                <i class="fas fa-cog mr-1"></i>
-                Scanner: {{ vulnerabilities.scanner }}
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-gray-600">
+                  <i class="fas fa-cog mr-1"></i>
+                  Scanners:
+                </span>
+                <div class="flex flex-wrap gap-1">
+                  <Badge
+                    v-for="scanner in scannerList"
+                    :key="scanner"
+                    variant="secondary"
+                    class="text-xs"
+                  >
+                    {{ scanner }}
+                  </Badge>
+                </div>
+              </div>
             </div>
             <div v-if="bypassedCount > 0" class="flex items-center gap-2 text-green-600">
               <i class="fas fa-check-circle"></i>
@@ -97,8 +109,8 @@
           </CardTitle>
         </CardHeader>
         <CardContent class="p-0">
-          <div class="border-t">
-            <Table>
+          <div class="border-t overflow-x-auto">
+            <Table class="min-w-[800px]">
               <TableHeader>
                 <TableRow class="bg-gray-50 hover:bg-gray-50">
                   <TableHead class="w-[100px]">Severity</TableHead>
@@ -131,7 +143,7 @@
                       <span class="font-mono text-sm font-medium">{{ vuln.id }}</span>
                     </TableCell>
                     <TableCell>
-                      <p class="text-sm text-gray-900 line-clamp-2">{{ vuln.title || vuln.description }}</p>
+                      <p class="text-sm text-gray-900 line-clamp-2 break-words">{{ vuln.title || vuln.description }}</p>
                     </TableCell>
                     <TableCell>
                       <span v-if="vuln.fixed_in" class="inline-flex items-center text-sm text-green-700">
@@ -165,7 +177,7 @@
                         <div>
                           <h5 class="font-semibold text-gray-900 mb-2">Description</h5>
                           <div
-                            class="text-sm text-gray-700 leading-relaxed prose prose-sm max-w-none"
+                            class="text-sm text-gray-700 leading-relaxed prose prose-sm max-w-none break-words overflow-hidden"
                             v-html="renderMarkdown(vuln.description)"
                           ></div>
                         </div>
@@ -176,14 +188,14 @@
                             <i class="fas fa-info-circle"></i>
                             Bypass Active
                           </h5>
-                          <div class="grid grid-cols-3 gap-4 text-sm text-green-800">
-                            <div>
+                          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-green-800">
+                            <div class="break-words">
                               <span class="font-medium">Reason:</span> {{ vuln.bypass.reason }}
                             </div>
-                            <div>
+                            <div class="break-words">
                               <span class="font-medium">By:</span> {{ vuln.bypass.created_by }}
                             </div>
-                            <div>
+                            <div class="break-words">
                               <span class="font-medium">Expires:</span> {{ formatDate(vuln.bypass.expires_at) }}
                             </div>
                           </div>
@@ -199,20 +211,29 @@
                           </div>
                         </div>
 
-                        <!-- Primary Reference -->
-                        <div v-if="vuln.references && vuln.references.length > 0" class="flex items-center gap-2 text-sm">
-                          <i class="fas fa-link text-gray-500"></i>
-                          <a
-                            :href="vuln.references[0]"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                          >
-                            View Full Advisory
-                          </a>
-                          <span v-if="vuln.references.length > 1" class="text-gray-500">
-                            (+{{ vuln.references.length - 1 }} more)
-                          </span>
+                        <!-- References -->
+                        <div v-if="vuln.references && vuln.references.length > 0">
+                          <h5 class="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            <i class="fas fa-link"></i>
+                            References ({{ vuln.references.length }})
+                          </h5>
+                          <div class="space-y-1.5">
+                            <div
+                              v-for="(ref, refIndex) in vuln.references"
+                              :key="refIndex"
+                              class="flex items-start gap-2 text-sm"
+                            >
+                              <i class="fas fa-external-link-alt text-gray-400 text-xs mt-0.5"></i>
+                              <a
+                                :href="ref"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="text-blue-600 hover:text-blue-800 hover:underline break-all"
+                              >
+                                {{ ref }}
+                              </a>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </TableCell>
@@ -245,6 +266,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  getSeverityBadgeClass,
+  getRegistryBadgeClass,
+  getVulnerabilityBorderClass,
+  formatSeverityName,
+} from '@/composables/useBadgeStyles'
 
 // Configure marked
 marked.setOptions({
@@ -328,6 +355,12 @@ const vulnerabilityList = computed(() => {
 const severityCounts = computed(() => vulnerabilities.value?.severity_counts || { critical: 0, high: 0, moderate: 0, low: 0 })
 const bypassedCount = computed(() => vulnerabilities.value?.bypassed_count || 0)
 
+// Parse scanner string into array of scanner names
+const scannerList = computed(() => {
+  if (!vulnerabilities.value?.scanner) return []
+  return vulnerabilities.value.scanner.split('+').map((s: string) => s.trim())
+})
+
 onMounted(() => {
   fetchVulnerabilities()
 })
@@ -341,11 +374,11 @@ async function fetchVulnerabilities() {
     const response = await axios.get(
       `/api/packages/${registry.value}/${packageName.value}/${version.value}/vulnerabilities`
     )
-    // API wraps response in {success: true, data: {...}}
-    vulnerabilities.value = response.data.data
+    // Store the response data
+    vulnerabilities.value = response.data
   } catch (err: any) {
     console.error('Failed to fetch vulnerabilities:', err)
-    error.value = err.response?.data?.error?.message || err.message || 'Failed to load vulnerability details'
+    error.value = err.response?.data?.error || err.message || 'Failed to load vulnerability details'
   } finally {
     loading.value = false
   }
@@ -372,37 +405,6 @@ function getRowClass(index: number, severity: string): string {
   return classes.join(' ')
 }
 
-function getSeverityBadgeClass(severity: string): string {
-  const classes: Record<string, string> = {
-    CRITICAL: 'bg-red-600 text-white hover:bg-red-700 border-0',
-    HIGH: 'bg-orange-500 text-white hover:bg-orange-600 border-0',
-    MEDIUM: 'bg-yellow-500 text-white hover:bg-yellow-600 border-0',
-    LOW: 'bg-blue-500 text-white hover:bg-blue-600 border-0',
-    MODERATE: 'bg-yellow-500 text-white hover:bg-yellow-600 border-0',
-  }
-  return classes[severity.toUpperCase()] || 'bg-gray-500 text-white hover:bg-gray-600 border-0'
-}
-
-function getVulnerabilityBorderClass(severity: string): string {
-  const classes: Record<string, string> = {
-    CRITICAL: 'border-l-4 border-l-red-600',
-    HIGH: 'border-l-4 border-l-orange-500',
-    MEDIUM: 'border-l-4 border-l-yellow-500',
-    MODERATE: 'border-l-4 border-l-yellow-500',
-    LOW: 'border-l-4 border-l-blue-500',
-  }
-  return classes[severity.toUpperCase()] || 'border-l-4 border-l-gray-500'
-}
-
-function getRegistryBadgeClass(registry: string): string {
-  const classes: Record<string, string> = {
-    npm: 'bg-red-500 text-white border-0',
-    pypi: 'bg-blue-500 text-white border-0',
-    go: 'bg-cyan-500 text-white border-0',
-  }
-  return classes[registry] || 'bg-gray-500 text-white border-0'
-}
-
 function formatDate(date: string): string {
   return new Date(date).toLocaleString()
 }
@@ -410,11 +412,5 @@ function formatDate(date: string): string {
 function renderMarkdown(text: string): string {
   if (!text) return ''
   return marked.parse(text) as string
-}
-
-function formatSeverityName(severity: string): string {
-  // Convert severity to title case (e.g., "CRITICAL" -> "Critical", "MODERATE" -> "Moderate")
-  const normalized = severity.toUpperCase()
-  return normalized.charAt(0) + normalized.slice(1).toLowerCase()
 }
 </script>

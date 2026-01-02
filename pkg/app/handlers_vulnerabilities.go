@@ -1,40 +1,38 @@
 package app
 
 import (
-	"net/http"
 	"strings"
 
-	"github.com/lukaszraczylo/gohoarder/pkg/errors"
+	"github.com/gofiber/fiber/v2"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/rs/zerolog/log"
 )
 
 // handleVulnerabilities handles /api/packages/{registry}/{name}/{version}/vulnerabilities endpoint
-func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+func (a *App) handleVulnerabilities(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	c.Set("Access-Control-Allow-Origin", "*")
+	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
 	}
 
-	if r.Method != "GET" {
-		errors.WriteErrorSimple(w, errors.BadRequest("method not allowed"))
-		return
+	if c.Method() != "GET" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
 	}
 
-	ctx := r.Context()
+	ctx := c.Context()
 
 	// Parse path: /api/packages/{registry}/{name}/{version}/vulnerabilities
-	path := strings.TrimPrefix(r.URL.Path, "/api/packages/")
+	path := strings.TrimPrefix(c.Path(), "/api/packages/")
 	path = strings.TrimSuffix(path, "/vulnerabilities")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		errors.WriteErrorSimple(w, errors.BadRequest("invalid path format, expected /api/packages/{registry}/{name}/{version}/vulnerabilities"))
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid path format, expected /api/packages/{registry}/{name}/{version}/vulnerabilities",
+		})
 	}
 
 	registry := parts[0]
@@ -53,13 +51,12 @@ func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
 		// Check if package exists
 		pkg, pkgErr := a.metadata.GetPackage(ctx, registry, name, version)
 		if pkgErr != nil {
-			errors.WriteErrorSimple(w, errors.NotFound("package not found"))
-			return
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "package not found"})
 		}
 
 		// Package exists but not scanned yet
-		errors.WriteJSONSimple(w, http.StatusOK, map[string]interface{}{
-			"package": map[string]string{
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"package": fiber.Map{
 				"registry": registry,
 				"name":     name,
 				"version":  version,
@@ -71,7 +68,6 @@ func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
 			"message":             "Package not yet scanned for vulnerabilities",
 			"security_scanned":    pkg.SecurityScanned,
 		})
-		return
 	}
 
 	// Get active bypasses to show which vulnerabilities are bypassed
@@ -135,8 +131,8 @@ func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build response
-	response := map[string]interface{}{
-		"package": map[string]string{
+	response := fiber.Map{
+		"package": fiber.Map{
 			"registry": registry,
 			"name":     name,
 			"version":  version,
@@ -147,7 +143,7 @@ func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
 		"status":              scanResult.Status,
 		"vulnerabilities":     enrichedVulns,
 		"vulnerability_count": scanResult.VulnerabilityCount,
-		"severity_counts": map[string]int{
+		"severity_counts": fiber.Map{
 			"critical": severityCounts["CRITICAL"],
 			"high":     severityCounts["HIGH"],
 			"moderate": severityCounts["MODERATE"],
@@ -156,5 +152,5 @@ func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
 		"bypassed_count": len(scanResult.Vulnerabilities) - (severityCounts["CRITICAL"] + severityCounts["HIGH"] + severityCounts["MODERATE"] + severityCounts["LOW"]),
 	}
 
-	errors.WriteJSONSimple(w, http.StatusOK, response)
+	return c.Status(fiber.StatusOK).JSON(response)
 }

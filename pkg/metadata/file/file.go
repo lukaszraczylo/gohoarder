@@ -521,6 +521,24 @@ func (s *Store) CleanupExpiredBypasses(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// GetTimeSeriesStats returns time-series download statistics
+// File-based store doesn't support time-series statistics
+func (s *Store) GetTimeSeriesStats(ctx context.Context, period string, registry string) (*metadata.TimeSeriesStats, error) {
+	// Return empty time-series data for file-based store
+	return &metadata.TimeSeriesStats{
+		Period:     period,
+		Registry:   registry,
+		DataPoints: []*metadata.TimeSeriesDataPoint{},
+	}, nil
+}
+
+// AggregateDownloadData aggregates download data
+// File-based store doesn't support aggregation
+func (s *Store) AggregateDownloadData(ctx context.Context) error {
+	// No-op for file-based store
+	return nil
+}
+
 // Close closes the store
 func (s *Store) Close() error {
 	// Nothing to close for file-based store

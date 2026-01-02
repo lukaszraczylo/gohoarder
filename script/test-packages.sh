@@ -135,7 +135,9 @@ go_packages=(
 for pkg_info in "${go_packages[@]}"; do
     IFS=':' read -r pkg desc <<< "$pkg_info"
     echo -n "  • $pkg ($desc)... "
-    if GOPROXY="$GOHOARDER_URL/go,direct" go get "$pkg" > /dev/null 2>&1; then
+    # Removed ",direct" fallback to enforce security scanning
+    # Packages will fail if blocked (same behavior as pip/npm/pnpm/yarn)
+    if GOPROXY="$GOHOARDER_URL/go" go get "$pkg" > /dev/null 2>&1; then
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗${NC}"

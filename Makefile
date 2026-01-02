@@ -4,7 +4,8 @@
 BINARY_NAME=gohoarder
 BINARY_PATH=bin/$(BINARY_NAME)
 CMD_PATH=./cmd/gohoarder
-VERSION?=dev
+# Generate semantic version using script, fallback to 'dev' if script fails
+VERSION?=$(shell ./script/generate-version.sh 2>/dev/null || echo "dev")
 GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS=-ldflags "-X github.com/lukaszraczylo/gohoarder/internal/version.Version=$(VERSION) \

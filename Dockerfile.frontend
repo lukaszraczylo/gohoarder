@@ -1,0 +1,100 @@
+# Website - Frontend Dashboard
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# Copy frontend source
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/ ./
+
+# Install pnpm and dependencies
+RUN npm install -g pnpm && \
+    pnpm install --frozen-lockfile
+
+# Build the frontend
+RUN pnpm run build
+
+# Production stage
+FROM nginx:alpine
+
+# Install envsubst for runtime configuration
+RUN apk add --no-cache gettext
+
+# Copy built frontend
+COPY --from=builder /build/dist /usr/share/nginx/html
+
+# Create runtime config injection script
+RUN cat > /docker-entrypoint.d/40-inject-config.sh <<'EOF'
+#!/bin/sh
+set -e
+
+# Create runtime configuration file
+cat > /usr/share/nginx/html/config.js <<JSEOF
+window.__RUNTIME_CONFIG__ = {
+  API_BASE_URL: "${API_BASE_URL:-/api}",
+  APP_VERSION: "${APP_VERSION:-unknown}",
+  APP_NAME: "${APP_NAME:-GoHoarder}"
+};
+JSEOF
+
+# Substitute environment variables
+envsubst < /usr/share/nginx/html/config.js > /usr/share/nginx/html/config.tmp.js
+mv /usr/share/nginx/html/config.tmp.js /usr/share/nginx/html/config.js
+
+echo "Runtime configuration injected:"
+cat /usr/share/nginx/html/config.js
+EOF
+
+RUN chmod +x /docker-entrypoint.d/40-inject-config.sh
+
+# Copy nginx configuration
+RUN cat > /etc/nginx/conf.d/default.conf <<'EOF'
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
+
+    # SPA routing
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Runtime configuration endpoint
+    location = /config.js {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+EOF
+
+# Expose port
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+
+# Environment variables with defaults
+ENV API_BASE_URL=/api \
+    APP_VERSION=unknown \
+    APP_NAME=GoHoarder
+
+CMD ["nginx", "-g", "daemon off;"]

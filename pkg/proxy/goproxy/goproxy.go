@@ -6,25 +6,35 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/network"
+	"github.com/lukaszraczylo/gohoarder/pkg/vcs"
 	"github.com/rs/zerolog/log"
 )
 
 // Handler implements the GOPROXY protocol
 type Handler struct {
-	cache    *cache.Manager
-	client   *network.Client
-	upstream string
-	sumDBURL string
+	cache           *cache.Manager
+	client          *network.Client
+	upstream        string
+	sumDBURL        string
+	credExtractor   *auth.CredentialExtractor
+	credHasher      *auth.CredentialHasher
+	credValidator   *auth.GoValidator
+	validationCache *auth.ValidationCache
+	gitFetcher      *vcs.GitFetcher
+	moduleBuilder   *vcs.ModuleBuilder
 }
 
 // Config holds Go proxy configuration
 type Config struct {
-	Upstream string // Upstream Go proxy (e.g., proxy.golang.org)
-	SumDBURL string // Checksum database URL
+	Upstream  string                // Upstream Go proxy (e.g., proxy.golang.org)
+	SumDBURL  string                // Checksum database URL
+	CredStore *vcs.CredentialStore  // Optional credential store for git access
 }
 
 // New creates a new Go proxy handler
@@ -37,11 +47,23 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 		config.SumDBURL = "https://sum.golang.org"
 	}
 
+	// Use provided credential store or create empty one
+	credStore := config.CredStore
+	if credStore == nil {
+		credStore = vcs.NewCredentialStore()
+	}
+
 	return &Handler{
-		cache:    cacheManager,
-		client:   client,
-		upstream: config.Upstream,
-		sumDBURL: config.SumDBURL,
+		cache:           cacheManager,
+		client:          client,
+		upstream:        config.Upstream,
+		sumDBURL:        config.SumDBURL,
+		credExtractor:   auth.NewCredentialExtractor(),
+		credHasher:      auth.NewCredentialHasher(),
+		credValidator:   auth.NewGoValidator(),
+		validationCache: auth.NewValidationCache(5 * time.Minute),
+		gitFetcher:      vcs.NewGitFetcher("", credStore),
+		moduleBuilder:   vcs.NewModuleBuilder(),
 	}
 }
 
@@ -88,8 +110,17 @@ func (h *Handler) handleList(ctx context.Context, w http.ResponseWriter, r *http
 	url := h.upstream + path
 	modulePath := h.extractModulePath(path)
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+
 	entry, err := h.cache.Get(ctx, "go", modulePath, "list", func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
 			return nil, "", err
 		}
@@ -119,8 +150,17 @@ func (h *Handler) handleInfo(ctx context.Context, w http.ResponseWriter, r *http
 	// Use .info suffix to distinguish from .mod and .zip in cache
 	cacheKey := modulePath + "/@v/" + version + ".info"
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+
 	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
 			return nil, "", err
 		}
@@ -150,8 +190,17 @@ func (h *Handler) handleMod(ctx context.Context, w http.ResponseWriter, r *http.
 	// Use .mod suffix to distinguish from .info and .zip in cache
 	cacheKey := modulePath + "/@v/" + version + ".mod"
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+
 	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
 			return nil, "", err
 		}
@@ -181,16 +230,55 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 	// Use .zip suffix to distinguish from .info and .mod in cache
 	cacheKey := modulePath + "/@v/" + version + ".zip"
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+	credHash := h.credHasher.Hash(credentials)
+
+	log.Debug().
+		Str("path", path).
+		Str("module", modulePath).
+		Str("version", version).
+		Str("url", url).
+		Str("cred_hash", credHash).
+		Bool("has_credentials", credentials != "").
+		Msg("Handling Go module zip request")
+
 	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		// Try upstream proxy first (fast path for public modules)
+		body, statusCode, err := h.client.Get(ctx, url, headers)
+		if err == nil && statusCode == http.StatusOK {
+			return body, url, nil
+		}
+
+		// If upstream failed with 404 or 403, try git fallback (private modules)
+		if statusCode == http.StatusNotFound || statusCode == http.StatusForbidden {
+			if body != nil {
+				body.Close()
+			}
+
+			log.Debug().
+				Str("module", modulePath).
+				Str("version", version).
+				Int("upstream_status", statusCode).
+				Msg("Upstream proxy returned not found, trying git fallback")
+
+			return h.fetchModuleFromGit(ctx, modulePath, version, credentials)
+		}
+
+		// Other errors
+		if body != nil {
+			body.Close()
+		}
 		if err != nil {
 			return nil, "", err
 		}
-		if statusCode != http.StatusOK {
-			body.Close()
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
-		}
-		return body, url, nil
+		return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 	})
 
 	if err != nil {
@@ -208,6 +296,58 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 	defer entry.Data.Close()
 
+	// CRITICAL SECURITY CHECK: If module requires auth, validate credentials
+	if entry.Package != nil && entry.Package.RequiresAuth {
+		// Check validation cache first
+		allowed, cached, reason := h.validationCache.Get(credHash, modulePath)
+		if cached {
+			if !allowed {
+				log.Warn().
+					Str("module", modulePath).
+					Str("version", version).
+					Str("reason", reason).
+					Msg("Access denied (cached validation)")
+				http.Error(w, "Module not found", http.StatusNotFound)
+				return
+			}
+			log.Debug().
+				Str("module", modulePath).
+				Str("version", version).
+				Msg("Access granted (cached validation)")
+		} else {
+			// Validate with upstream using git ls-remote
+			log.Debug().
+				Str("module", modulePath).
+				Str("version", version).
+				Str("provider", entry.Package.AuthProvider).
+				Msg("Validating credentials with upstream")
+
+			allowed, err := h.credValidator.ValidateAccess(ctx, modulePath, credentials)
+			if err != nil {
+				reason = err.Error()
+			}
+
+			// Cache validation result
+			h.validationCache.Set(credHash, modulePath, allowed, reason)
+
+			if !allowed {
+				log.Warn().
+					Str("module", modulePath).
+					Str("version", version).
+					Err(err).
+					Msg("Access denied by upstream")
+				// Return 404 (same as GitHub does for private repos)
+				http.Error(w, "Module not found", http.StatusNotFound)
+				return
+			}
+
+			log.Debug().
+				Str("module", modulePath).
+				Str("version", version).
+				Msg("Access granted by upstream")
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/zip")
 	io.Copy(w, entry.Data)
 }
@@ -217,8 +357,17 @@ func (h *Handler) handleLatest(ctx context.Context, w http.ResponseWriter, r *ht
 	url := h.upstream + path
 	modulePath := h.extractModulePath(path)
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+
 	entry, err := h.cache.Get(ctx, "go", modulePath, "latest", func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
 			return nil, "", err
 		}
@@ -296,4 +445,41 @@ func (h *Handler) extractModulePath(path string) string {
 
 	// Fallback: remove /@latest suffix if present
 	return strings.TrimSuffix(path, "/@latest")
+}
+
+// fetchModuleFromGit fetches a Go module directly from git repository
+func (h *Handler) fetchModuleFromGit(ctx context.Context, modulePath, version, credentials string) (io.ReadCloser, string, error) {
+	log.Info().
+		Str("module", modulePath).
+		Str("version", version).
+		Msg("Fetching module from git repository")
+
+	// 1. Fetch module source from git
+	srcPath, err := h.gitFetcher.FetchModule(ctx, modulePath, version, credentials)
+	if err != nil {
+		return nil, "", fmt.Errorf("git fetch failed: %w", err)
+	}
+	defer h.gitFetcher.Cleanup(srcPath)
+
+	// 2. Validate module
+	if err := h.moduleBuilder.ValidateModule(ctx, srcPath, modulePath); err != nil {
+		return nil, "", fmt.Errorf("module validation failed: %w", err)
+	}
+
+	// 3. Build module zip
+	zipReader, err := h.moduleBuilder.BuildModuleZip(ctx, srcPath, modulePath, version)
+	if err != nil {
+		return nil, "", fmt.Errorf("module zip build failed: %w", err)
+	}
+
+	// Create source URL for logging
+	sourceURL := fmt.Sprintf("git+https://%s@%s", modulePath, version)
+
+	log.Info().
+		Str("module", modulePath).
+		Str("version", version).
+		Str("source", sourceURL).
+		Msg("Successfully built module from git")
+
+	return zipReader, sourceURL, nil
 }

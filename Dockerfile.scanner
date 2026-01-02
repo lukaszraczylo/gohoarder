@@ -1,0 +1,58 @@
+# Scanning Engine - Background Scanner Worker
+FROM alpine:latest
+
+# Install scanning tools and runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    git \
+    curl \
+    wget \
+    bash \
+    && update-ca-certificates
+
+# Install Trivy for container scanning
+RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
+    wget -O /tmp/trivy.tar.gz https://github.com/aquasecurity/trivy/releases/latest/download/trivy_$(uname -s)_$(uname -m).tar.gz && \
+    tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin && \
+    rm /tmp/trivy.tar.gz && \
+    chmod +x /usr/local/bin/trivy
+
+# Install Grype for vulnerability scanning
+RUN wget -qO - https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+# Create non-root user
+RUN addgroup -g 1000 scanner && \
+    adduser -D -u 1000 -G scanner scanner
+
+# Create necessary directories
+RUN mkdir -p /data/cache /data/scans && \
+    chown -R scanner:scanner /data
+
+# Copy binary
+COPY gohoarder /usr/local/bin/gohoarder
+RUN chmod +x /usr/local/bin/gohoarder
+
+# Copy example config
+COPY config.yaml.example /etc/gohoarder/config.yaml.example
+
+WORKDIR /data
+USER scanner
+
+# Expose metrics port
+EXPOSE 9091
+
+# Health check
+HEALTHCHECK --interval=60s --timeout=30s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/gohoarder", "version"] || exit 1
+
+# Environment variables for scanner mode
+ENV SCANNER_MODE=true \
+    SCANNER_WORKERS=4 \
+    SCANNER_INTERVAL=300
+
+# Run the scanner in background mode
+# Note: You may need to add a scanner-specific command to your CLI
+# For now, this assumes the serve command can run in scanner mode
+ENTRYPOINT ["/usr/local/bin/gohoarder"]
+CMD ["serve", "--scanner-only"]

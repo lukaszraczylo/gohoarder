@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/network"
@@ -17,9 +19,13 @@ import (
 
 // Handler implements the PyPI Simple API (PEP 503)
 type Handler struct {
-	cache    *cache.Manager
-	client   *network.Client
-	upstream string
+	cache           *cache.Manager
+	client          *network.Client
+	upstream        string
+	credExtractor   *auth.CredentialExtractor
+	credHasher      *auth.CredentialHasher
+	credValidator   *auth.PyPIValidator
+	validationCache *auth.ValidationCache
 }
 
 // Config holds PyPI proxy configuration
@@ -34,9 +40,13 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 	}
 
 	return &Handler{
-		cache:    cacheManager,
-		client:   client,
-		upstream: config.Upstream,
+		cache:           cacheManager,
+		client:          client,
+		upstream:        config.Upstream,
+		credExtractor:   auth.NewCredentialExtractor(),
+		credHasher:      auth.NewCredentialHasher(),
+		credValidator:   auth.NewPyPIValidator(),
+		validationCache: auth.NewValidationCache(5 * time.Minute),
 	}
 }
 
@@ -138,6 +148,10 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	packageName, version := extractPackageFileInfo(path)
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+	credHash := h.credHasher.Hash(credentials)
+
 	// Check if we have the original URL from the rewritten package page
 	originalURL := r.URL.Query().Get("original_url")
 
@@ -152,8 +166,23 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		}
 	}
 
+	log.Debug().
+		Str("path", path).
+		Str("package", packageName).
+		Str("version", version).
+		Str("url", originalURL).
+		Str("cred_hash", credHash).
+		Bool("has_credentials", credentials != "").
+		Msg("Handling PyPI package file request")
+
 	entry, err := h.cache.Get(ctx, "pypi", packageName, version, func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, originalURL, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		body, statusCode, err := h.client.Get(ctx, originalURL, headers)
 		if err != nil {
 			return nil, "", err
 		}
@@ -178,6 +207,57 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 	defer entry.Data.Close()
+
+	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
+	if entry.Package != nil && entry.Package.RequiresAuth {
+		// Check validation cache first
+		allowed, cached, reason := h.validationCache.Get(credHash, originalURL)
+		if cached {
+			if !allowed {
+				log.Warn().
+					Str("package", packageName).
+					Str("version", version).
+					Str("reason", reason).
+					Msg("Access denied (cached validation)")
+				http.Error(w, "Access denied", http.StatusForbidden)
+				return
+			}
+			log.Debug().
+				Str("package", packageName).
+				Str("version", version).
+				Msg("Access granted (cached validation)")
+		} else {
+			// Validate with upstream
+			log.Debug().
+				Str("package", packageName).
+				Str("version", version).
+				Str("provider", entry.Package.AuthProvider).
+				Msg("Validating credentials with upstream")
+
+			allowed, err := h.credValidator.ValidateAccess(ctx, originalURL, credentials)
+			if err != nil {
+				reason = err.Error()
+			}
+
+			// Cache validation result
+			h.validationCache.Set(credHash, originalURL, allowed, reason)
+
+			if !allowed {
+				log.Warn().
+					Str("package", packageName).
+					Str("version", version).
+					Err(err).
+					Msg("Access denied by upstream")
+				http.Error(w, "Access denied", http.StatusForbidden)
+				return
+			}
+
+			log.Debug().
+				Str("package", packageName).
+				Str("version", version).
+				Msg("Access granted by upstream")
+		}
+	}
 
 	// Determine content type based on file extension
 	contentType := "application/octet-stream"

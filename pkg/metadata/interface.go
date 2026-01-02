@@ -83,6 +83,8 @@ type Package struct {
 	DownloadCount   int64             `json:"download_count"`   // Download counter
 	Metadata        map[string]string `json:"metadata"`         // Additional metadata
 	SecurityScanned bool              `json:"security_scanned"` // Has been scanned
+	RequiresAuth    bool              `json:"requires_auth"`    // Package requires authentication
+	AuthProvider    string            `json:"auth_provider"`    // Auth provider (github.com, npm.pkg.github.com, etc.)
 }
 
 // ScanResult represents a security scan result

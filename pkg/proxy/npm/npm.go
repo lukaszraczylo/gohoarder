@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/network"
@@ -17,9 +19,13 @@ import (
 
 // Handler implements the NPM registry protocol
 type Handler struct {
-	cache    *cache.Manager
-	client   *network.Client
-	upstream string
+	cache           *cache.Manager
+	client          *network.Client
+	upstream        string
+	credExtractor   *auth.CredentialExtractor
+	credHasher      *auth.CredentialHasher
+	credValidator   *auth.NPMValidator
+	validationCache *auth.ValidationCache
 }
 
 // Config holds NPM proxy configuration
@@ -34,9 +40,13 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 	}
 
 	return &Handler{
-		cache:    cacheManager,
-		client:   client,
-		upstream: config.Upstream,
+		cache:           cacheManager,
+		client:          client,
+		upstream:        config.Upstream,
+		credExtractor:   auth.NewCredentialExtractor(),
+		credHasher:      auth.NewCredentialHasher(),
+		credValidator:   auth.NewNPMValidator(),
+		validationCache: auth.NewValidationCache(5 * time.Minute),
 	}
 }
 
@@ -123,6 +133,10 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	packageName, version := extractTarballInfo(path)
 
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
+	credHash := h.credHasher.Hash(credentials)
+
 	// Construct proper upstream URL with /-/ format
 	// Format: https://registry.npmjs.org/package/-/package-version.tgz
 	tarballFilename := strings.ReplaceAll(packageName, "/", "-") + "-" + version + ".tgz"
@@ -133,10 +147,19 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 		Str("package", packageName).
 		Str("version", version).
 		Str("upstream_url", url).
+		Str("cred_hash", credHash).
+		Bool("has_credentials", credentials != "").
 		Msg("Handling tarball request")
 
+	// Try to get from cache first (with credential-aware key)
 	entry, err := h.cache.Get(ctx, "npm", packageName, version, func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		// Prepare headers for upstream request
+		headers := make(map[string]string)
+		if credentials != "" {
+			headers["Authorization"] = credentials
+		}
+
+		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
 			return nil, "", err
 		}
@@ -161,6 +184,57 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 		return
 	}
 	defer entry.Data.Close()
+
+	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
+	if entry.Package != nil && entry.Package.RequiresAuth {
+		// Check validation cache first
+		allowed, cached, reason := h.validationCache.Get(credHash, url)
+		if cached {
+			if !allowed {
+				log.Warn().
+					Str("package", packageName).
+					Str("version", version).
+					Str("reason", reason).
+					Msg("Access denied (cached validation)")
+				http.Error(w, "Access denied", http.StatusForbidden)
+				return
+			}
+			log.Debug().
+				Str("package", packageName).
+				Str("version", version).
+				Msg("Access granted (cached validation)")
+		} else {
+			// Validate with upstream
+			log.Debug().
+				Str("package", packageName).
+				Str("version", version).
+				Str("provider", entry.Package.AuthProvider).
+				Msg("Validating credentials with upstream")
+
+			allowed, err := h.credValidator.ValidateAccess(ctx, url, credentials)
+			if err != nil {
+				reason = err.Error()
+			}
+
+			// Cache validation result
+			h.validationCache.Set(credHash, url, allowed, reason)
+
+			if !allowed {
+				log.Warn().
+					Str("package", packageName).
+					Str("version", version).
+					Err(err).
+					Msg("Access denied by upstream")
+				http.Error(w, "Access denied", http.StatusForbidden)
+				return
+			}
+
+			log.Debug().
+				Str("package", packageName).
+				Str("version", version).
+				Msg("Access granted by upstream")
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	io.Copy(w, entry.Data)

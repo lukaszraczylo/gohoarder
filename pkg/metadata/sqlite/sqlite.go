@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS packages (
 	download_count INTEGER DEFAULT 0,
 	metadata TEXT,
 	security_scanned BOOLEAN DEFAULT 0,
+	requires_auth BOOLEAN DEFAULT 0,
+	auth_provider TEXT,
 	UNIQUE(registry, name, version)
 );
 
@@ -149,9 +151,49 @@ func New(cfg Config) (*SQLiteStore, error) {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SQLite schema")
 	}
 
+	// Run migrations for existing databases
+	if err := runMigrations(db); err != nil {
+		db.Close()
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to run database migrations")
+	}
+
 	return &SQLiteStore{
 		db: db,
 	}, nil
+}
+
+// runMigrations runs database migrations for existing databases
+func runMigrations(db *sql.DB) error {
+	// Migration 1: Add requires_auth and auth_provider columns (if they don't exist)
+	// SQLite doesn't have IF NOT EXISTS for ALTER TABLE, so we need to check first
+	var columnExists int
+	err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('packages') WHERE name='requires_auth'").Scan(&columnExists)
+	if err != nil {
+		return err
+	}
+
+	if columnExists == 0 {
+		log.Info().Msg("Running migration: adding requires_auth and auth_provider columns")
+
+		// Add requires_auth column
+		if _, err := db.Exec("ALTER TABLE packages ADD COLUMN requires_auth BOOLEAN DEFAULT 0"); err != nil {
+			return fmt.Errorf("failed to add requires_auth column: %w", err)
+		}
+
+		// Add auth_provider column
+		if _, err := db.Exec("ALTER TABLE packages ADD COLUMN auth_provider TEXT"); err != nil {
+			return fmt.Errorf("failed to add auth_provider column: %w", err)
+		}
+
+		// Create index
+		if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_packages_requires_auth ON packages(requires_auth)"); err != nil {
+			return fmt.Errorf("failed to create requires_auth index: %w", err)
+		}
+
+		log.Info().Msg("Migration completed successfully")
+	}
+
+	return nil
 }
 
 // SavePackage saves package metadata
@@ -175,8 +217,8 @@ func (s *SQLiteStore) SavePackage(ctx context.Context, pkg *metadata.Package) er
 			id, registry, name, version, storage_key, size,
 			checksum_md5, checksum_sha256, upstream_url,
 			cached_at, last_accessed, expires_at, download_count,
-			metadata, security_scanned
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			metadata, security_scanned, requires_auth, auth_provider
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(registry, name, version) DO UPDATE SET
 			storage_key = excluded.storage_key,
 			size = excluded.size,
@@ -186,14 +228,16 @@ func (s *SQLiteStore) SavePackage(ctx context.Context, pkg *metadata.Package) er
 			last_accessed = excluded.last_accessed,
 			expires_at = excluded.expires_at,
 			metadata = excluded.metadata,
-			security_scanned = excluded.security_scanned
+			security_scanned = excluded.security_scanned,
+			requires_auth = excluded.requires_auth,
+			auth_provider = excluded.auth_provider
 	`
 
 	_, err = s.db.ExecContext(ctx, query,
 		pkg.ID, pkg.Registry, pkg.Name, pkg.Version, pkg.StorageKey, pkg.Size,
 		pkg.ChecksumMD5, pkg.ChecksumSHA256, pkg.UpstreamURL,
 		pkg.CachedAt, pkg.LastAccessed, expiresAt, pkg.DownloadCount,
-		string(metadataJSON), pkg.SecurityScanned,
+		string(metadataJSON), pkg.SecurityScanned, pkg.RequiresAuth, pkg.AuthProvider,
 	)
 
 	if err != nil {
@@ -212,7 +256,7 @@ func (s *SQLiteStore) GetPackage(ctx context.Context, registry, name, version st
 		SELECT id, registry, name, version, storage_key, size,
 			checksum_md5, checksum_sha256, upstream_url,
 			cached_at, last_accessed, expires_at, download_count,
-			metadata, security_scanned
+			metadata, security_scanned, requires_auth, auth_provider
 		FROM packages
 		WHERE registry = ? AND name = ? AND version = ?
 	`
@@ -220,12 +264,13 @@ func (s *SQLiteStore) GetPackage(ctx context.Context, registry, name, version st
 	var pkg metadata.Package
 	var metadataJSON string
 	var expiresAt sql.NullTime
+	var authProvider sql.NullString
 
 	err := s.db.QueryRowContext(ctx, query, registry, name, version).Scan(
 		&pkg.ID, &pkg.Registry, &pkg.Name, &pkg.Version, &pkg.StorageKey, &pkg.Size,
 		&pkg.ChecksumMD5, &pkg.ChecksumSHA256, &pkg.UpstreamURL,
 		&pkg.CachedAt, &pkg.LastAccessed, &expiresAt, &pkg.DownloadCount,
-		&metadataJSON, &pkg.SecurityScanned,
+		&metadataJSON, &pkg.SecurityScanned, &pkg.RequiresAuth, &authProvider,
 	)
 
 	if err == sql.ErrNoRows {
@@ -238,6 +283,10 @@ func (s *SQLiteStore) GetPackage(ctx context.Context, registry, name, version st
 
 	if expiresAt.Valid {
 		pkg.ExpiresAt = &expiresAt.Time
+	}
+
+	if authProvider.Valid {
+		pkg.AuthProvider = authProvider.String
 	}
 
 	// Deserialize metadata
@@ -516,6 +565,7 @@ func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, reg
 				COUNT(*) as download_count
 			FROM download_events
 			WHERE downloaded_at >= ?
+				AND downloaded_at IS NOT NULL
 		`
 		args = []interface{}{timeFormat, startTime}
 
@@ -526,6 +576,7 @@ func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, reg
 
 		query += `
 			GROUP BY time_bucket
+			HAVING time_bucket IS NOT NULL
 			ORDER BY time_bucket ASC
 		`
 	} else {
@@ -535,7 +586,9 @@ func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, reg
 				time_bucket,
 				SUM(download_count) as download_count
 			FROM aggregated_download_stats
-			WHERE resolution = ? AND time_bucket >= ?
+			WHERE resolution = ?
+				AND time_bucket >= ?
+				AND time_bucket IS NOT NULL
 		`
 		args = []interface{}{useResolution, startTime}
 
@@ -559,12 +612,15 @@ func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, reg
 	// Collect data points
 	dataMap := make(map[string]int64)
 	for rows.Next() {
-		var bucket string
+		var bucket sql.NullString
 		var count int64
 		if err := rows.Scan(&bucket, &count); err != nil {
 			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to scan time-series data")
 		}
-		dataMap[bucket] = count
+		// Skip NULL buckets (shouldn't happen with NOT NULL constraint, but defensive)
+		if bucket.Valid && bucket.String != "" {
+			dataMap[bucket.String] = count
+		}
 	}
 
 	if err := rows.Err(); err != nil {
@@ -654,7 +710,9 @@ func (s *SQLiteStore) AggregateDownloadData(ctx context.Context) error {
 			COUNT(*) as download_count
 		FROM download_events
 		WHERE downloaded_at < ?
+			AND downloaded_at IS NOT NULL
 		GROUP BY registry, time_bucket
+		HAVING time_bucket IS NOT NULL
 	`
 	_, err = tx.ExecContext(ctx, hourlyAggQuery, oneHourAgo)
 	if err != nil {
@@ -680,8 +738,11 @@ func (s *SQLiteStore) AggregateDownloadData(ctx context.Context) error {
 			'daily' as resolution,
 			SUM(download_count) as download_count
 		FROM aggregated_download_stats
-		WHERE resolution = 'hourly' AND time_bucket < ?
+		WHERE resolution = 'hourly'
+			AND time_bucket < ?
+			AND time_bucket IS NOT NULL
 		GROUP BY registry, strftime('%Y-%m-%d 00:00:00', time_bucket)
+		HAVING time_bucket IS NOT NULL
 	`
 	_, err = tx.ExecContext(ctx, dailyAggQuery, oneDayAgo)
 	if err != nil {

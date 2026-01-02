@@ -1,0 +1,151 @@
+version: '3.8'
+
+# GoHoarder - Unified Deployment Example
+# This docker-compose file demonstrates deploying all GoHoarder services
+# under a single domain using the gateway reverse proxy
+
+services:
+  # Backend - Main application server
+  gohoarder-server:
+    image: ghcr.io/lukaszraczylo/gohoarder-server:latest
+    container_name: gohoarder-server
+    restart: unless-stopped
+    environment:
+      # Application configuration
+      - CONFIG_FILE=/config/config.yaml
+      # Database
+      - DB_PATH=/data/metadata/gohoarder.db
+      # Storage
+      - STORAGE_BACKEND=filesystem
+      - STORAGE_PATH=/data/cache
+      # Security scanning
+      - ENABLE_SCANNING=true
+      - SCAN_ON_DOWNLOAD=true
+      # Logging
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    volumes:
+      # Configuration
+      - ./config.yaml:/config/config.yaml:ro
+      # Data persistence
+      - gohoarder-cache:/data/cache
+      - gohoarder-metadata:/data/metadata
+    networks:
+      - gohoarder-internal
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gohoarder", "version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Frontend - Web dashboard
+  gohoarder-frontend:
+    image: ghcr.io/lukaszraczylo/gohoarder-frontend:latest
+    container_name: gohoarder-frontend
+    restart: unless-stopped
+    environment:
+      # Runtime configuration - injected into /config.js
+      - API_BASE_URL=/api
+      - APP_VERSION=1.0.0
+      - APP_NAME=GoHoarder
+    networks:
+      - gohoarder-internal
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Scanner - Background vulnerability scanner (optional)
+  gohoarder-scanner:
+    image: ghcr.io/lukaszraczylo/gohoarder-scanner:latest
+    container_name: gohoarder-scanner
+    restart: unless-stopped
+    environment:
+      - CONFIG_FILE=/config/config.yaml
+      - SCANNER_MODE=true
+      - SCANNER_WORKERS=4
+      - SCANNER_INTERVAL=300
+      - LOG_LEVEL=info
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - gohoarder-cache:/data/cache:ro
+      - gohoarder-metadata:/data/metadata
+    networks:
+      - gohoarder-internal
+    depends_on:
+      - gohoarder-server
+    # Uncomment if you want to run scanner separately
+    # If commented out, scanning happens inline in the server
+    # profiles:
+    #   - scanner
+
+  # Gateway - Nginx reverse proxy
+  gohoarder-gateway:
+    image: ghcr.io/lukaszraczylo/gohoarder-gateway:latest
+    container_name: gohoarder-gateway
+    restart: unless-stopped
+    environment:
+      # Backend service connection
+      - BACKEND_HOST=gohoarder-server
+      - BACKEND_PORT=8080
+      # Frontend service connection
+      - FRONTEND_HOST=gohoarder-frontend
+      - FRONTEND_PORT=80
+      # Server configuration
+      - SERVER_NAME=hoarder.i.raczylo.com
+    ports:
+      # Map to host port 80 (HTTP)
+      - "80:80"
+      # Map to host port 443 (HTTPS) - uncomment if using SSL
+      # - "443:443"
+    networks:
+      - gohoarder-internal
+    depends_on:
+      - gohoarder-server
+      - gohoarder-frontend
+    # Uncomment if using custom SSL certificates
+    # volumes:
+    #   - ./ssl/cert.pem:/etc/nginx/ssl/cert.pem:ro
+    #   - ./ssl/key.pem:/etc/nginx/ssl/key.pem:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  gohoarder-internal:
+    driver: bridge
+
+volumes:
+  # Persistent storage for cached packages
+  gohoarder-cache:
+    driver: local
+  # Persistent storage for metadata and scan results
+  gohoarder-metadata:
+    driver: local
+
+# Usage:
+# 1. Copy this file: cp docker-compose.example.yaml docker-compose.yaml
+# 2. Copy config: cp config.yaml.example config.yaml
+# 3. Edit config.yaml with your settings
+# 4. Start services: docker-compose up -d
+# 5. View logs: docker-compose logs -f
+# 6. Stop services: docker-compose down
+#
+# Access:
+# - Web UI: http://localhost or http://hoarder.i.raczylo.com
+# - API: http://localhost/api or http://hoarder.i.raczylo.com/api
+# - Health: http://localhost/health
+# - Metrics: http://localhost/metrics
+#
+# For production:
+# - Enable HTTPS in the gateway container
+# - Set up proper SSL certificates
+# - Configure firewall rules
+# - Set appropriate resource limits
+# - Enable monitoring and alerting

@@ -245,10 +245,11 @@ type HandlersConfig struct {
 
 // GoHandlerConfig contains Go proxy configuration
 type GoHandlerConfig struct {
-	Enabled         bool   `mapstructure:"enabled" json:"enabled"`
-	UpstreamProxy   string `mapstructure:"upstream_proxy" json:"upstream_proxy"`
-	ChecksumDB      string `mapstructure:"checksum_db" json:"checksum_db"`
-	VerifyChecksums bool   `mapstructure:"verify_checksums" json:"verify_checksums"`
+	Enabled            bool   `mapstructure:"enabled" json:"enabled"`
+	UpstreamProxy      string `mapstructure:"upstream_proxy" json:"upstream_proxy"`
+	ChecksumDB         string `mapstructure:"checksum_db" json:"checksum_db"`
+	VerifyChecksums    bool   `mapstructure:"verify_checksums" json:"verify_checksums"`
+	GitCredentialsFile string `mapstructure:"git_credentials_file" json:"git_credentials_file"` // Path to git credentials JSON file
 }
 
 // NPMHandlerConfig contains NPM registry configuration

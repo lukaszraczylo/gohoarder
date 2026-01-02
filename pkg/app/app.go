@@ -30,6 +30,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem"
+	"github.com/lukaszraczylo/gohoarder/pkg/vcs"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -251,9 +252,28 @@ func (a *App) setupServer() error {
 	a.app.All("/api/admin/bypasses/:id?", a.handleAdminBypasses)
 
 	// Proxy handlers (adapted from net/http)
+	// Load git credentials if configured
+	var credStore *vcs.CredentialStore
+	if a.config.Handlers.Go.GitCredentialsFile != "" {
+		credStore = vcs.NewCredentialStore()
+		if err := credStore.LoadFromFile(a.config.Handlers.Go.GitCredentialsFile); err != nil {
+			log.Error().
+				Err(err).
+				Str("file", a.config.Handlers.Go.GitCredentialsFile).
+				Msg("Failed to load git credentials, continuing without pattern-based credentials")
+		} else if err := credStore.ValidateConfig(); err != nil {
+			log.Error().
+				Err(err).
+				Str("file", a.config.Handlers.Go.GitCredentialsFile).
+				Msg("Invalid git credentials configuration, continuing without pattern-based credentials")
+			credStore = nil
+		}
+	}
+
 	goProxyHandler := goproxy.New(a.cache, a.networkClient, goproxy.Config{
-		Upstream: "https://proxy.golang.org",
-		SumDBURL: "https://sum.golang.org",
+		Upstream:  "https://proxy.golang.org",
+		SumDBURL:  "https://sum.golang.org",
+		CredStore: credStore,
 	})
 	a.app.All("/go/*", adaptor.HTTPHandler(http.StripPrefix("/go", goProxyHandler)))
 

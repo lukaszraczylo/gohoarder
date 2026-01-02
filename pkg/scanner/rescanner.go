@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/rs/zerolog/log"
 )
 
@@ -12,15 +13,17 @@ import (
 type RescanWorker struct {
 	manager       *Manager
 	metadataStore metadata.MetadataStore
+	storage       storage.StorageBackend
 	interval      time.Duration
 	stopCh        chan struct{}
 }
 
 // NewRescanWorker creates a new rescan worker
-func NewRescanWorker(manager *Manager, metadataStore metadata.MetadataStore, interval time.Duration) *RescanWorker {
+func NewRescanWorker(manager *Manager, metadataStore metadata.MetadataStore, storageBackend storage.StorageBackend, interval time.Duration) *RescanWorker {
 	return &RescanWorker{
 		manager:       manager,
 		metadataStore: metadataStore,
+		storage:       storageBackend,
 		interval:      interval,
 		stopCh:        make(chan struct{}),
 	}
@@ -40,8 +43,12 @@ func (w *RescanWorker) Start(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Run initial scan immediately
+	// Run initial scan immediately on startup
+	log.Info().Msg("Running initial package scan on startup")
 	w.rescanPackages(ctx)
+	log.Info().
+		Dur("next_scan", w.interval).
+		Msg("Initial scan complete, next scan scheduled")
 
 	for {
 		select {
@@ -64,7 +71,7 @@ func (w *RescanWorker) Stop() {
 
 // rescanPackages re-scans packages that need updating
 func (w *RescanWorker) rescanPackages(ctx context.Context) {
-	log.Info().Msg("Starting package rescan cycle")
+	log.Info().Msg("Starting package rescan cycle - checking all packages for scan status")
 
 	// Get all packages
 	packages, err := w.metadataStore.ListPackages(ctx, &metadata.ListOptions{})
@@ -78,6 +85,12 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 	failed := 0
 
 	for _, pkg := range packages {
+		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
+		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
+			skipped++
+			continue
+		}
+
 		// Check if package needs rescanning
 		needsRescan, err := w.needsRescan(ctx, pkg)
 		if err != nil {
@@ -95,19 +108,57 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 			continue
 		}
 
-		// Rescan the package
-		// Note: We need the file path - we'll need to reconstruct it or get it from storage
-		// For now, we'll just log and skip actual rescanning
 		log.Info().
 			Str("registry", pkg.Registry).
 			Str("package", pkg.Name).
 			Str("version", pkg.Version).
 			Msg("Package needs rescanning")
 
-		// TODO: Implement actual rescanning by:
-		// 1. Retrieving package file from storage
-		// 2. Scanning it
-		// This would require access to storage backend
+		// Get file path from storage using the storage key from the package metadata
+		if pkg.StorageKey == "" {
+			log.Warn().
+				Str("registry", pkg.Registry).
+				Str("package", pkg.Name).
+				Str("version", pkg.Version).
+				Msg("Package has no storage key, skipping rescan")
+			failed++
+			continue
+		}
+
+		filePath, err := w.getPackageFilePath(ctx, pkg.StorageKey)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("registry", pkg.Registry).
+				Str("package", pkg.Name).
+				Str("version", pkg.Version).
+				Str("storage_key", pkg.StorageKey).
+				Msg("Failed to get package file path, skipping rescan")
+			failed++
+			continue
+		}
+
+		if filePath == "" {
+			log.Debug().
+				Str("registry", pkg.Registry).
+				Str("package", pkg.Name).
+				Str("version", pkg.Version).
+				Msg("No local file path available, skipping rescan")
+			skipped++
+			continue
+		}
+
+		// Perform the actual scan
+		if err := w.manager.ScanPackage(ctx, pkg.Registry, pkg.Name, pkg.Version, filePath); err != nil {
+			log.Error().
+				Err(err).
+				Str("registry", pkg.Registry).
+				Str("package", pkg.Name).
+				Str("version", pkg.Version).
+				Msg("Failed to rescan package")
+			failed++
+			continue
+		}
 
 		scanned++
 	}
@@ -126,6 +177,19 @@ func (w *RescanWorker) needsRescan(ctx context.Context, pkg *metadata.Package) (
 	scanResult, err := w.metadataStore.GetScanResult(ctx, pkg.Registry, pkg.Name, pkg.Version)
 	if err != nil {
 		// No scan result - needs scanning
+		log.Debug().
+			Str("package", pkg.Name).
+			Str("version", pkg.Version).
+			Msg("Package has no scan result, needs scanning")
+		return true, nil
+	}
+
+	// If package is not marked as scanned but has scan result, it's a stale state - rescan
+	if !pkg.SecurityScanned {
+		log.Info().
+			Str("package", pkg.Name).
+			Str("version", pkg.Version).
+			Msg("Package has scan result but security_scanned flag is false, needs update")
 		return true, nil
 	}
 
@@ -136,4 +200,15 @@ func (w *RescanWorker) needsRescan(ctx context.Context, pkg *metadata.Package) (
 	}
 
 	return false, nil
+}
+
+// getPackageFilePath retrieves the local file path for a package from storage
+func (w *RescanWorker) getPackageFilePath(ctx context.Context, storageKey string) (string, error) {
+	// Check if storage backend supports local paths
+	if localProvider, ok := w.storage.(storage.LocalPathProvider); ok {
+		return localProvider.GetLocalPath(ctx, storageKey)
+	}
+
+	// If storage doesn't support local paths (S3, SMB), we can't rescan
+	return "", nil
 }

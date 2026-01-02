@@ -58,8 +58,8 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	// Filter, clean, and deduplicate packages
 	seen := make(map[string]*metadata.Package)
 	for _, pkg := range allPackages {
-		// Skip metadata entries
-		if pkg.Version == "list" || pkg.Version == "latest" {
+		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
+		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
 			continue
 		}
 
@@ -121,7 +121,7 @@ func (a *App) handleListPackages(w http.ResponseWriter, r *http.Request) {
 						"counts": map[string]int{
 							"critical": severityCounts["CRITICAL"],
 							"high":     severityCounts["HIGH"],
-							"medium":   severityCounts["MEDIUM"],
+							"moderate": severityCounts["MODERATE"],
 							"low":      severityCounts["LOW"],
 						},
 						"total": scanResult.VulnerabilityCount,
@@ -330,8 +330,8 @@ func (a *App) handleStats(w http.ResponseWriter, r *http.Request) {
 	registryStats := make(map[string]map[string]interface{})
 
 	for _, pkg := range packages {
-		// Skip metadata entries
-		if pkg.Version == "list" || pkg.Version == "latest" {
+		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
+		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
 			continue
 		}
 		totalSize += pkg.Size

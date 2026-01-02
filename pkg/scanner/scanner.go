@@ -260,7 +260,8 @@ func (m *Manager) compareSeverity(s1, s2 string) int {
 	severityOrder := map[string]int{
 		"CRITICAL": 4,
 		"HIGH":     3,
-		"MEDIUM":   2,
+		"MODERATE": 2,
+		"MEDIUM":   2, // Support both for backwards compatibility
 		"LOW":      1,
 		"UNKNOWN":  0,
 	}
@@ -353,10 +354,11 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 			severityCounts["HIGH"], thresholds.High), nil
 	}
 
-	// Check medium
-	if thresholds.Medium >= 0 && severityCounts["MEDIUM"] > thresholds.Medium {
-		return true, fmt.Sprintf("Package has %d MEDIUM vulnerabilities (threshold: %d)",
-			severityCounts["MEDIUM"], thresholds.Medium), nil
+	// Check moderate (medium)
+	moderateCount := severityCounts["MODERATE"] + severityCounts["MEDIUM"] // Support both for backwards compatibility
+	if thresholds.Medium >= 0 && moderateCount > thresholds.Medium {
+		return true, fmt.Sprintf("Package has %d MODERATE vulnerabilities (threshold: %d)",
+			moderateCount, thresholds.Medium), nil
 	}
 
 	// Check low
@@ -379,9 +381,10 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 			if severityCounts["CRITICAL"] > 0 || severityCounts["HIGH"] > 0 {
 				return true, fmt.Sprintf("Package has HIGH or CRITICAL vulnerabilities"), nil
 			}
-		case "MEDIUM":
-			if severityCounts["CRITICAL"] > 0 || severityCounts["HIGH"] > 0 || severityCounts["MEDIUM"] > 0 {
-				return true, fmt.Sprintf("Package has MEDIUM, HIGH, or CRITICAL vulnerabilities"), nil
+		case "MODERATE", "MEDIUM":
+			moderateCount := severityCounts["MODERATE"] + severityCounts["MEDIUM"]
+			if severityCounts["CRITICAL"] > 0 || severityCounts["HIGH"] > 0 || moderateCount > 0 {
+				return true, fmt.Sprintf("Package has MODERATE, HIGH, or CRITICAL vulnerabilities"), nil
 			}
 		case "LOW":
 			if len(result.Vulnerabilities) > 0 {

@@ -150,10 +150,10 @@ func (a *App) handleVulnerabilities(w http.ResponseWriter, r *http.Request) {
 		"severity_counts": map[string]int{
 			"critical": severityCounts["CRITICAL"],
 			"high":     severityCounts["HIGH"],
-			"medium":   severityCounts["MEDIUM"],
+			"moderate": severityCounts["MODERATE"],
 			"low":      severityCounts["LOW"],
 		},
-		"bypassed_count": len(scanResult.Vulnerabilities) - (severityCounts["CRITICAL"] + severityCounts["HIGH"] + severityCounts["MEDIUM"] + severityCounts["LOW"]),
+		"bypassed_count": len(scanResult.Vulnerabilities) - (severityCounts["CRITICAL"] + severityCounts["HIGH"] + severityCounts["MODERATE"] + severityCounts["LOW"]),
 	}
 
 	errors.WriteJSONSimple(w, http.StatusOK, response)

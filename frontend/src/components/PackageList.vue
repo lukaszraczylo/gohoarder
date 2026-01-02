@@ -13,28 +13,28 @@
         <span class="text-sm font-medium text-gray-700">Filter by registry:</span>
         <div class="flex gap-2">
           <Button
-            @click="selectedRegistry = 'all'"
+            @click="changeRegistryFilter('all')"
             :variant="selectedRegistry === 'all' ? 'default' : 'outline'"
             size="sm"
           >
             All
           </Button>
           <Button
-            @click="selectedRegistry = 'npm'"
+            @click="changeRegistryFilter('npm')"
             :variant="selectedRegistry === 'npm' ? 'default' : 'outline'"
             size="sm"
           >
             <i class="fab fa-npm mr-2"></i>NPM
           </Button>
           <Button
-            @click="selectedRegistry = 'pypi'"
+            @click="changeRegistryFilter('pypi')"
             :variant="selectedRegistry === 'pypi' ? 'default' : 'outline'"
             size="sm"
           >
             <i class="fab fa-python mr-2"></i>PyPI
           </Button>
           <Button
-            @click="selectedRegistry = 'go'"
+            @click="changeRegistryFilter('go')"
             :variant="selectedRegistry === 'go' ? 'default' : 'outline'"
             size="sm"
           >
@@ -230,20 +230,13 @@
       </DialogContent>
     </Dialog>
 
-    <!-- Vulnerability Details Modal -->
-    <VulnerabilityDetailsModal
-      v-if="selectedPackage"
-      v-model:open="showVulnerabilityModal"
-      :registry="selectedPackage.registry"
-      :package-name="selectedPackage.name"
-      :version="selectedPackage.version"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import { usePackageStore, type Package } from '../stores/packages'
 import {
   Accordion,
@@ -265,16 +258,20 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
-import VulnerabilityDetailsModal from './VulnerabilityDetailsModal.vue'
 
+// Props from router
+const props = defineProps<{
+  registry?: string
+}>()
+
+const route = useRoute()
+const router = useRouter()
 const store = usePackageStore()
 const { packages, loading, error } = storeToRefs(store)
 
 const showDeleteModal = ref(false)
 const packageToDelete = ref<Package | null>(null)
-const showVulnerabilityModal = ref(false)
-const selectedPackage = ref<{ registry: string; name: string; version: string } | null>(null)
-const selectedRegistry = ref<string>('all')
+const selectedRegistry = ref<string>(props.registry || 'all')
 const searchTerm = ref<string>('')
 const currentPage = ref<number>(1)
 const itemsPerPage = ref<number>(10)
@@ -359,6 +356,11 @@ watch([selectedRegistry, searchTerm], () => {
   resetPagination()
 })
 
+// Watch for route parameter changes to update filter
+watch(() => route.params.registry, (newRegistry) => {
+  selectedRegistry.value = (newRegistry as string) || 'all'
+})
+
 onMounted(async () => {
   await store.fetchPackages()
 })
@@ -406,7 +408,19 @@ function formatDate(date: string): string {
 }
 
 function showVulnerabilityDetails(registry: string, name: string, version: string) {
-  selectedPackage.value = { registry, name, version }
-  showVulnerabilityModal.value = true
+  // Navigate to the package details page
+  router.push({
+    name: 'package-details',
+    params: {
+      registry,
+      name,
+      version,
+    },
+  })
+}
+
+function changeRegistryFilter(registry: string) {
+  const path = registry === 'all' ? '/packages' : `/packages/${registry}`
+  router.push(path)
 }
 </script>

@@ -187,13 +187,16 @@ func (s *Scanner) convertTrivyResult(trivyResult *TrivyResult, registry, package
 	// Aggregate all vulnerabilities from all results
 	for _, result := range trivyResult.Results {
 		for _, vuln := range result.Vulnerabilities {
+			// Normalize severity to standard values (CRITICAL, HIGH, MODERATE, LOW)
+			normalizedSeverity := metadata.NormalizeSeverity(vuln.Severity)
+
 			// Count by severity
-			severityCounts[strings.ToUpper(vuln.Severity)]++
+			severityCounts[normalizedSeverity]++
 
 			// Add to vulnerabilities list
 			vulnerabilities = append(vulnerabilities, metadata.Vulnerability{
 				ID:          vuln.VulnerabilityID,
-				Severity:    strings.ToUpper(vuln.Severity),
+				Severity:    normalizedSeverity,
 				Title:       vuln.Title,
 				Description: vuln.Description,
 				References:  vuln.References,

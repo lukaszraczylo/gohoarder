@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -95,12 +96,31 @@ type ScanResult struct {
 // Vulnerability represents a security vulnerability
 type Vulnerability struct {
 	ID          string   `json:"id"`       // CVE-xxx, GHSA-xxx, etc.
-	Severity    string   `json:"severity"` // critical, high, medium, low
+	Severity    string   `json:"severity"` // critical, high, moderate, low
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	References  []string `json:"references"`
 	FixedIn     string   `json:"fixed_in"` // Version where fixed
 	DetectedBy  []string `json:"detected_by,omitempty"` // List of scanners that detected this vulnerability
+}
+
+// NormalizeSeverity normalizes severity names to standard values
+// Ensures consistent naming: CRITICAL, HIGH, MODERATE, LOW
+func NormalizeSeverity(severity string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(severity))
+
+	// Map MEDIUM to MODERATE for consistency
+	if normalized == "MEDIUM" {
+		return "MODERATE"
+	}
+
+	// Ensure we only return valid severity levels
+	switch normalized {
+	case "CRITICAL", "HIGH", "MODERATE", "LOW":
+		return normalized
+	default:
+		return "LOW" // Default unknown severities to LOW
+	}
 }
 
 // ScanStatus represents scan result status

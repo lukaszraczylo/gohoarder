@@ -5,7 +5,7 @@ import axios from 'axios'
 export interface VulnerabilityCounts {
   critical: number
   high: number
-  medium: number
+  moderate: number
   low: number
 }
 

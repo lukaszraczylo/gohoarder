@@ -253,32 +253,42 @@ func (s *Scanner) convertOSVResult(osvResp *OSVResponse, registry, packageName, 
 
 // determineSeverity extracts severity from OSV vulnerability
 func (s *Scanner) determineSeverity(vuln *OSVVulnerability) string {
+	var rawSeverity string
+
 	// Try to get severity from CVSS
 	for _, sev := range vuln.Severity {
 		if sev.Type == "CVSS_V3" || sev.Type == "CVSS_V2" {
 			// Parse CVSS score to severity
 			score := sev.Score
 			if strings.Contains(strings.ToUpper(score), "CRITICAL") {
-				return "CRITICAL"
+				rawSeverity = "CRITICAL"
 			} else if strings.Contains(strings.ToUpper(score), "HIGH") {
-				return "HIGH"
-			} else if strings.Contains(strings.ToUpper(score), "MEDIUM") {
-				return "MEDIUM"
+				rawSeverity = "HIGH"
+			} else if strings.Contains(strings.ToUpper(score), "MEDIUM") || strings.Contains(strings.ToUpper(score), "MODERATE") {
+				rawSeverity = "MODERATE"
 			} else if strings.Contains(strings.ToUpper(score), "LOW") {
-				return "LOW"
+				rawSeverity = "LOW"
+			}
+			if rawSeverity != "" {
+				break
 			}
 		}
 	}
 
-	// Check database_specific for severity
-	if vuln.DatabaseSpecific != nil {
+	// Check database_specific for severity if not found in CVSS
+	if rawSeverity == "" && vuln.DatabaseSpecific != nil {
 		if sev, ok := vuln.DatabaseSpecific["severity"].(string); ok {
-			return strings.ToUpper(sev)
+			rawSeverity = sev
 		}
 	}
 
-	// Default to MEDIUM if unknown
-	return "MEDIUM"
+	// Default to MODERATE if unknown
+	if rawSeverity == "" {
+		rawSeverity = "MODERATE"
+	}
+
+	// Normalize to standard severity values
+	return metadata.NormalizeSeverity(rawSeverity)
 }
 
 // findFixedVersion extracts the fixed version from OSV affected ranges

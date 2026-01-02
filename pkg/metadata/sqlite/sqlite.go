@@ -449,7 +449,25 @@ func (s *SQLiteStore) SaveScanResult(ctx context.Context, result *metadata.ScanR
 
 	// Update package security_scanned flag
 	updateQuery := `UPDATE packages SET security_scanned = 1 WHERE registry = ? AND name = ? AND version = ?`
-	s.db.ExecContext(ctx, updateQuery, result.Registry, result.PackageName, result.PackageVersion)
+	updateResult, err := s.db.ExecContext(ctx, updateQuery, result.Registry, result.PackageName, result.PackageVersion)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("registry", result.Registry).
+			Str("package", result.PackageName).
+			Str("version", result.PackageVersion).
+			Msg("Failed to update security_scanned flag")
+		// Don't return error - scan result is already saved
+	} else {
+		rowsAffected, _ := updateResult.RowsAffected()
+		if rowsAffected == 0 {
+			log.Warn().
+				Str("registry", result.Registry).
+				Str("package", result.PackageName).
+				Str("version", result.PackageVersion).
+				Msg("Package not found when updating security_scanned flag - possibly name mismatch")
+		}
+	}
 
 	return nil
 }

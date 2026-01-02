@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from '../components/Dashboard.vue'
 import PackageList from '../components/PackageList.vue'
+import PackageDetails from '../components/PackageDetails.vue'
 import Stats from '../components/Stats.vue'
 import BypassManagementPanel from '../components/BypassManagementPanel.vue'
 
@@ -13,9 +14,17 @@ const router = createRouter({
       component: Dashboard,
     },
     {
-      path: '/packages',
+      path: '/packages/:registry?',
       name: 'packages',
       component: PackageList,
+      props: true,
+    },
+    {
+      // Separate route for package details - supports names with slashes (Go packages)
+      path: '/package/:registry/:name+/:version',
+      name: 'package-details',
+      component: PackageDetails,
+      props: true,
     },
     {
       path: '/stats',

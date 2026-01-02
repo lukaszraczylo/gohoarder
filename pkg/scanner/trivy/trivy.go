@@ -118,7 +118,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		filePath,
 	}
 
-	cmd := exec.CommandContext(ctx, "trivy", args...)
+	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec G204 -- trivy command with controlled arguments
 
 	// Set cache directory if configured
 	if s.config.CacheDB != "" {

@@ -795,7 +795,7 @@ func TestClose(t *testing.T) {
 			manager, err := New(mockStorage, mockMetadata, nil, Config{})
 			require.NoError(t, err)
 
-			err = manager.Close()
+			err = manager.Close() // #nosec G104 -- Cleanup, error not critical
 
 			if tt.wantErr {
 				require.Error(t, err)

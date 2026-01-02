@@ -49,7 +49,7 @@ func (cs *CredentialStore) LoadFromFile(path string) error {
 		return nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- Path is from config, not user input
 	if err != nil {
 		return fmt.Errorf("failed to read credential file: %w", err)
 	}

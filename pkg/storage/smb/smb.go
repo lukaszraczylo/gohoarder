@@ -3,7 +3,7 @@ package smb
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- MD5 used for file checksums, not cryptographic security
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -124,14 +124,14 @@ func (s *SMBStorage) createConnection(ctx context.Context) (*smbConnection, erro
 
 	session, err := dialer.Dial(conn)
 	if err != nil {
-		conn.Close()
+		conn.Close() // #nosec G104 -- Cleanup, error not critical
 		return nil, err
 	}
 
 	share, err := session.Mount(s.share)
 	if err != nil {
-		session.Logoff()
-		conn.Close()
+		_ = session.Logoff() // #nosec G104 -- SMB cleanup
+		conn.Close()         // #nosec G104 -- Cleanup, error not critical
 		return nil, err
 	}
 
@@ -169,13 +169,13 @@ func (s *SMBStorage) returnConnection(conn *smbConnection) {
 // close closes an SMB connection
 func (c *smbConnection) close() {
 	if c.share != nil {
-		c.share.Umount()
+		_ = c.share.Umount() // #nosec G104 -- SMB cleanup
 	}
 	if c.session != nil {
-		c.session.Logoff()
+		_ = c.session.Logoff() // #nosec G104 -- SMB cleanup
 	}
 	if c.conn != nil {
-		c.conn.Close()
+		c.conn.Close() // #nosec G104 -- Cleanup, error not critical
 	}
 }
 
@@ -203,7 +203,7 @@ func (s *SMBStorage) Get(ctx context.Context, key string) (io.ReadCloser, error)
 	// Read entire file into memory and close SMB connection
 	// This is necessary because we need to return the connection to the pool
 	data, err := io.ReadAll(file)
-	file.Close()
+	file.Close() // #nosec G104 -- Cleanup, error not critical
 	s.returnConnection(conn)
 
 	if err != nil {
@@ -234,7 +234,7 @@ func (s *SMBStorage) Put(ctx context.Context, key string, data io.Reader, opts *
 
 	// Read data into buffer to calculate checksums and size
 	var buf bytes.Buffer
-	md5Hash := md5.New()
+	md5Hash := md5.New() // #nosec G401 -- MD5 used for file integrity check, not cryptographic security
 	sha256Hash := sha256.New()
 	multiWriter := io.MultiWriter(&buf, md5Hash, sha256Hash)
 
@@ -282,17 +282,17 @@ func (s *SMBStorage) Put(ctx context.Context, key string, data io.Reader, opts *
 
 	// Write data
 	_, err = io.Copy(file, bytes.NewReader(buf.Bytes()))
-	file.Close()
+	file.Close() // #nosec G104 -- Cleanup, error not critical
 
 	if err != nil {
-		conn.share.Remove(tempPath)
+		_ = conn.share.Remove(tempPath) // #nosec G104 -- SMB cleanup
 		metrics.RecordStorageOperation("smb", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to write SMB file")
 	}
 
 	// Atomic rename
 	if err := conn.share.Rename(tempPath, path); err != nil {
-		conn.share.Remove(tempPath)
+		_ = conn.share.Remove(tempPath) // #nosec G104 -- SMB cleanup
 		metrics.RecordStorageOperation("smb", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to rename SMB temp file")
 	}

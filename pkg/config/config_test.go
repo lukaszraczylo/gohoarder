@@ -26,7 +26,7 @@ func (s *ConfigTestSuite) SetupTest() {
 }
 
 func (s *ConfigTestSuite) TearDownTest() {
-	os.RemoveAll(s.tempDir)
+	_ = os.RemoveAll(s.tempDir) // #nosec G104 -- Cleanup
 }
 
 func (s *ConfigTestSuite) TestDefault() {

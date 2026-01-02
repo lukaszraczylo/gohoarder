@@ -1,7 +1,7 @@
 package cdn
 
 import (
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- MD5 used for ETag generation, not cryptographic security
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -210,7 +210,7 @@ func (m *Middleware) generateETag(body []byte) string {
 	if body == nil {
 		return ""
 	}
-	hash := md5.Sum(body)
+	hash := md5.Sum(body) // #nosec G401 -- MD5 used for ETag, not cryptographic security
 	return `"` + hex.EncodeToString(hash[:]) + `"`
 }
 

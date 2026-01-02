@@ -186,7 +186,7 @@ func (s *Server) closeAllClients() {
 	defer s.mu.Unlock()
 
 	for client := range s.clients {
-		client.conn.Close()
+		client.conn.Close() // #nosec G104 -- Cleanup, error not critical
 		close(client.send)
 	}
 	s.clients = make(map[*Client]bool)
@@ -237,12 +237,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (c *Client) readPump() {
 	defer func() {
 		c.server.unregister <- c
-		c.conn.Close()
+		c.conn.Close() // #nosec G104 -- Cleanup, error not critical
 	}()
 
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) // #nosec G104 -- Websocket deadline
+	c.conn.SetPongHandler(func(string) error { // #nosec G104 -- Websocket handler
+		_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) // #nosec G104 -- Websocket deadline
 		return nil
 	})
 
@@ -265,16 +265,16 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(54 * time.Second)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		c.conn.Close() // #nosec G104 -- Cleanup, error not critical
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) // #nosec G104 -- Websocket deadline, error not critical
 			if !ok {
 				// Channel closed
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{}) // #nosec G104 -- Websocket write
 				return
 			}
 
@@ -282,13 +282,13 @@ func (c *Client) writePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			_, _ = w.Write(message) // #nosec G104 -- Websocket buffer write
 
 			// Write any additional queued messages
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
+				_, _ = w.Write([]byte{'\n'}) // #nosec G104 -- Websocket buffer write
+				_, _ = w.Write(<-c.send) // #nosec G104 -- Websocket buffer write
 			}
 
 			if err := w.Close(); err != nil {
@@ -296,7 +296,7 @@ func (c *Client) writePump() {
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)) // #nosec G104 -- Websocket deadline, error not critical
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

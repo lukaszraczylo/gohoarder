@@ -202,7 +202,7 @@ func (w *Worker) prewarmPackage(ctx context.Context, pkg PackageInfo, workerID i
 			Msg("Failed to fetch package for pre-warming")
 		return
 	}
-	defer body.Close()
+	defer body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	if statusCode != 200 {
 		log.Warn().

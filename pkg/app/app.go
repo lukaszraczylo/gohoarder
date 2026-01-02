@@ -385,7 +385,7 @@ func (a *App) Shutdown() error {
 	}
 
 	// Close analytics engine
-	a.analyticsEngine.Close()
+	a.analyticsEngine.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Close storage
 	if err := a.storage.Close(); err != nil {

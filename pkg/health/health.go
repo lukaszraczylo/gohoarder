@@ -140,7 +140,7 @@ func (c *Checker) HealthHandler() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) // #nosec G104 -- JSON response write
 	}
 }
 
@@ -173,6 +173,6 @@ func (c *Checker) ReadyHandler() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) // #nosec G104 -- JSON response write
 	}
 }

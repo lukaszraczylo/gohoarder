@@ -3,7 +3,7 @@ package s3
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- MD5 used for S3 Content-MD5 header, not cryptographic security
 	"crypto/sha256"
 	"encoding/hex"
 	stderrors "errors"
@@ -136,7 +136,7 @@ func (s *S3Storage) Put(ctx context.Context, key string, data io.Reader, opts *s
 
 	// Read data into buffer to calculate checksums and size
 	var buf bytes.Buffer
-	md5Hash := md5.New()
+	md5Hash := md5.New() // #nosec G401 -- MD5 used for S3 integrity check, not cryptographic security
 	sha256Hash := sha256.New()
 	multiWriter := io.MultiWriter(&buf, md5Hash, sha256Hash)
 

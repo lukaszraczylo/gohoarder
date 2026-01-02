@@ -2,7 +2,7 @@ package filesystem
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- MD5 used for file checksums, not cryptographic security
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -29,7 +29,7 @@ type FilesystemStorage struct {
 // New creates a new filesystem storage backend
 func New(basePath string, quota int64) (*FilesystemStorage, error) {
 	// Create base directory if it doesn't exist
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, 0750); err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create base directory")
 	}
 
@@ -57,7 +57,7 @@ func (fs *FilesystemStorage) Get(ctx context.Context, key string) (io.ReadCloser
 
 	path := fs.keyToPath(key)
 
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- Path is sanitized storage key
 	if err != nil {
 		if os.IsNotExist(err) {
 			metrics.RecordStorageOperation("filesystem", "get", "not_found")
@@ -84,14 +84,14 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 	dir := filepath.Dir(path)
 
 	// Create directory
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create directory")
 	}
 
 	// Create temp file for atomic write
 	tempPath := path + ".tmp"
-	tempFile, err := os.Create(tempPath)
+	tempFile, err := os.Create(tempPath) // #nosec G304 -- Temp path is constructed from sanitized storage key
 	if err != nil {
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create temp file")
@@ -99,20 +99,20 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 
 	// Calculate checksums while writing
 	// NOTE: MD5 is used for integrity verification (checksums), not cryptographic security
-	md5Hash := md5.New()
+	md5Hash := md5.New() // #nosec G401 -- MD5 used for file integrity check, not cryptographic security
 	sha256Hash := sha256.New()
 	multiWriter := io.MultiWriter(tempFile, md5Hash, sha256Hash)
 
 	written, err := io.Copy(multiWriter, data)
 	if err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
+		tempFile.Close()        // #nosec G104 -- Cleanup, error not critical
+		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to write data")
 	}
 
 	if err := tempFile.Close(); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to close temp file")
 	}
@@ -121,7 +121,7 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 	fs.mu.Lock()
 	if fs.quota > 0 && fs.used+written > fs.quota {
 		fs.mu.Unlock()
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 		metrics.RecordStorageOperation("filesystem", "put", "quota_exceeded")
 		return errors.QuotaExceeded(fs.quota)
 	}
@@ -134,13 +134,13 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		sha256Sum := hex.EncodeToString(sha256Hash.Sum(nil))
 
 		if opts.ChecksumMD5 != "" && opts.ChecksumMD5 != md5Sum {
-			os.Remove(tempPath)
+			_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 			metrics.RecordStorageOperation("filesystem", "put", "checksum_error")
 			return errors.New(errors.ErrCodeChecksumMismatch, "MD5 checksum mismatch")
 		}
 
 		if opts.ChecksumSHA256 != "" && opts.ChecksumSHA256 != sha256Sum {
-			os.Remove(tempPath)
+			_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 			metrics.RecordStorageOperation("filesystem", "put", "checksum_error")
 			return errors.New(errors.ErrCodeChecksumMismatch, "SHA256 checksum mismatch")
 		}
@@ -148,7 +148,7 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 
 	// Atomic rename
 	if err := os.Rename(tempPath, path); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 		fs.mu.Lock()
 		fs.used -= written
 		currentUsed := fs.used
@@ -331,8 +331,8 @@ func (fs *FilesystemStorage) Health(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "cannot write to storage")
 	}
-	f.Close()
-	os.Remove(tempPath)
+	f.Close()               // #nosec G104 -- Cleanup, error not critical
+	_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 
 	return nil
 }

@@ -87,7 +87,7 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close()
+			body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -98,10 +98,10 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 		http.Error(w, "Failed to fetch PyPI index", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close()
+	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
 
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-	io.Copy(w, entry.Data)
+	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
 }
 
 // handlePackagePage handles package page requests
@@ -115,7 +115,7 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close()
+			body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -126,7 +126,7 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "Failed to fetch package page", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close()
+	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Read page into memory for URL rewriting
 	var buf bytes.Buffer
@@ -141,7 +141,7 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 	modifiedHTML := rewritePackagePageURLs(buf.String(), packageName, proxyBaseURL)
 
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-	w.Write([]byte(modifiedHTML))
+	_, _ = w.Write([]byte(modifiedHTML)) // #nosec G104 -- Websocket buffer write
 }
 
 // handlePackageFile handles package file download requests
@@ -187,7 +187,7 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close()
+			body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, originalURL, nil
@@ -206,7 +206,7 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "Failed to fetch package file", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close()
+	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
 	if entry.Package != nil && entry.Package.RequiresAuth {
@@ -270,7 +270,7 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	io.Copy(w, entry.Data)
+	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
 }
 
 // isPackagePage checks if the request is for a package page

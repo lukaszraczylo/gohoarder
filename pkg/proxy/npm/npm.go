@@ -84,7 +84,7 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close()
+			body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -95,7 +95,7 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 		http.Error(w, "Failed to fetch package metadata", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close()
+	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Read metadata into memory for URL rewriting
 	var buf bytes.Buffer
@@ -126,7 +126,7 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.Write(modifiedJSON)
+	_, _ = w.Write(modifiedJSON) // #nosec G104 -- Websocket buffer write
 }
 
 // handleTarball handles package tarball requests
@@ -164,7 +164,7 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close()
+			body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -183,7 +183,7 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 		http.Error(w, "Failed to fetch package tarball", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close()
+	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
 	if entry.Package != nil && entry.Package.RequiresAuth {
@@ -237,7 +237,7 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	io.Copy(w, entry.Data)
+	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
 }
 
 // handleSpecial handles special NPM endpoints
@@ -251,10 +251,10 @@ func (h *Handler) handleSpecial(ctx context.Context, w http.ResponseWriter, r *h
 		http.Error(w, "Failed to fetch from upstream", http.StatusBadGateway)
 		return
 	}
-	defer body.Close()
+	defer body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	w.WriteHeader(statusCode)
-	io.Copy(w, body)
+	_, _ = io.Copy(w, body) // #nosec G104 -- HTTP response write
 }
 
 // isTarballRequest checks if the request is for a tarball

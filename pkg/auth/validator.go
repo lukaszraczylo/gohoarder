@@ -54,7 +54,7 @@ func (v *NPMValidator) ValidateAccess(ctx context.Context, packageURL string, cr
 		log.Warn().Err(err).Str("url", packageURL).Msg("Validation request failed, allowing cache fallback")
 		return true, fmt.Errorf("validation failed: %w (allowing cache fallback)", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Check status code
 	switch resp.StatusCode {
@@ -105,7 +105,7 @@ func (v *PyPIValidator) ValidateAccess(ctx context.Context, packageURL string, c
 		log.Warn().Err(err).Str("url", packageURL).Msg("Validation request failed, allowing cache fallback")
 		return true, fmt.Errorf("validation failed: %w (allowing cache fallback)", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Check status code
 	switch resp.StatusCode {
@@ -181,7 +181,7 @@ func (v *GoValidator) validateGitHub(ctx context.Context, modulePath, credential
 	}
 
 	// Run git ls-remote (lightweight, just checks access)
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD") // #nosec G204 -- git command with validated URL
 	cmd.Env = append(os.Environ(),
 		"HOME="+tempDir,         // Use temp .netrc
 		"GIT_TERMINAL_PROMPT=0", // Disable prompts
@@ -237,7 +237,7 @@ func (v *GoValidator) validateGitLab(ctx context.Context, modulePath, credential
 	}
 
 	// Run git ls-remote
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD") // #nosec G204 -- git command with validated URL
 	cmd.Env = append(os.Environ(),
 		"HOME="+tempDir,
 		"GIT_TERMINAL_PROMPT=0",
@@ -264,7 +264,7 @@ func (v *GoValidator) validateGit(ctx context.Context, modulePath, credentials s
 	// Similar to GitHub validation but with generic host detection
 	repoURL := fmt.Sprintf("https://%s.git", modulePath)
 
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, "HEAD") // #nosec G204 -- git command with validated URL
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
 	output, err := cmd.CombinedOutput()

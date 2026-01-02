@@ -154,7 +154,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	if err != nil {
 		return nil, fmt.Errorf("OSV API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
@@ -322,7 +322,7 @@ func (s *Scanner) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("OSV API not reachable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	log.Debug().Int("status", resp.StatusCode).Msg("OSV health check passed")
 	return nil

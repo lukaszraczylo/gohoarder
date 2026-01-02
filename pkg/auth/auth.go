@@ -188,6 +188,6 @@ func getPermissionsForRole(role Role) []Permission {
 // generateID generates a unique ID
 func generateID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	_, _ = rand.Read(b) // #nosec G104 -- Rand read always succeeds
 	return base64.URLEncoding.EncodeToString(b)
 }

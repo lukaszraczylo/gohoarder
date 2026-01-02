@@ -25,7 +25,7 @@ func HandleUpstreamError(w http.ResponseWriter, err error, url, context string) 
 func CheckUpstreamStatus(statusCode int, body io.ReadCloser) error {
 	if statusCode != http.StatusOK {
 		if body != nil {
-			body.Close()
+			body.Close() // #nosec G104 -- Cleanup, error not critical
 		}
 		return fmt.Errorf("upstream returned status %d", statusCode)
 	}

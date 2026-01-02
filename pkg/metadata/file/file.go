@@ -31,7 +31,7 @@ func New(cfg Config) (*Store, error) {
 	}
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(cfg.Path, 0755); err != nil {
+	if err := os.MkdirAll(cfg.Path, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create metadata directory: %w", err)
 	}
 
@@ -51,7 +51,7 @@ func (s *Store) SavePackage(ctx context.Context, pkg *metadata.Package) error {
 
 	// Create registry directory
 	regDir := filepath.Join(s.basePath, pkg.Registry)
-	if err := os.MkdirAll(regDir, 0755); err != nil {
+	if err := os.MkdirAll(regDir, 0750); err != nil {
 		return err
 	}
 
@@ -62,7 +62,7 @@ func (s *Store) SavePackage(ctx context.Context, pkg *metadata.Package) error {
 		return err
 	}
 
-	return os.WriteFile(filename, data, 0644)
+	return os.WriteFile(filename, data, 0600)
 }
 
 // GetPackage retrieves package metadata
@@ -71,7 +71,7 @@ func (s *Store) GetPackage(ctx context.Context, registry, name, version string) 
 	defer s.mu.RUnlock()
 
 	filename := filepath.Join(s.basePath, registry, fmt.Sprintf("%s-%s.json", name, version))
-	data, err := os.ReadFile(filename)
+	data, err := os.ReadFile(filename) // #nosec G304 -- Filename is from internal registry structure
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -104,7 +104,7 @@ func (s *Store) ListPackages(ctx context.Context, opts *metadata.ListOptions) ([
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
 		if err != nil {
 			return nil // Skip files we can't read
 		}
@@ -159,7 +159,7 @@ func (s *Store) SaveScanResult(ctx context.Context, result *metadata.ScanResult)
 
 	// Create scans directory
 	scanDir := filepath.Join(s.basePath, "scans", result.Registry, result.PackageName)
-	if err := os.MkdirAll(scanDir, 0755); err != nil {
+	if err := os.MkdirAll(scanDir, 0750); err != nil {
 		return err
 	}
 
@@ -171,7 +171,7 @@ func (s *Store) SaveScanResult(ctx context.Context, result *metadata.ScanResult)
 		return err
 	}
 
-	return os.WriteFile(filename, data, 0644)
+	return os.WriteFile(filename, data, 0600)
 }
 
 // UpdateDownloadCount increments download counter
@@ -213,7 +213,7 @@ func (s *Store) GetStats(ctx context.Context, registry string) (*metadata.Stats,
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
 		if err != nil {
 			return nil
 		}
@@ -265,7 +265,7 @@ func (s *Store) GetScanResult(ctx context.Context, registry, name, version strin
 
 	// Get the latest file
 	latestFile := matches[len(matches)-1]
-	data, err := os.ReadFile(latestFile)
+	data, err := os.ReadFile(latestFile) // #nosec G304 -- Path from glob match on internal structure
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func (s *Store) SaveCVEBypass(ctx context.Context, bypass *metadata.CVEBypass) e
 
 	// Create bypasses directory
 	bypassesDir := filepath.Join(s.basePath, "bypasses")
-	if err := os.MkdirAll(bypassesDir, 0755); err != nil {
+	if err := os.MkdirAll(bypassesDir, 0750); err != nil {
 		return err
 	}
 
@@ -328,7 +328,7 @@ func (s *Store) SaveCVEBypass(ctx context.Context, bypass *metadata.CVEBypass) e
 		return err
 	}
 
-	return os.WriteFile(filename, data, 0644)
+	return os.WriteFile(filename, data, 0600)
 }
 
 // GetActiveCVEBypasses retrieves all active (non-expired) CVE bypasses
@@ -353,7 +353,7 @@ func (s *Store) GetActiveCVEBypasses(ctx context.Context) ([]*metadata.CVEBypass
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
 		if err != nil {
 			return err
 		}
@@ -401,7 +401,7 @@ func (s *Store) ListCVEBypasses(ctx context.Context, opts *metadata.BypassListOp
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
 		if err != nil {
 			return err
 		}
@@ -491,7 +491,7 @@ func (s *Store) CleanupExpiredBypasses(ctx context.Context) (int, error) {
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
 		if err != nil {
 			return err
 		}

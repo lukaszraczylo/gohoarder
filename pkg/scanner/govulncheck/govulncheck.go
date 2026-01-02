@@ -74,7 +74,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	}
 
 	// Run govulncheck
-	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "-mode=binary", tmpDir)
+	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "-mode=binary", tmpDir) // #nosec G204 -- govulncheck command with temp directory
 	output, _ := cmd.CombinedOutput()
 
 	// govulncheck returns non-zero when vulnerabilities are found

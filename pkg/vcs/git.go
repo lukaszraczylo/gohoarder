@@ -65,7 +65,7 @@ func (g *GitFetcher) FetchModule(ctx context.Context, modulePath, version, crede
 	// Set up credentials
 	credentialHelper, cleanup, err := g.setupCredentials(repoURL, modulePath, credentials)
 	if err != nil {
-		os.RemoveAll(cloneDir)
+		_ = os.RemoveAll(cloneDir) // #nosec G104 -- Cleanup
 		return "", fmt.Errorf("failed to setup credentials: %w", err)
 	}
 	defer cleanup()
@@ -76,13 +76,13 @@ func (g *GitFetcher) FetchModule(ctx context.Context, modulePath, version, crede
 
 		// Fallback to full clone
 		if err := g.fullClone(ctx, repoURL, cloneDir, credentialHelper); err != nil {
-			os.RemoveAll(cloneDir)
+			_ = os.RemoveAll(cloneDir) // #nosec G104 -- Cleanup
 			return "", fmt.Errorf("git clone failed: %w", err)
 		}
 
 		// Checkout specific version
 		if err := g.checkout(ctx, cloneDir, version); err != nil {
-			os.RemoveAll(cloneDir)
+			_ = os.RemoveAll(cloneDir) // #nosec G104 -- Cleanup
 			return "", fmt.Errorf("git checkout failed: %w", err)
 		}
 	}
@@ -165,7 +165,7 @@ func (g *GitFetcher) createTempNetrc(repoURL, username, token string) (map[strin
 	netrcPath := filepath.Join(tempDir, ".netrc")
 	netrcContent := fmt.Sprintf("machine %s\nlogin %s\npassword %s\n", host, username, token)
 	if err := os.WriteFile(netrcPath, []byte(netrcContent), 0600); err != nil {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir) // #nosec G104 -- Cleanup
 		return nil, nil, fmt.Errorf("failed to write .netrc: %w", err)
 	}
 
@@ -175,7 +175,7 @@ func (g *GitFetcher) createTempNetrc(repoURL, username, token string) (map[strin
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir) // #nosec G104 -- Cleanup
 	}
 
 	log.Debug().Str("host", host).Msg("Created temporary .netrc for git authentication")

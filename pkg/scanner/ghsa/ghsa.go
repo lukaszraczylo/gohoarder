@@ -105,7 +105,7 @@ func (s *Scanner) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("github advisory database not accessible: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("github api returned status: %d", resp.StatusCode)
@@ -146,7 +146,7 @@ func (s *Scanner) queryAdvisories(ctx context.Context, ecosystem, packageName st
 	if err != nil {
 		return nil, fmt.Errorf("failed to query advisories: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

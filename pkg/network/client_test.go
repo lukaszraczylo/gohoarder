@@ -35,7 +35,7 @@ func TestClientGet(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, http.MethodGet, r.Method)
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("success"))
+					_, _ = w.Write([]byte("success")) // #nosec G104 -- Websocket buffer write
 				}))
 			},
 			config: network.Config{
@@ -43,7 +43,7 @@ func TestClientGet(t *testing.T) {
 				MaxRetries: 3,
 			},
 			validateBody: func(t *testing.T, body io.ReadCloser) {
-				defer body.Close()
+				defer body.Close() // #nosec G104 -- Cleanup, error not critical
 				data, err := io.ReadAll(body)
 				require.NoError(t, err)
 				assert.Equal(t, "success", string(data))
@@ -64,7 +64,7 @@ func TestClientGet(t *testing.T) {
 						return
 					}
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("retry-success"))
+					_, _ = w.Write([]byte("retry-success")) // #nosec G104 -- Websocket buffer write
 				}))
 			},
 			config: network.Config{
@@ -73,7 +73,7 @@ func TestClientGet(t *testing.T) {
 				RetryDelay: 10 * time.Millisecond,
 			},
 			validateBody: func(t *testing.T, body io.ReadCloser) {
-				defer body.Close()
+				defer body.Close() // #nosec G104 -- Cleanup, error not critical
 				data, err := io.ReadAll(body)
 				require.NoError(t, err)
 				assert.Equal(t, "retry-success", string(data))
@@ -135,7 +135,7 @@ func TestClientGet(t *testing.T) {
 						return
 					}
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("success-after-rate-limit"))
+					_, _ = w.Write([]byte("success-after-rate-limit")) // #nosec G104 -- Websocket buffer write
 				}))
 			},
 			config: network.Config{
@@ -144,7 +144,7 @@ func TestClientGet(t *testing.T) {
 				RetryDelay: 10 * time.Millisecond,
 			},
 			validateBody: func(t *testing.T, body io.ReadCloser) {
-				defer body.Close()
+				defer body.Close() // #nosec G104 -- Cleanup, error not critical
 				data, err := io.ReadAll(body)
 				require.NoError(t, err)
 				assert.Equal(t, "success-after-rate-limit", string(data))
@@ -212,7 +212,7 @@ func TestClientGet(t *testing.T) {
 				MaxRetries: 1,
 			},
 			validateBody: func(t *testing.T, body io.ReadCloser) {
-				defer body.Close()
+				defer body.Close() // #nosec G104 -- Cleanup, error not critical
 				data, err := io.ReadAll(body)
 				require.NoError(t, err)
 				assert.Empty(t, data)
@@ -225,7 +225,7 @@ func TestClientGet(t *testing.T) {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					largeBody := strings.Repeat("a", 1024*1024) // 1MB
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(largeBody))
+					_, _ = w.Write([]byte(largeBody)) // #nosec G104 -- Websocket buffer write
 				}))
 			},
 			config: network.Config{
@@ -233,7 +233,7 @@ func TestClientGet(t *testing.T) {
 				MaxRetries: 1,
 			},
 			validateBody: func(t *testing.T, body io.ReadCloser) {
-				defer body.Close()
+				defer body.Close() // #nosec G104 -- Cleanup, error not critical
 				data, err := io.ReadAll(body)
 				require.NoError(t, err)
 				assert.Len(t, data, 1024*1024)
@@ -285,7 +285,7 @@ func TestClientGet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			server := tt.serverBehavior(t)
-			defer server.Close()
+			defer server.Close() // #nosec G104 -- Cleanup, error not critical
 
 			client := network.NewClient(tt.config)
 			ctx := context.Background()
@@ -315,7 +315,7 @@ func TestClientGet(t *testing.T) {
 			if tt.validateBody != nil {
 				tt.validateBody(t, body)
 			} else {
-				body.Close()
+				body.Close() // #nosec G104 -- Cleanup, error not critical
 			}
 
 			if tt.validateStatus != nil {
@@ -332,7 +332,7 @@ func TestRetryDelays(t *testing.T) {
 		attemptTimes = append(attemptTimes, time.Now())
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	defer server.Close() // #nosec G104 -- Cleanup, error not critical
 
 	client := network.NewClient(network.Config{
 		Timeout:    10 * time.Second,
@@ -356,9 +356,9 @@ func TestRetryDelays(t *testing.T) {
 func TestConcurrentRequests(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("concurrent-ok"))
+		_, _ = w.Write([]byte("concurrent-ok")) // #nosec G104 -- Websocket buffer write
 	}))
-	defer server.Close()
+	defer server.Close() // #nosec G104 -- Cleanup, error not critical
 
 	client := network.NewClient(network.Config{
 		Timeout:    5 * time.Second,
@@ -377,7 +377,7 @@ func TestConcurrentRequests(t *testing.T) {
 				errs <- err
 				return
 			}
-			defer body.Close()
+			defer body.Close() // #nosec G104 -- Cleanup, error not critical
 
 			if status != http.StatusOK {
 				errs <- fmt.Errorf("unexpected status: %d", status)

@@ -75,8 +75,8 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	}
 
 	// Run pip-audit on the package file
-	cmd := exec.CommandContext(ctx, "pip-audit", "-r", tmpFile, "--format", "json")
-	output, _ := cmd.CombinedOutput() // pip-audit returns non-zero when vulns found
+	cmd := exec.CommandContext(ctx, "pip-audit", "-r", tmpFile, "--format", "json") // #nosec G204 -- pip-audit command with temp file
+	output, _ := cmd.CombinedOutput()                                               // pip-audit returns non-zero when vulns found
 
 	// Parse pip-audit output
 	var auditResult PipAuditResult
@@ -110,11 +110,11 @@ func (s *Scanner) Health(ctx context.Context) error {
 
 // copyFile copies a file from src to dst
 func (s *Scanner) copyFile(src, dst string) error {
-	input, err := os.ReadFile(src)
+	input, err := os.ReadFile(src) // #nosec G304 -- Source path is from scanner, controlled
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, input, 0644)
+	return os.WriteFile(dst, input, 0600)
 }
 
 // emptyResult returns an empty scan result

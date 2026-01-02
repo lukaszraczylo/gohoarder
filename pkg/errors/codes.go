@@ -9,7 +9,7 @@ const (
 	ErrCodeNotFound        = "NOT_FOUND"
 	ErrCodeRateLimited     = "RATE_LIMITED"
 	ErrCodePayloadTooLarge = "PAYLOAD_TOO_LARGE"
-	ErrCodeInvalidAPIKey   = "INVALID_API_KEY"
+	ErrCodeInvalidAPIKey   = "INVALID_API_KEY" // #nosec G101 -- Not a credential, just an error code constant
 	ErrCodeQuotaExceeded   = "QUOTA_EXCEEDED"
 	ErrCodeConflict        = "CONFLICT"
 	ErrCodeInvalidConfig   = "INVALID_CONFIG"

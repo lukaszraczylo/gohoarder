@@ -224,7 +224,7 @@ func (l *Lock) IsHeld(ctx context.Context) bool {
 
 // Close closes the lock manager and its Redis connection
 func (m *Manager) Close() error {
-	return m.client.Close()
+	return m.client.Close() // #nosec G104 -- Cleanup, error not critical
 }
 
 // generateLockValue generates a cryptographically random lock value

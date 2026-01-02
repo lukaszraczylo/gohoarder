@@ -46,7 +46,7 @@ func FetchFromUpstream(
 // WriteResponse writes the cache entry data to the HTTP response writer
 // Sets appropriate content type and handles errors
 func WriteResponse(w http.ResponseWriter, entry *cache.CacheEntry, contentType string) error {
-	defer entry.Data.Close()
+	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
 
 	w.Header().Set("Content-Type", contentType)
 	if _, err := io.Copy(w, entry.Data); err != nil {

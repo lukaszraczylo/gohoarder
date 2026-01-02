@@ -147,13 +147,13 @@ func New(cfg Config) (*SQLiteStore, error) {
 
 	// Create schema
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		db.Close() // #nosec G104 -- Cleanup, error not critical
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SQLite schema")
 	}
 
 	// Run migrations for existing databases
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		db.Close() // #nosec G104 -- Cleanup, error not critical
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to run database migrations")
 	}
 
@@ -383,7 +383,7 @@ func (s *SQLiteStore) ListPackages(ctx context.Context, opts *metadata.ListOptio
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to list packages")
 	}
-	defer rows.Close()
+	defer rows.Close() // #nosec G104 -- Cleanup, error not critical
 
 	var packages []*metadata.Package
 	for rows.Next() {
@@ -407,7 +407,7 @@ func (s *SQLiteStore) ListPackages(ctx context.Context, opts *metadata.ListOptio
 		}
 
 		if metadataJSON != "" {
-			goccy_json.Unmarshal([]byte(metadataJSON), &pkg.Metadata)
+			_ = goccy_json.Unmarshal([]byte(metadataJSON), &pkg.Metadata) // #nosec G104 -- Best-effort unmarshal
 		}
 
 		packages = append(packages, &pkg)
@@ -504,7 +504,7 @@ func (s *SQLiteStore) GetStats(ctx context.Context, registry string) (*metadata.
 		vulnArgs = append(vulnArgs, registry)
 	}
 
-	s.db.QueryRowContext(ctx, vulnQuery, vulnArgs...).Scan(&stats.VulnerablePackages)
+	_ = s.db.QueryRowContext(ctx, vulnQuery, vulnArgs...).Scan(&stats.VulnerablePackages) // #nosec G104 -- Optional query
 
 	return &stats, nil
 }
@@ -607,7 +607,7 @@ func (s *SQLiteStore) GetTimeSeriesStats(ctx context.Context, period string, reg
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to query time-series stats")
 	}
-	defer rows.Close()
+	defer rows.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// Collect data points
 	dataMap := make(map[string]int64)
@@ -869,11 +869,11 @@ func (s *SQLiteStore) GetScanResult(ctx context.Context, registry, name, version
 
 	// Deserialize
 	if vulnJSON != "" {
-		goccy_json.Unmarshal([]byte(vulnJSON), &result.Vulnerabilities)
+		_ = goccy_json.Unmarshal([]byte(vulnJSON), &result.Vulnerabilities) // #nosec G104 -- Best-effort unmarshal
 	}
 
 	if detailsJSON != "" {
-		goccy_json.Unmarshal([]byte(detailsJSON), &result.Details)
+		_ = goccy_json.Unmarshal([]byte(detailsJSON), &result.Details) // #nosec G104 -- Best-effort unmarshal
 	}
 
 	return &result, nil
@@ -950,7 +950,7 @@ func (s *SQLiteStore) GetActiveCVEBypasses(ctx context.Context) ([]*metadata.CVE
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get active CVE bypasses")
 	}
-	defer rows.Close()
+	defer rows.Close() // #nosec G104 -- Cleanup, error not critical
 
 	var bypasses []*metadata.CVEBypass
 	for rows.Next() {
@@ -1022,7 +1022,7 @@ func (s *SQLiteStore) ListCVEBypasses(ctx context.Context, opts *metadata.Bypass
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to list CVE bypasses")
 	}
-	defer rows.Close()
+	defer rows.Close() // #nosec G104 -- Cleanup, error not critical
 
 	var bypasses []*metadata.CVEBypass
 	for rows.Next() {
@@ -1085,5 +1085,5 @@ func (s *SQLiteStore) CleanupExpiredBypasses(ctx context.Context) (int, error) {
 
 // Close closes the metadata store
 func (s *SQLiteStore) Close() error {
-	return s.db.Close()
+	return s.db.Close() // #nosec G104 -- Cleanup, error not critical
 }

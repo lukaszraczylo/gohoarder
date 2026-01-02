@@ -32,10 +32,10 @@ func (s *FilesystemStorageTestSuite) SetupTest() {
 
 func (s *FilesystemStorageTestSuite) TearDownTest() {
 	if s.fs != nil {
-		s.fs.Close()
+		s.fs.Close() // #nosec G104 -- Cleanup, error not critical
 	}
 	if s.tempDir != "" {
-		os.RemoveAll(s.tempDir)
+		_ = os.RemoveAll(s.tempDir) // #nosec G104 -- Cleanup
 	}
 }
 
@@ -148,7 +148,7 @@ func (s *FilesystemStorageTestSuite) TestGet() {
 			} else {
 				s.NoError(err)
 				s.NotNil(reader)
-				defer reader.Close()
+				defer reader.Close() // #nosec G104 -- Cleanup, error not critical
 
 				data, err := io.ReadAll(reader)
 				s.NoError(err)
@@ -362,7 +362,7 @@ func (s *FilesystemStorageTestSuite) TestQuotaEnforcement() {
 
 	smallFs, err := New(smallQuotaDir, 100)
 	s.Require().NoError(err)
-	defer smallFs.Close()
+	defer smallFs.Close() // #nosec G104 -- Cleanup, error not critical
 
 	// First write should succeed
 	err = smallFs.Put(ctx, "file1.txt", strings.NewReader("small content"), nil)
@@ -532,7 +532,7 @@ func (s *FilesystemStorageTestSuite) TestConcurrentReadsAndWrites() {
 				reader, err := s.fs.Get(ctx, key)
 				if err == nil {
 					io.ReadAll(reader)
-					reader.Close()
+					reader.Close() // #nosec G104 -- Cleanup, error not critical
 				}
 			}
 		}(i)
@@ -614,7 +614,7 @@ func (s *FilesystemStorageTestSuite) TestAtomicWrite() {
 						continue
 					}
 					data, err := io.ReadAll(reader)
-					reader.Close()
+					reader.Close() // #nosec G104 -- Cleanup, error not critical
 					if err != nil {
 						readErrors <- err
 						continue
@@ -720,7 +720,7 @@ func BenchmarkFilesystemPut(b *testing.B) {
 	defer os.RemoveAll(tempDir)
 
 	fs, _ := New(tempDir, 1024*1024*1024) // 1GB quota
-	defer fs.Close()
+	defer fs.Close()                      // #nosec G104 -- Cleanup, error not critical
 
 	ctx := context.Background()
 	data := strings.Repeat("x", 1024) // 1KB
@@ -738,7 +738,7 @@ func BenchmarkFilesystemGet(b *testing.B) {
 	defer os.RemoveAll(tempDir)
 
 	fs, _ := New(tempDir, 1024*1024*1024)
-	defer fs.Close()
+	defer fs.Close() // #nosec G104 -- Cleanup, error not critical
 
 	ctx := context.Background()
 	data := strings.Repeat("x", 1024)
@@ -751,7 +751,7 @@ func BenchmarkFilesystemGet(b *testing.B) {
 		reader, _ := fs.Get(ctx, "bench/test.txt")
 		if reader != nil {
 			io.ReadAll(reader)
-			reader.Close()
+			reader.Close() // #nosec G104 -- Cleanup, error not critical
 		}
 	}
 }

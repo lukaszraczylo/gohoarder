@@ -57,7 +57,7 @@ func (b *ModuleBuilder) BuildModuleZip(ctx context.Context, srcPath, modulePath,
 	prefix := fmt.Sprintf("%s@%s/", modulePath, version)
 	for _, relPath := range files {
 		if err := b.addFileToZip(zipWriter, srcPath, relPath, prefix); err != nil {
-			zipWriter.Close()
+			zipWriter.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, fmt.Errorf("failed to add file %s: %w", relPath, err)
 		}
 	}
@@ -148,11 +148,11 @@ func (b *ModuleBuilder) addFileToZip(zipWriter *zip.Writer, srcPath, relPath, pr
 	}
 
 	// Copy file contents
-	file, err := os.Open(fullPath)
+	file, err := os.Open(fullPath) // #nosec G304 -- Path is from zip archive extraction
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer file.Close() // #nosec G104 -- Cleanup, error not critical
 
 	if _, err := io.Copy(writer, file); err != nil {
 		return err
@@ -207,7 +207,7 @@ func (b *ModuleBuilder) getGitCommitTime(repoPath string) (time.Time, error) {
 func (b *ModuleBuilder) ExtractGoMod(ctx context.Context, srcPath string) ([]byte, error) {
 	goModPath := filepath.Join(srcPath, "go.mod")
 
-	data, err := os.ReadFile(goModPath)
+	data, err := os.ReadFile(goModPath) // #nosec G304 -- Path is from controlled temp directory
 	if err != nil {
 		return nil, fmt.Errorf("failed to read go.mod: %w", err)
 	}

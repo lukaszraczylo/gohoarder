@@ -4,7 +4,7 @@ ARG TARGETARCH
 
 FROM alpine:latest
 
-# Install scanning tools and runtime dependencies
+# Install scanning tools and runtime dependencies (including CGO/SQLite dependencies)
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -12,6 +12,8 @@ RUN apk add --no-cache \
     curl \
     wget \
     bash \
+    sqlite-libs \
+    musl \
     && update-ca-certificates
 
 # Install Trivy for container scanning

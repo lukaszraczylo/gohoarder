@@ -4,10 +4,12 @@ ARG TARGETARCH
 
 FROM alpine:latest
 
-# Install runtime dependencies
+# Install runtime dependencies (including CGO/SQLite dependencies)
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
+    sqlite-libs \
+    musl \
     && update-ca-certificates
 
 # Create non-root user

@@ -18,7 +18,7 @@ builds:
     main: ./cmd/gohoarder
     binary: gohoarder
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - linux
       - darwin

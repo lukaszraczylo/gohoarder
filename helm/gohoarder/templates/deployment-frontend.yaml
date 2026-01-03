@@ -26,7 +26,30 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "gohoarder.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        fsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 101
+      initContainers:
+      - name: copy-static-files
+        image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag | default .Chart.AppVersion }}"
+        command: ['sh', '-c']
+        args:
+        - |
+          # Copy built frontend files to writable volume
+          cp -rp /usr/share/nginx/html/* /html/
+          # Copy nginx config to writable volume
+          cp -rp /etc/nginx/conf.d/* /conf/
+        volumeMounts:
+        - name: nginx-html
+          mountPath: /html
+        - name: nginx-conf
+          mountPath: /conf
+        securityContext:
+          runAsUser: 101
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
       containers:
       - name: frontend
         securityContext:
@@ -35,6 +58,7 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: false
+          runAsUser: 101
         image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.frontend.pullPolicy }}
         ports:
@@ -64,12 +88,20 @@ spec:
           mountPath: /var/cache/nginx
         - name: nginx-run
           mountPath: /var/run
+        - name: nginx-html
+          mountPath: /usr/share/nginx/html
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d
       volumes:
       - name: tmp
         emptyDir: {}
       - name: nginx-cache
         emptyDir: {}
       - name: nginx-run
+        emptyDir: {}
+      - name: nginx-html
+        emptyDir: {}
+      - name: nginx-conf
         emptyDir: {}
       {{- with .Values.frontend.nodeSelector }}
       nodeSelector:

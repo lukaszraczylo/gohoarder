@@ -42,9 +42,14 @@ spec:
           chown -R 1000:1000 /var/cache/gohoarder /var/lib/gohoarder /tmp/gohoarder
           chmod 750 /var/cache/gohoarder /var/lib/gohoarder
         volumeMounts:
-        {{- include "gohoarder.storageVolume" . | nindent 8 }}
-        {{- include "gohoarder.metadataVolume" . | nindent 8 }}
-        {{- include "gohoarder.trivyCacheVolume" . | nindent 8 }}
+        - name: storage
+          mountPath: /var/cache/gohoarder
+        - name: metadata
+          mountPath: /var/lib/gohoarder/metadata
+        {{- if .Values.security.scanners.trivy.enabled }}
+        - name: trivy-cache
+          mountPath: {{ .Values.security.scanners.trivy.cacheDb }}
+        {{- end }}
         - name: tmp
           mountPath: /tmp/gohoarder
         securityContext:

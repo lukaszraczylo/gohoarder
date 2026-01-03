@@ -79,14 +79,15 @@ release:
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
   - id: gohoarder-server
-    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-server
-    build_flag_templates:
-      - "--platform=linux/amd64,linux/arm64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_TIME={{ .Date }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    build_args:
+      VERSION: "{{ .Version }}"
+      GIT_COMMIT: "{{ .ShortCommit }}"
+      BUILD_TIME: "{{ .Date }}"
     tags:
       - "{{ .Version }}"
       - latest
@@ -104,11 +105,11 @@ dockers_v2:
 
   # 2. Website - Frontend Dashboard
   - id: gohoarder-frontend
-    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-frontend
-    build_flag_templates:
-      - "--platform=linux/amd64,linux/arm64"
+    platforms:
+      - linux/amd64
+      - linux/arm64
     tags:
       - "{{ .Version }}"
       - latest
@@ -126,14 +127,15 @@ dockers_v2:
 
   # 3. Scanning Engine - Background scanner worker
   - id: gohoarder-scanner
-    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-scanner
-    build_flag_templates:
-      - "--platform=linux/amd64,linux/arm64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_TIME={{ .Date }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    build_args:
+      VERSION: "{{ .Version }}"
+      GIT_COMMIT: "{{ .ShortCommit }}"
+      BUILD_TIME: "{{ .Date }}"
     tags:
       - "{{ .Version }}"
       - latest
@@ -151,11 +153,11 @@ dockers_v2:
 
   # 4. Gateway - Nginx reverse proxy for unified deployment
   - id: gohoarder-gateway
-    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-gateway
-    build_flag_templates:
-      - "--platform=linux/amd64,linux/arm64"
+    platforms:
+      - linux/amd64
+      - linux/arm64
     tags:
       - "{{ .Version }}"
       - latest
@@ -171,14 +173,15 @@ dockers_v2:
 
   # 5. Migration Engine - Database migration tool
   - id: gohoarder-migrate
-    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-migrate
-    build_flag_templates:
-      - "--platform=linux/amd64,linux/arm64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_TIME={{ .Date }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    build_args:
+      VERSION: "{{ .Version }}"
+      GIT_COMMIT: "{{ .ShortCommit }}"
+      BUILD_TIME: "{{ .Date }}"
     tags:
       - "{{ .Version }}"
       - latest

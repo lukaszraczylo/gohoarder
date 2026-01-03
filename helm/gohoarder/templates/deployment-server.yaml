@@ -30,6 +30,77 @@ spec:
       serviceAccountName: {{ include "gohoarder.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.migration.enabled }}
+      initContainers:
+      # Wait for database to be ready
+      - name: wait-for-db
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for database..."
+          {{- if eq .Values.metadata.backend "postgresql" }}
+          until nc -z {{ .Values.metadata.postgresql.host }} {{ .Values.metadata.postgresql.port }}; do
+            echo "  PostgreSQL not ready, retrying in 2s..."
+            sleep 2
+          done
+          echo "✓ PostgreSQL is ready"
+          {{- else if eq .Values.metadata.backend "mysql" }}
+          until nc -z {{ .Values.metadata.mysql.host }} {{ .Values.metadata.mysql.port }}; do
+            echo "  MySQL not ready, retrying in 2s..."
+            sleep 2
+          done
+          echo "✓ MySQL is ready"
+          {{- else }}
+          echo "✓ SQLite (no wait needed)"
+          {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+      # Run database migrations
+      - name: migrate
+        image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+        env:
+        - name: DB_DRIVER
+          value: {{ .Values.metadata.backend | quote }}
+        {{- if eq .Values.metadata.backend "postgresql" }}
+        - name: DATABASE_URL
+          value: "postgresql://{{ .Values.metadata.postgresql.username }}:{{ .Values.metadata.postgresql.password }}@{{ .Values.metadata.postgresql.host }}:{{ .Values.metadata.postgresql.port }}/{{ .Values.metadata.postgresql.database }}?sslmode={{ .Values.metadata.postgresql.sslMode }}"
+        {{- else if eq .Values.metadata.backend "mysql" }}
+        - name: DATABASE_URL
+          value: "{{ .Values.metadata.mysql.username }}:{{ .Values.metadata.mysql.password }}@tcp({{ .Values.metadata.mysql.host }}:{{ .Values.metadata.mysql.port }})/{{ .Values.metadata.mysql.database }}?charset={{ .Values.metadata.mysql.charset }}&parseTime={{ .Values.metadata.mysql.parseTime }}"
+        {{- else }}
+        - name: DATABASE_URL
+          value: "/var/lib/gohoarder/metadata/gohoarder.db"
+        {{- end }}
+        args:
+        - --driver=$(DB_DRIVER)
+        - --dsn=$(DATABASE_URL)
+        - --action=migrate
+        - --log-level={{ .Values.migration.logLevel | default "info" }}
+        - --timeout={{ .Values.migration.timeout | default "5m" }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+        resources:
+          {{- toYaml .Values.migration.resources | nindent 10 }}
+        {{- if eq .Values.metadata.backend "sqlite" }}
+        volumeMounts:
+        - name: metadata
+          mountPath: /var/lib/gohoarder/metadata
+        {{- end }}
+      {{- end }}
       containers:
       - name: server
         securityContext:
@@ -123,6 +194,29 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ include "gohoarder.fullname" . }}-postgresql
+              key: password
+        {{- end }}
+        {{- if and (or (eq .Values.metadata.backend "mysql") (eq .Values.metadata.backend "mariadb")) .Values.metadata.mysql.existingSecret }}
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.metadata.mysql.existingSecret }}
+              key: username
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.metadata.mysql.existingSecret }}
+              key: password
+        {{- else if and (or (eq .Values.metadata.backend "mysql") (eq .Values.metadata.backend "mariadb")) .Values.metadata.mysql.username }}
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-mysql
+              key: username
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gohoarder.fullname" . }}-mysql
               key: password
         {{- end }}
         {{- if and .Values.security.scanners.ghsa.enabled .Values.security.scanners.ghsa.existingSecret }}

@@ -78,17 +78,24 @@ clean: ## Clean build artifacts
 	@rm -f *.db *.db-shm *.db-wal
 	@echo "Clean complete"
 
-clean-db: ## Clean all local cache and database files (from config.yaml paths)
+clean-db: ## Clean all local cache and database files (requires confirmation)
 	@echo "WARNING: This will delete all cached packages and scan results!"
-	@echo "Paths from config.yaml:"
+	@echo "Paths to be cleaned:"
 	@echo "  - ./data/storage (package cache)"
-	@echo "  - ./data/gohoarder.db (metadata database)"
+	@echo "  - ./data/gohoarder.db and gohoarder.db (metadata database)"
 	@echo "  - /tmp/trivy (Trivy cache)"
 	@echo ""
-	@read -p "Are you sure you want to continue? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@printf "Are you sure you want to continue? [y/N] " && read confirm && [ "$$confirm" = "y" ] || (echo "Cancelled." && exit 1)
 	@echo "Cleaning database and cache..."
-	@rm -rf ./data/storage
-	@rm -f ./data/gohoarder.db ./data/gohoarder.db-shm ./data/gohoarder.db-wal
+	@rm -rf ./data/storage ./data
+	@rm -f gohoarder.db gohoarder.db-shm gohoarder.db-wal
+	@rm -rf /tmp/trivy
+	@echo "Database and cache cleaned successfully"
+
+clean-db-force: ## Clean all local cache and database files (no confirmation)
+	@echo "Cleaning database and cache..."
+	@rm -rf ./data/storage ./data
+	@rm -f gohoarder.db gohoarder.db-shm gohoarder.db-wal
 	@rm -rf /tmp/trivy
 	@echo "Database and cache cleaned successfully"
 

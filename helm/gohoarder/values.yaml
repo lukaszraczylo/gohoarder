@@ -272,7 +272,7 @@ storage:
 
 # Metadata storage configuration
 metadata:
-  # Backend: sqlite, postgresql
+  # Backend: sqlite, postgresql, mysql
   #
   # IMPORTANT: SQLite CANNOT be used with SMB/CIFS/NFS network storage!
   # SQLite requires POSIX file locking which causes "database is locked" errors on network filesystems.
@@ -286,6 +286,13 @@ metadata:
   # 2. PostgreSQL with any storage (RECOMMENDED for production)
   #    - Set backend: postgresql
   #    - Configure postgresql settings below
+  #    - Works with any storage including SMB/NFS
+  #    - Supports multiple replicas and high availability
+  #
+  # 3. MySQL/MariaDB with any storage (alternative to PostgreSQL)
+  #    - Set backend: mysql
+  #    - Configure mysql settings below
+  #    - Works with any storage including SMB/NFS
   #
   backend: "sqlite"
 
@@ -305,6 +312,8 @@ metadata:
     walMode: false
 
   # PostgreSQL configuration
+  # Works with any storage including SMB/NFS
+  # Recommended for production deployments
   postgresql:
     # Use bundled PostgreSQL (sets up postgresql subchart)
     enabled: false
@@ -313,9 +322,56 @@ metadata:
     database: "gohoarder"
     username: "gohoarder"
     password: ""
-    sslMode: "disable"
+    sslMode: "disable"  # disable, require, verify-ca, verify-full
     # Use existing secret for PostgreSQL credentials
     existingSecret: ""
+
+  # MySQL/MariaDB configuration
+  # Works with any storage including SMB/NFS
+  # Alternative to PostgreSQL for production deployments
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "gohoarder"
+    username: "gohoarder"
+    password: ""
+    charset: "utf8mb4"
+    parseTime: true
+    # Use existing secret for MySQL credentials
+    existingSecret: ""
+
+  # GORM connection pool settings (applies to all database backends)
+  # These settings control database connection pooling and performance
+  maxOpenConns: 25      # Maximum number of open connections to the database
+  maxIdleConns: 5       # Maximum number of idle connections in the pool
+  connMaxLifetime: 3600 # Maximum lifetime of a connection in seconds (1 hour)
+  logLevel: "warn"      # GORM log level: silent, error, warn, info
+
+# Database migration configuration
+migration:
+  # Enable automatic database migrations via init containers
+  # When enabled, each pod will run migrations before starting the main container
+  # Gormigrate handles concurrency automatically - safe for multiple pods
+  enabled: true
+
+  # Migration image configuration
+  image:
+    repository: ghcr.io/lukaszraczylo/gohoarder-migrate
+    pullPolicy: IfNotPresent
+    tag: "latest"  # Should match the application version
+
+  # Migration settings
+  logLevel: "info"    # debug, info, warn, error
+  timeout: "5m"       # Maximum time for migrations to complete
+
+  # Resource limits for migration init container
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
 
 # Cache configuration
 cache:

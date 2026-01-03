@@ -148,6 +148,17 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	packageName, version := extractPackageFileInfo(path)
 
+	// Make version unique by appending file type to avoid cache collisions
+	// between .whl and .metadata files with same version
+	cacheVersion := version
+	if strings.HasSuffix(path, ".metadata") {
+		cacheVersion = version + ".metadata"
+	} else if strings.HasSuffix(path, ".whl") {
+		cacheVersion = version + ".whl"
+	} else if strings.HasSuffix(path, ".tar.gz") {
+		cacheVersion = version + ".tar.gz"
+	}
+
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
 	credHash := h.credHasher.Hash(credentials)
@@ -170,12 +181,13 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		Str("path", path).
 		Str("package", packageName).
 		Str("version", version).
+		Str("cache_version", cacheVersion).
 		Str("url", originalURL).
 		Str("cred_hash", credHash).
 		Bool("has_credentials", credentials != "").
 		Msg("Handling PyPI package file request")
 
-	entry, err := h.cache.Get(ctx, "pypi", packageName, version, func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "pypi", packageName, cacheVersion, func(ctx context.Context) (io.ReadCloser, string, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -281,11 +293,12 @@ func isPackagePage(path string) bool {
 
 // isPackageFile checks if the request is for a package file
 func isPackageFile(path string) bool {
-	// Package files (not including .metadata files which need special handling)
+	// Package files including .metadata files for PEP 658 support
 	return strings.HasSuffix(path, ".whl") ||
 		strings.HasSuffix(path, ".tar.gz") ||
 		strings.HasSuffix(path, ".zip") ||
-		strings.HasSuffix(path, ".egg")
+		strings.HasSuffix(path, ".egg") ||
+		strings.HasSuffix(path, ".metadata")
 }
 
 // extractPackageName extracts package name from path

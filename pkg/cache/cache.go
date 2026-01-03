@@ -203,9 +203,12 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 		return nil, err
 	}
 
+	// Skip security scan wait for metadata entries (index pages, lists, etc.)
+	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata"
+
 	// Wait briefly for initial scan to complete if scanner is enabled
 	// This prevents serving vulnerable packages on first request
-	if m.scanner != nil {
+	if m.scanner != nil && !isMetadataEntry {
 		// Wait up to 30 seconds for scan to complete
 		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -360,15 +363,19 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		Metadata:       make(map[string]string),
 	}
 
-	// Save metadata
-	if err := m.metadata.SavePackage(ctx, pkg); err != nil {
-		// Clean up storage if metadata save fails
-		_ = m.storage.Delete(ctx, storageKey) // #nosec G104 -- Cleanup, error logged
-		return nil, err
+	// Save metadata (skip metadata entries like index pages, lists, etc.)
+	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata"
+	if !isMetadataEntry {
+		if err := m.metadata.SavePackage(ctx, pkg); err != nil {
+			// Clean up storage if metadata save fails
+			_ = m.storage.Delete(ctx, storageKey) // #nosec G104 -- Cleanup, error logged
+			return nil, err
+		}
 	}
 
 	// Scan package if scanner is enabled (run in background to not block cache operations)
-	if m.scanner != nil {
+	// Skip scanning metadata entries (index pages, lists, etc.)
+	if m.scanner != nil && !isMetadataEntry {
 		go func() {
 			scanCtx := context.Background()
 			var filePath string

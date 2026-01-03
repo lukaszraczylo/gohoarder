@@ -19,7 +19,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/health"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	metafile "github.com/lukaszraczylo/gohoarder/pkg/metadata/file"
-	metasqlite "github.com/lukaszraczylo/gohoarder/pkg/metadata/sqlite"
+	metagorm "github.com/lukaszraczylo/gohoarder/pkg/metadata/gormstore"
 	"github.com/lukaszraczylo/gohoarder/pkg/metrics"
 	"github.com/lukaszraczylo/gohoarder/pkg/network"
 	"github.com/lukaszraczylo/gohoarder/pkg/prewarming"
@@ -119,18 +119,67 @@ func (a *App) initializeComponents() error {
 	log.Info().Str("backend", a.config.Metadata.Backend).Msg("Initializing metadata store")
 	switch a.config.Metadata.Backend {
 	case "sqlite":
-		a.metadata, err = metasqlite.New(metasqlite.Config{
-			Path:    a.config.Metadata.Connection,
-			WALMode: a.config.Metadata.SQLite.WALMode,
+		// Use GORM for SQLite
+		a.metadata, err = metagorm.NewV2(metagorm.Config{
+			Driver:          "sqlite",
+			DSN:             metagorm.BuildSQLiteDSN(a.config.Metadata.SQLite.Path, a.config.Metadata.SQLite.WALMode),
+			MaxOpenConns:    getOrDefault(a.config.Metadata.MaxOpenConns, 25),
+			MaxIdleConns:    getOrDefault(a.config.Metadata.MaxIdleConns, 5),
+			ConnMaxLifetime: time.Duration(getOrDefault(a.config.Metadata.ConnMaxLifetime, 3600)) * time.Second,
+			LogLevel:        getOrDefaultStr(a.config.Metadata.LogLevel, "warn"),
 		})
+
+	case "postgresql", "postgres":
+		// Use GORM for PostgreSQL
+		dsn := metagorm.BuildPostgresDSN(
+			a.config.Metadata.PostgreSQL.Host,
+			a.config.Metadata.PostgreSQL.Port,
+			a.config.Metadata.PostgreSQL.User,
+			a.config.Metadata.PostgreSQL.Password,
+			a.config.Metadata.PostgreSQL.Database,
+			getOrDefaultStr(a.config.Metadata.PostgreSQL.SSLMode, "disable"),
+		)
+		a.metadata, err = metagorm.NewV2(metagorm.Config{
+			Driver:          "postgres",
+			DSN:             dsn,
+			MaxOpenConns:    getOrDefault(a.config.Metadata.MaxOpenConns, 25),
+			MaxIdleConns:    getOrDefault(a.config.Metadata.MaxIdleConns, 5),
+			ConnMaxLifetime: time.Duration(getOrDefault(a.config.Metadata.ConnMaxLifetime, 3600)) * time.Second,
+			LogLevel:        getOrDefaultStr(a.config.Metadata.LogLevel, "warn"),
+		})
+
+	case "mysql", "mariadb":
+		// Use GORM for MySQL/MariaDB
+		dsn := metagorm.BuildMySQLDSN(
+			a.config.Metadata.MySQL.Host,
+			a.config.Metadata.MySQL.Port,
+			a.config.Metadata.MySQL.User,
+			a.config.Metadata.MySQL.Password,
+			a.config.Metadata.MySQL.Database,
+			getOrDefaultStr(a.config.Metadata.MySQL.Charset, "utf8mb4"),
+		)
+		a.metadata, err = metagorm.NewV2(metagorm.Config{
+			Driver:          "mysql",
+			DSN:             dsn,
+			MaxOpenConns:    getOrDefault(a.config.Metadata.MaxOpenConns, 25),
+			MaxIdleConns:    getOrDefault(a.config.Metadata.MaxIdleConns, 5),
+			ConnMaxLifetime: time.Duration(getOrDefault(a.config.Metadata.ConnMaxLifetime, 3600)) * time.Second,
+			LogLevel:        getOrDefaultStr(a.config.Metadata.LogLevel, "warn"),
+		})
+
 	case "file":
+		// Keep file backend as-is for file-based metadata
 		a.metadata, err = metafile.New(metafile.Config{
 			Path: a.config.Metadata.Connection,
 		})
+
 	default:
-		a.metadata, err = metasqlite.New(metasqlite.Config{
-			Path:    "gohoarder.db",
-			WALMode: false, // Default to DELETE mode for compatibility
+		// Default to SQLite with GORM
+		log.Warn().Str("backend", a.config.Metadata.Backend).Msg("Unknown metadata backend, defaulting to SQLite with GORM")
+		a.metadata, err = metagorm.NewV2(metagorm.Config{
+			Driver:   "sqlite",
+			DSN:      metagorm.BuildSQLiteDSN("gohoarder.db", false),
+			LogLevel: "warn",
 		})
 	}
 	if err != nil {
@@ -478,4 +527,20 @@ func (a *App) startAggregationWorker(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// getOrDefault returns the value if it's non-zero, otherwise returns the default
+func getOrDefault(value, defaultValue int) int {
+	if value == 0 {
+		return defaultValue
+	}
+	return value
+}
+
+// getOrDefaultStr returns the value if it's non-empty, otherwise returns the default
+func getOrDefaultStr(value, defaultValue string) string {
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }

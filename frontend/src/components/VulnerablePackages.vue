@@ -7,11 +7,16 @@
         Back to Stats
       </Button>
       <div class="flex items-center gap-3">
-        <i class="fas fa-exclamation-triangle text-3xl text-red-600"></i>
+        <i :class="showOnlyBlocked ? 'fas fa-hand' : 'fas fa-exclamation-triangle'" class="text-3xl text-red-600"></i>
         <div>
-          <h1 class="text-3xl font-bold text-gray-900">Vulnerable Packages</h1>
+          <h1 class="text-3xl font-bold text-gray-900">
+            {{ showOnlyBlocked ? 'Blocked Packages' : 'Vulnerable Packages' }}
+          </h1>
           <p class="text-gray-600 mt-1">
-            Packages with known security vulnerabilities, sorted by risk
+            {{ showOnlyBlocked
+              ? 'Packages blocked from download due to exceeding vulnerability thresholds'
+              : 'Packages with known security vulnerabilities, sorted by risk'
+            }}
           </p>
         </div>
       </div>
@@ -132,6 +137,7 @@
                             :counts="version.vulnerabilities.counts"
                             :total="version.vulnerabilities.total"
                             :scannedAt="version.vulnerabilities.scannedAt"
+                            :isBlocked="version.vulnerabilities.isBlocked"
                             @click.stop="navigateToPackage(version)"
                           />
                         </div>
@@ -170,10 +176,14 @@ import { getRegistryBadgeClass } from '@/composables/useBadgeStyles'
 
 const store = usePackageStore()
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 const vulnerablePackages = ref<Package[]>([])
+
+// Check if we should filter to show only blocked packages
+const showOnlyBlocked = computed(() => route.path === '/blocked-packages')
 
 onMounted(async () => {
   await fetchVulnerablePackages()
@@ -185,9 +195,13 @@ async function fetchVulnerablePackages() {
 
   try {
     await store.fetchPackages()
-    vulnerablePackages.value = store.packages.filter(
-      pkg => pkg.vulnerabilities?.status === 'vulnerable'
-    )
+    vulnerablePackages.value = store.packages.filter(pkg => {
+      const isVulnerable = pkg.vulnerabilities?.status === 'vulnerable'
+      if (showOnlyBlocked.value) {
+        return isVulnerable && pkg.vulnerabilities?.isBlocked === true
+      }
+      return isVulnerable
+    })
   } catch (err: any) {
     console.error('Failed to load vulnerable packages:', err)
     error.value = err.message || 'Failed to load vulnerable packages'

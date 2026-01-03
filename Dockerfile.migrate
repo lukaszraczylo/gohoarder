@@ -1,0 +1,30 @@
+# Migration Engine - Database Migration Tool
+ARG TARGETOS
+ARG TARGETARCH
+
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    postgresql-client \
+    mysql-client \
+    busybox-extras \
+    && update-ca-certificates
+
+# Create non-root user
+RUN addgroup -g 1000 gohoarder && \
+    adduser -D -u 1000 -G gohoarder gohoarder
+
+# Copy binary (from platform-specific path)
+ARG TARGETOS
+ARG TARGETARCH
+COPY ${TARGETOS}/${TARGETARCH}/migrate /usr/local/bin/migrate
+RUN chmod +x /usr/local/bin/migrate
+
+WORKDIR /app
+USER gohoarder
+
+# Run migrations
+ENTRYPOINT ["/usr/local/bin/migrate"]
+CMD ["--action=migrate"]

@@ -73,10 +73,17 @@ type SMBConfig struct {
 
 // MetadataConfig contains metadata store configuration
 type MetadataConfig struct {
-	PostgreSQL PostgreSQLConfig `mapstructure:"postgresql" json:"postgresql"`
 	Backend    string           `mapstructure:"backend" json:"backend"`
 	Connection string           `mapstructure:"connection" json:"connection"`
 	SQLite     SQLiteConfig     `mapstructure:"sqlite" json:"sqlite"`
+	PostgreSQL PostgreSQLConfig `mapstructure:"postgresql" json:"postgresql"`
+	MySQL      MySQLConfig      `mapstructure:"mysql" json:"mysql"`
+
+	// GORM-specific settings
+	MaxOpenConns    int    `mapstructure:"max_open_conns" json:"max_open_conns"`
+	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
+	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"` // seconds
+	LogLevel        string `mapstructure:"log_level" json:"log_level"`                 // "silent", "error", "warn", "info"
 }
 
 // SQLiteConfig contains SQLite-specific configuration
@@ -88,11 +95,22 @@ type SQLiteConfig struct {
 // PostgreSQLConfig contains PostgreSQL-specific configuration
 type PostgreSQLConfig struct {
 	Host     string `mapstructure:"host" json:"host"`
+	Port     int    `mapstructure:"port" json:"port"`
 	Database string `mapstructure:"database" json:"database"`
 	User     string `mapstructure:"user" json:"user"`
 	Password string `mapstructure:"password" json:"-"`
 	SSLMode  string `mapstructure:"ssl_mode" json:"ssl_mode"`
-	Port     int    `mapstructure:"port" json:"port"`
+}
+
+// MySQLConfig contains MySQL/MariaDB-specific configuration
+type MySQLConfig struct {
+	Host      string `mapstructure:"host" json:"host"`
+	Port      int    `mapstructure:"port" json:"port"`
+	Database  string `mapstructure:"database" json:"database"`
+	User      string `mapstructure:"user" json:"user"`
+	Password  string `mapstructure:"password" json:"-"` // Don't serialize
+	Charset   string `mapstructure:"charset" json:"charset"`
+	ParseTime bool   `mapstructure:"parse_time" json:"parse_time"`
 }
 
 // CacheConfig contains cache management configuration
@@ -415,9 +433,16 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate metadata backend
-	validMetadataBackends := map[string]bool{"sqlite": true, "postgresql": true, "file": true}
+	validMetadataBackends := map[string]bool{
+		"sqlite":     true,
+		"postgresql": true,
+		"postgres":   true,
+		"mysql":      true,
+		"mariadb":    true,
+		"file":       true,
+	}
 	if !validMetadataBackends[c.Metadata.Backend] {
-		return fmt.Errorf("metadata.backend must be one of: sqlite, postgresql, file; got %s", c.Metadata.Backend)
+		return fmt.Errorf("metadata.backend must be one of: sqlite, postgresql, mysql, file; got %s", c.Metadata.Backend)
 	}
 
 	// Validate cache

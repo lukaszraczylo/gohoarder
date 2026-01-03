@@ -128,6 +128,7 @@
                         :counts="version.vulnerabilities.counts"
                         :total="version.vulnerabilities.total"
                         :scannedAt="version.vulnerabilities.scannedAt"
+                        :isBlocked="version.vulnerabilities.isBlocked"
                         @click="showVulnerabilityDetails(group.registry, group.name, version.version)"
                       />
                     </div>

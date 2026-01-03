@@ -15,6 +15,7 @@ export interface VulnerabilityInfo {
   counts?: VulnerabilityCounts
   total?: number
   scannedAt?: string // ISO 8601 timestamp
+  isBlocked?: boolean // Whether download is blocked due to vulnerability thresholds
 }
 
 export interface Package {

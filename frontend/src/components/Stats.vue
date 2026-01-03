@@ -29,11 +29,26 @@
               </p>
               <p class="text-sm text-gray-600">Total Packages</p>
             </div>
-            <div class="text-center p-6 bg-gray-50 rounded-lg">
-              <p class="text-4xl font-bold text-blue-600 mb-2">
-                {{ formatBytes(stats?.total_size || 0) }}
-              </p>
-              <p class="text-sm text-gray-600">Total Storage Used</p>
+            <div class="p-6 bg-gray-50 rounded-lg">
+              <div class="text-center mb-3">
+                <p class="text-2xl font-bold text-blue-600">
+                  {{ formatBytes(stats?.total_size || 0) }} / {{ formatBytes(stats?.max_cache_size || 0) }}
+                </p>
+                <p class="text-sm text-gray-600 mt-1">Storage Used</p>
+              </div>
+              <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div
+                  class="h-full bg-blue-600 rounded-full transition-all duration-300"
+                  :style="{ width: storagePercentage + '%' }"
+                  :class="{
+                    'bg-green-600': storagePercentage < 50,
+                    'bg-yellow-600': storagePercentage >= 50 && storagePercentage < 80,
+                    'bg-orange-600': storagePercentage >= 80 && storagePercentage < 90,
+                    'bg-red-600': storagePercentage >= 90
+                  }"
+                ></div>
+              </div>
+              <p class="text-xs text-gray-500 text-center mt-1">{{ storagePercentage.toFixed(1) }}% used</p>
             </div>
             <div class="text-center p-6 bg-gray-50 rounded-lg">
               <p class="text-4xl font-bold text-green-600 mb-2">
@@ -51,7 +66,7 @@
           <h3 class="text-xl font-semibold text-gray-900 mb-6">
             <i class="fas fa-shield-alt mr-2"></i>Security Scanning
           </h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="flex items-center justify-between p-6 bg-green-50 rounded-lg border border-green-200">
               <div>
                 <p class="text-3xl font-bold text-green-600">
@@ -63,11 +78,11 @@
             </div>
             <div
               @click="showVulnerablePackages"
-              class="flex items-center justify-between p-6 bg-red-50 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors"
+              class="flex items-center justify-between p-6 bg-orange-50 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors"
               :class="{ 'opacity-50': (stats?.vulnerable_packages || 0) === 0 }"
             >
               <div>
-                <p class="text-3xl font-bold text-red-600">
+                <p class="text-3xl font-bold text-orange-600">
                   {{ formatNumber(stats?.vulnerable_packages || 0) }}
                 </p>
                 <p class="text-sm text-gray-600 mt-1">
@@ -75,7 +90,23 @@
                   <span v-if="(stats?.vulnerable_packages || 0) > 0" class="text-xs ml-1">(click to view)</span>
                 </p>
               </div>
-              <i class="fas fa-exclamation-triangle text-5xl text-red-400"></i>
+              <i class="fas fa-exclamation-triangle text-5xl text-orange-400"></i>
+            </div>
+            <div
+              @click="showBlockedPackages"
+              class="flex items-center justify-between p-6 bg-red-50 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors"
+              :class="{ 'opacity-50': (stats?.blocked_packages || 0) === 0 }"
+            >
+              <div>
+                <p class="text-3xl font-bold text-red-600">
+                  {{ formatNumber(stats?.blocked_packages || 0) }}
+                </p>
+                <p class="text-sm text-gray-600 mt-1">
+                  Blocked Packages
+                  <span v-if="(stats?.blocked_packages || 0) > 0" class="text-xs ml-1">(click to view)</span>
+                </p>
+              </div>
+              <i class="fas fa-hand text-5xl text-red-400"></i>
             </div>
           </div>
         </CardContent>
@@ -141,6 +172,14 @@ function showVulnerablePackages() {
   router.push('/vulnerable-packages')
 }
 
+function showBlockedPackages() {
+  if ((stats.value?.blocked_packages || 0) === 0) {
+    return
+  }
+
+  router.push('/blocked-packages')
+}
+
 // Registry configuration for icons and colors
 const registryConfig: Record<string, {label: string, icon: string, color: string}> = {
   npm: {
@@ -178,6 +217,12 @@ const registries = computed(() => {
       downloads: data.downloads || 0
     }
   })
+})
+
+const storagePercentage = computed(() => {
+  const totalSize = stats.value?.total_size || 0
+  const maxSize = stats.value?.max_cache_size || 1
+  return (totalSize / maxSize) * 100
 })
 
 function formatNumber(num: number): string {

@@ -142,6 +142,13 @@ func (a *App) handleListPackages(c *fiber.Ctx) error {
 						severityCounts[strings.ToUpper(vuln.Severity)]++
 					}
 
+					// Check if package should be blocked based on thresholds
+					isBlocked := false
+					if a.scanManager != nil {
+						blocked, _, _ := a.scanManager.CheckVulnerabilities(ctx, pkg.Registry, entry.originalName, pkg.Version)
+						isBlocked = blocked
+					}
+
 					pkgMap["vulnerabilities"] = map[string]interface{}{
 						"scanned":   true,
 						"status":    scanResult.Status,
@@ -152,18 +159,21 @@ func (a *App) handleListPackages(c *fiber.Ctx) error {
 							"moderate": severityCounts["MODERATE"],
 							"low":      severityCounts["LOW"],
 						},
-						"total": scanResult.VulnerabilityCount,
+						"total":     scanResult.VulnerabilityCount,
+						"isBlocked": isBlocked,
 					}
 				} else {
 					pkgMap["vulnerabilities"] = map[string]interface{}{
-						"scanned": false,
-						"status":  "pending",
+						"scanned":   false,
+						"status":    "pending",
+						"isBlocked": false,
 					}
 				}
 			} else {
 				pkgMap["vulnerabilities"] = map[string]interface{}{
-					"scanned": false,
-					"status":  "not_scanned",
+					"scanned":   false,
+					"status":    "not_scanned",
+					"isBlocked": false,
 				}
 			}
 
@@ -351,8 +361,9 @@ func (a *App) handleStats(c *fiber.Ctx) error {
 		packages = []*metadata.Package{}
 	}
 
-	// Calculate per-registry breakdown (exclude metadata entries like "list", "latest")
+	// Calculate per-registry breakdown and blocked packages count
 	registryStats := make(map[string]map[string]interface{})
+	blockedCount := int64(0)
 
 	for _, pkg := range packages {
 		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
@@ -371,6 +382,14 @@ func (a *App) handleStats(c *fiber.Ctx) error {
 		registryStats[pkg.Registry]["count"] = registryStats[pkg.Registry]["count"].(int) + 1
 		registryStats[pkg.Registry]["size"] = registryStats[pkg.Registry]["size"].(int64) + pkg.Size
 		registryStats[pkg.Registry]["downloads"] = registryStats[pkg.Registry]["downloads"].(int64) + int64(pkg.DownloadCount)
+
+		// Check if package is blocked (only if security scanning is enabled and package is scanned)
+		if a.config.Security.Enabled && a.scanManager != nil && pkg.SecurityScanned {
+			blocked, _, _ := a.scanManager.CheckVulnerabilities(ctx, pkg.Registry, pkg.Name, pkg.Version)
+			if blocked {
+				blockedCount++
+			}
+		}
 	}
 
 	// Combine statistics using database stats for accuracy
@@ -378,12 +397,14 @@ func (a *App) handleStats(c *fiber.Ctx) error {
 		"total_packages":      cacheStats.TotalPackages,
 		"total_downloads":     cacheStats.TotalDownloads,
 		"total_size":          cacheStats.TotalSize,
+		"max_cache_size":      a.config.Cache.MaxSizeBytes,
 		"cache_hits":          cacheStats.TotalDownloads,
 		"cache_misses":        0, // TODO: Track cache misses
 		"cache_evictions":     0, // TODO: Track evictions
 		"cache_size":          cacheStats.TotalSize,
 		"scanned_packages":    cacheStats.ScannedPackages,
 		"vulnerable_packages": cacheStats.VulnerablePackages,
+		"blocked_packages":    blockedCount,
 	}
 
 	// Convert registry stats to interface map

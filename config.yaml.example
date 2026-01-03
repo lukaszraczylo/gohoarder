@@ -40,20 +40,53 @@ storage:
     domain: ""
 
 metadata:
-  backend: "sqlite"  # sqlite, postgresql, file
-  connection: "file:gohoarder.db?cache=shared&mode=rwc"
+  # Backend: sqlite, postgresql, mysql, mariadb, file
+  #
+  # Choose based on your deployment:
+  # - sqlite: Single instance, local storage (NOT for network filesystems like SMB/NFS!)
+  # - postgresql: Production, multiple replicas, works with any storage including SMB/NFS
+  # - mysql: Production alternative to PostgreSQL
+  # - file: Simple file-based metadata (limited features)
+  #
+  # IMPORTANT: SQLite + SMB/NFS = Database locked errors!
+  # For network storage (SMB, NFS), use PostgreSQL or MySQL.
+  backend: "sqlite"
+  connection: "file:gohoarder.db?cache=shared&mode=rwc"  # Legacy, not used with GORM
 
+  # SQLite configuration (for local storage only)
+  # Use with local storage classes (local-path, hostPath, or RWX like longhorn)
+  # DO NOT use with SMB/NFS network storage!
   sqlite:
     path: "gohoarder.db"
-    wal_mode: true
+    wal_mode: true  # Set to false for network filesystems if you must use SQLite
 
+  # PostgreSQL configuration (recommended for production)
+  # Works with any storage including SMB/NFS
+  # Supports multiple replicas and high availability
   postgresql:
     host: "localhost"
     port: 5432
     database: "gohoarder"
     user: "gohoarder"
     password: ""
-    ssl_mode: "disable"
+    ssl_mode: "disable"  # disable, require, verify-ca, verify-full
+
+  # MySQL/MariaDB configuration (alternative to PostgreSQL)
+  # Works with any storage including SMB/NFS
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "gohoarder"
+    user: "gohoarder"
+    password: ""
+    charset: "utf8mb4"
+    parse_time: true
+
+  # GORM connection pool settings (applies to all database backends)
+  max_open_conns: 25      # Maximum number of open connections to the database
+  max_idle_conns: 5       # Maximum number of idle connections in the pool
+  conn_max_lifetime: 3600 # Maximum lifetime of a connection in seconds (1 hour)
+  log_level: "warn"       # GORM log level: silent, error, warn, info
 
 cache:
   default_ttl: "168h"  # 7 days

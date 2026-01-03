@@ -38,6 +38,11 @@ const router = createRouter({
       component: VulnerablePackages,
     },
     {
+      path: '/blocked-packages',
+      name: 'blocked-packages',
+      component: VulnerablePackages,
+    },
+    {
       path: '/admin/bypasses',
       name: 'bypasses',
       component: BypassManagementPanel,

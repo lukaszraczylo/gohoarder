@@ -143,13 +143,18 @@ const (
 
 // Stats represents metadata statistics
 type Stats struct {
-	LastUpdated        time.Time `json:"last_updated"`
-	Registry           string    `json:"registry"`
-	TotalPackages      int64     `json:"total_packages"`
-	TotalSize          int64     `json:"total_size"`
-	TotalDownloads     int64     `json:"total_downloads"`
-	ScannedPackages    int64     `json:"scanned_packages"`
-	VulnerablePackages int64     `json:"vulnerable_packages"`
+	LastUpdated             time.Time `json:"last_updated"`
+	Registry                string    `json:"registry"`
+	TotalPackages           int64     `json:"total_packages"`
+	TotalSize               int64     `json:"total_size"`
+	TotalDownloads          int64     `json:"total_downloads"`
+	ScannedPackages         int64     `json:"scanned_packages"`
+	VulnerablePackages      int64     `json:"vulnerable_packages"`
+	BlockedPackages         int64     `json:"blocked_packages"`
+	CriticalVulnerabilities int64     `json:"critical_vulnerabilities"`
+	HighVulnerabilities     int64     `json:"high_vulnerabilities"`
+	ModerateVulnerabilities int64     `json:"moderate_vulnerabilities"`
+	LowVulnerabilities      int64     `json:"low_vulnerabilities"`
 }
 
 // TimeSeriesDataPoint represents a single data point in time-series

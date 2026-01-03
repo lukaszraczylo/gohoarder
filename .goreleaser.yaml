@@ -32,6 +32,24 @@ builds:
       - -X github.com/lukaszraczylo/gohoarder/internal/version.GitCommit={{.ShortCommit}}
       - -X github.com/lukaszraczylo/gohoarder/internal/version.BuildTime={{.Date}}
 
+  - id: migrate
+    main: ./cmd/migrate
+    binary: migrate
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.ShortCommit}}
+      - -X main.BuildTime={{.Date}}
+
 # Archives for releases
 archives:
   - id: default
@@ -176,6 +194,28 @@ dockers_v2:
     labels:
       org.opencontainers.image.title: GoHoarder Gateway
       org.opencontainers.image.description: Nginx reverse proxy for unified GoHoarder deployment
+      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+
+  # 5. Migration Engine - Database migration tool
+  - id: gohoarder-migrate
+    ids:
+      - migrate
+    images:
+      - ghcr.io/lukaszraczylo/gohoarder-migrate
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.migrate
+    labels:
+      org.opencontainers.image.title: GoHoarder Migrate
+      org.opencontainers.image.description: Database migration tool for GoHoarder V2 schema
       org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
       org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
       org.opencontainers.image.version: "{{ .Version }}"

@@ -139,6 +139,7 @@ dockers_v2:
       - "{{ .Version }}"
       - latest
     dockerfile: Dockerfile.server
+    sbom: false  # Disable SBOM attestations (requires docker-container driver)
     labels:
       org.opencontainers.image.title: GoHoarder Server
       org.opencontainers.image.description: Universal package cache proxy server
@@ -161,6 +162,7 @@ dockers_v2:
       - "{{ .Version }}"
       - latest
     dockerfile: Dockerfile.frontend
+    sbom: false  # Disable SBOM attestations (requires docker-container driver)
     labels:
       org.opencontainers.image.title: GoHoarder Frontend
       org.opencontainers.image.description: GoHoarder web dashboard
@@ -187,6 +189,7 @@ dockers_v2:
       - "{{ .Version }}"
       - latest
     dockerfile: Dockerfile.scanner
+    sbom: false  # Disable SBOM attestations (requires docker-container driver)
     labels:
       org.opencontainers.image.title: GoHoarder Scanner
       org.opencontainers.image.description: GoHoarder vulnerability scanning engine
@@ -209,6 +212,7 @@ dockers_v2:
       - "{{ .Version }}"
       - latest
     dockerfile: Dockerfile.gateway
+    sbom: false  # Disable SBOM attestations (requires docker-container driver)
     labels:
       org.opencontainers.image.title: GoHoarder Gateway
       org.opencontainers.image.description: Nginx reverse proxy for unified GoHoarder deployment
@@ -233,6 +237,7 @@ dockers_v2:
       - "{{ .Version }}"
       - latest
     dockerfile: Dockerfile.migrate
+    sbom: false  # Disable SBOM attestations (requires docker-container driver)
     labels:
       org.opencontainers.image.title: GoHoarder Migrate
       org.opencontainers.image.description: Database migration tool for GoHoarder V2 schema

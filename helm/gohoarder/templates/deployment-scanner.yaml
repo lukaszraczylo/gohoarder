@@ -28,34 +28,6 @@ spec:
       serviceAccountName: {{ include "gohoarder.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      initContainers:
-      - name: init-permissions
-        image: busybox:latest
-        command: ['sh', '-c']
-        args:
-        - |
-          mkdir -p /var/cache/gohoarder /var/lib/gohoarder/metadata /tmp/gohoarder
-          {{- if .Values.security.scanners.trivy.enabled }}
-          mkdir -p {{ .Values.security.scanners.trivy.cacheDb }}
-          {{- end }}
-          chmod 750 /var/cache/gohoarder /var/lib/gohoarder 2>/dev/null || true
-        volumeMounts:
-        - name: storage
-          mountPath: /var/cache/gohoarder
-        - name: metadata
-          mountPath: /var/lib/gohoarder/metadata
-        {{- if .Values.security.scanners.trivy.enabled }}
-        - name: trivy-cache
-          mountPath: {{ .Values.security.scanners.trivy.cacheDb }}
-        {{- end }}
-        - name: tmp
-          mountPath: /tmp/gohoarder
-        securityContext:
-          runAsUser: 1000
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
       containers:
       - name: scanner
         securityContext:

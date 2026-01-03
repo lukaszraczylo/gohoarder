@@ -14,9 +14,15 @@ RUN apk add --no-cache \
 RUN addgroup -g 1000 gohoarder && \
     adduser -D -u 1000 -G gohoarder gohoarder
 
-# Create necessary directories
-RUN mkdir -p /data/cache /data/metadata && \
-    chown -R gohoarder:gohoarder /data
+# Create necessary directories with proper permissions
+RUN mkdir -p /var/cache/gohoarder \
+             /var/lib/gohoarder/metadata \
+             /tmp/gohoarder && \
+    chown -R gohoarder:gohoarder /var/cache/gohoarder \
+                                  /var/lib/gohoarder \
+                                  /tmp/gohoarder && \
+    chmod -R 750 /var/cache/gohoarder \
+                 /var/lib/gohoarder
 
 # Copy binary (from platform-specific path)
 ARG TARGETOS
@@ -27,7 +33,7 @@ RUN chmod +x /usr/local/bin/gohoarder
 # Copy example config
 COPY config.yaml.example /etc/gohoarder/config.yaml.example
 
-WORKDIR /data
+WORKDIR /var/cache/gohoarder
 USER gohoarder
 
 # Expose ports

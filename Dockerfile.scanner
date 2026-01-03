@@ -24,9 +24,18 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh |
 RUN addgroup -g 1000 scanner && \
     adduser -D -u 1000 -G scanner scanner
 
-# Create necessary directories
-RUN mkdir -p /data/cache /data/scans && \
-    chown -R scanner:scanner /data
+# Create necessary directories with proper permissions
+RUN mkdir -p /var/cache/gohoarder \
+             /var/lib/gohoarder/metadata \
+             /var/lib/trivy \
+             /tmp/gohoarder && \
+    chown -R scanner:scanner /var/cache/gohoarder \
+                              /var/lib/gohoarder \
+                              /var/lib/trivy \
+                              /tmp/gohoarder && \
+    chmod -R 750 /var/cache/gohoarder \
+                 /var/lib/gohoarder \
+                 /var/lib/trivy
 
 # Copy binary (from platform-specific path)
 ARG TARGETOS
@@ -37,7 +46,7 @@ RUN chmod +x /usr/local/bin/gohoarder
 # Copy example config
 COPY config.yaml.example /etc/gohoarder/config.yaml.example
 
-WORKDIR /data
+WORKDIR /var/cache/gohoarder
 USER scanner
 
 # Expose metrics port

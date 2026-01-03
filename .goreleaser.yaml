@@ -13,42 +13,13 @@ before:
     # - ./script/generate-version.sh
 
 # Build configuration
+# Note: Binaries are built inside Docker containers (multi-stage builds)
+# to avoid CGO cross-compilation issues. No standalone builds here.
 builds:
   - id: gohoarder
-    main: ./cmd/gohoarder
-    binary: gohoarder
-    env:
-      - CGO_ENABLED=1
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-      - -X github.com/lukaszraczylo/gohoarder/internal/version.Version={{.Version}}
-      - -X github.com/lukaszraczylo/gohoarder/internal/version.GitCommit={{.ShortCommit}}
-      - -X github.com/lukaszraczylo/gohoarder/internal/version.BuildTime={{.Date}}
-
+    skip: true
   - id: migrate
-    main: ./cmd/migrate
-    binary: migrate
-    env:
-      - CGO_ENABLED=1
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-      - -X main.Version={{.Version}}
-      - -X main.GitCommit={{.ShortCommit}}
-      - -X main.BuildTime={{.Date}}
+    skip: true
 
 # Archives for releases
 archives:
@@ -108,16 +79,17 @@ release:
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
   - id: gohoarder-server
-    ids:
-      - gohoarder
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-server
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
+      - "--build-arg=BUILD_TIME={{ .Date }}"
     tags:
       - "{{ .Version }}"
       - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
     dockerfile: Dockerfile.server
     labels:
       org.opencontainers.image.title: GoHoarder Server
@@ -132,16 +104,14 @@ dockers_v2:
 
   # 2. Website - Frontend Dashboard
   - id: gohoarder-frontend
-    ids:
-      - gohoarder
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-frontend
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
     tags:
       - "{{ .Version }}"
       - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
     dockerfile: Dockerfile.frontend
     labels:
       org.opencontainers.image.title: GoHoarder Frontend
@@ -156,16 +126,17 @@ dockers_v2:
 
   # 3. Scanning Engine - Background scanner worker
   - id: gohoarder-scanner
-    ids:
-      - gohoarder
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-scanner
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
+      - "--build-arg=BUILD_TIME={{ .Date }}"
     tags:
       - "{{ .Version }}"
       - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
     dockerfile: Dockerfile.scanner
     labels:
       org.opencontainers.image.title: GoHoarder Scanner
@@ -180,16 +151,14 @@ dockers_v2:
 
   # 4. Gateway - Nginx reverse proxy for unified deployment
   - id: gohoarder-gateway
-    ids:
-      - gohoarder
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-gateway
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
     tags:
       - "{{ .Version }}"
       - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
     dockerfile: Dockerfile.gateway
     labels:
       org.opencontainers.image.title: GoHoarder Gateway
@@ -202,16 +171,17 @@ dockers_v2:
 
   # 5. Migration Engine - Database migration tool
   - id: gohoarder-migrate
-    ids:
-      - migrate
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-migrate
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
+      - "--build-arg=BUILD_TIME={{ .Date }}"
     tags:
       - "{{ .Version }}"
       - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
     dockerfile: Dockerfile.migrate
     labels:
       org.opencontainers.image.title: GoHoarder Migrate

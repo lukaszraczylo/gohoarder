@@ -1,7 +1,43 @@
 # Application Engine - GoHoarder Server
+# Multi-stage build to compile with CGO support
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+# Build stage
+FROM --platform=$TARGETOS/$TARGETARCH golang:1.23-alpine AS builder
+
+# Install build dependencies for CGO
+RUN apk add --no-cache \
+    gcc \
+    g++ \
+    musl-dev \
+    sqlite-dev \
+    git
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build with CGO enabled
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
 
+RUN CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-s -w \
+    -X github.com/lukaszraczylo/gohoarder/internal/version.Version=${VERSION} \
+    -X github.com/lukaszraczylo/gohoarder/internal/version.GitCommit=${GIT_COMMIT} \
+    -X github.com/lukaszraczylo/gohoarder/internal/version.BuildTime=${BUILD_TIME}" \
+    -o gohoarder ./cmd/gohoarder
+
+# Runtime stage
 FROM alpine:latest
 
 # Install runtime dependencies (including CGO/SQLite dependencies)
@@ -26,10 +62,8 @@ RUN mkdir -p /var/cache/gohoarder \
     chmod -R 750 /var/cache/gohoarder \
                  /var/lib/gohoarder
 
-# Copy binary (from platform-specific path)
-ARG TARGETOS
-ARG TARGETARCH
-COPY ${TARGETOS}/${TARGETARCH}/gohoarder /usr/local/bin/gohoarder
+# Copy binary from builder
+COPY --from=builder /build/gohoarder /usr/local/bin/gohoarder
 RUN chmod +x /usr/local/bin/gohoarder
 
 # Copy example config

@@ -7,9 +7,9 @@ import (
 
 // ValidationResult represents a cached credential validation result
 type ValidationResult struct {
-	Allowed   bool
 	ExpiresAt time.Time
 	Reason    string
+	Allowed   bool
 }
 
 // ValidationCache caches credential validation results to reduce upstream checks

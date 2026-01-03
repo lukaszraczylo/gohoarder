@@ -52,21 +52,21 @@ type ListOptions struct {
 
 // StorageObject represents a stored object
 type StorageObject struct {
-	Key      string
-	Size     int64
 	Modified time.Time
+	Key      string
 	ETag     string
+	Size     int64
 }
 
 // StorageInfo contains detailed object information
 type StorageInfo struct {
-	Key         string
-	Size        int64
 	Modified    time.Time
-	ETag        string
-	ContentType string
 	Metadata    map[string]string
 	Checksums   *Checksums
+	Key         string
+	ETag        string
+	ContentType string
+	Size        int64
 }
 
 // Checksums contains file checksums

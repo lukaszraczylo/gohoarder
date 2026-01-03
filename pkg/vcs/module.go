@@ -27,8 +27,8 @@ func NewModuleBuilder() *ModuleBuilder {
 
 // ModuleInfo represents Go module version metadata (.info file)
 type ModuleInfo struct {
-	Version string    `json:"Version"`
 	Time    time.Time `json:"Time"`
+	Version string    `json:"Version"`
 }
 
 // BuildModuleZip creates a Go module zip from source directory

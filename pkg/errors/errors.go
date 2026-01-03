@@ -6,11 +6,11 @@ import (
 
 // Error represents a structured error with code and details
 type Error struct {
+	Details interface{} `json:"details,omitempty"`
+	Cause   error       `json:"-"`
 	Code    string      `json:"code"`
 	Message string      `json:"message"`
-	Details interface{} `json:"details,omitempty"`
 	Trace   []string    `json:"trace,omitempty"`
-	Cause   error       `json:"-"` // Internal cause, not serialized
 }
 
 // Error implements the error interface
@@ -34,23 +34,9 @@ func New(code, message string) *Error {
 	}
 }
 
-// Newf creates a new error with formatted message
-func Newf(code, format string, args ...interface{}) *Error {
-	return &Error{
-		Code:    code,
-		Message: fmt.Sprintf(format, args...),
-	}
-}
-
 // WithDetails adds details to the error
 func (e *Error) WithDetails(details interface{}) *Error {
 	e.Details = details
-	return e
-}
-
-// WithTrace adds stack trace to the error
-func (e *Error) WithTrace(trace []string) *Error {
-	e.Trace = trace
 	return e
 }
 
@@ -69,44 +55,12 @@ func Wrap(err error, code, message string) *Error {
 	}
 }
 
-// Wrapf wraps an existing error with formatted message
-func Wrapf(err error, code, format string, args ...interface{}) *Error {
-	return &Error{
-		Code:    code,
-		Message: fmt.Sprintf(format, args...),
-		Cause:   err,
-	}
-}
-
-// Common error constructors
-func BadRequest(message string) *Error {
-	return New(ErrCodeBadRequest, message)
-}
-
-func Unauthorized(message string) *Error {
-	return New(ErrCodeUnauthorized, message)
-}
-
-func Forbidden(message string) *Error {
-	return New(ErrCodeForbidden, message)
-}
-
+// NotFound creates a not found error
 func NotFound(message string) *Error {
 	return New(ErrCodeNotFound, message)
 }
 
-func InternalServer(message string) *Error {
-	return New(ErrCodeInternalServer, message)
-}
-
-func PackageNotFound(name, version string) *Error {
-	return New(ErrCodePackageNotFound, fmt.Sprintf("Package %s@%s not found", name, version)).
-		WithDetails(map[string]string{
-			"package": name,
-			"version": version,
-		})
-}
-
+// QuotaExceeded creates a quota exceeded error
 func QuotaExceeded(limit int64) *Error {
 	return New(ErrCodeQuotaExceeded, "Storage quota exceeded").
 		WithDetails(map[string]interface{}{

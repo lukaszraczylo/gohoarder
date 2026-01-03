@@ -68,37 +68,37 @@ type MetadataStore interface {
 
 // Package represents package metadata
 type Package struct {
+	CachedAt        time.Time         `json:"cached_at"`
+	LastAccessed    time.Time         `json:"last_accessed"`
+	Metadata        map[string]string `json:"metadata"`
+	ExpiresAt       *time.Time        `json:"expires_at"`
+	UpstreamURL     string            `json:"upstream_url"`
+	ChecksumMD5     string            `json:"checksum_md5"`
+	ChecksumSHA256  string            `json:"checksum_sha256"`
 	ID              string            `json:"id"`
-	Registry        string            `json:"registry"`         // npm, pypi, go
-	Name            string            `json:"name"`             // Package name
-	Version         string            `json:"version"`          // Package version
-	StorageKey      string            `json:"storage_key"`      // Key in storage backend
-	Size            int64             `json:"size"`             // Package size in bytes
-	ChecksumMD5     string            `json:"checksum_md5"`     // MD5 checksum
-	ChecksumSHA256  string            `json:"checksum_sha256"`  // SHA256 checksum
-	UpstreamURL     string            `json:"upstream_url"`     // Original upstream URL
-	CachedAt        time.Time         `json:"cached_at"`        // When cached
-	LastAccessed    time.Time         `json:"last_accessed"`    // Last access time
-	ExpiresAt       *time.Time        `json:"expires_at"`       // Expiration time (nil = never)
-	DownloadCount   int64             `json:"download_count"`   // Download counter
-	Metadata        map[string]string `json:"metadata"`         // Additional metadata
-	SecurityScanned bool              `json:"security_scanned"` // Has been scanned
-	RequiresAuth    bool              `json:"requires_auth"`    // Package requires authentication
-	AuthProvider    string            `json:"auth_provider"`    // Auth provider (github.com, npm.pkg.github.com, etc.)
+	StorageKey      string            `json:"storage_key"`
+	Version         string            `json:"version"`
+	Name            string            `json:"name"`
+	Registry        string            `json:"registry"`
+	AuthProvider    string            `json:"auth_provider"`
+	Size            int64             `json:"size"`
+	DownloadCount   int64             `json:"download_count"`
+	SecurityScanned bool              `json:"security_scanned"`
+	RequiresAuth    bool              `json:"requires_auth"`
 }
 
 // ScanResult represents a security scan result
 type ScanResult struct {
+	ScannedAt          time.Time              `json:"scanned_at"`
+	Details            map[string]interface{} `json:"details"`
 	ID                 string                 `json:"id"`
 	Registry           string                 `json:"registry"`
 	PackageName        string                 `json:"package_name"`
 	PackageVersion     string                 `json:"package_version"`
-	Scanner            string                 `json:"scanner"` // trivy, osv, etc.
-	ScannedAt          time.Time              `json:"scanned_at"`
-	Status             ScanStatus             `json:"status"` // clean, vulnerable, error
-	VulnerabilityCount int                    `json:"vulnerability_count"`
+	Scanner            string                 `json:"scanner"`
+	Status             ScanStatus             `json:"status"`
 	Vulnerabilities    []Vulnerability        `json:"vulnerabilities"`
-	Details            map[string]interface{} `json:"details"` // Scanner-specific details
+	VulnerabilityCount int                    `json:"vulnerability_count"`
 }
 
 // Vulnerability represents a security vulnerability
@@ -143,13 +143,13 @@ const (
 
 // Stats represents metadata statistics
 type Stats struct {
+	LastUpdated        time.Time `json:"last_updated"`
 	Registry           string    `json:"registry"`
 	TotalPackages      int64     `json:"total_packages"`
 	TotalSize          int64     `json:"total_size"`
 	TotalDownloads     int64     `json:"total_downloads"`
 	ScannedPackages    int64     `json:"scanned_packages"`
 	VulnerablePackages int64     `json:"vulnerable_packages"`
-	LastUpdated        time.Time `json:"last_updated"`
 }
 
 // TimeSeriesDataPoint represents a single data point in time-series
@@ -198,14 +198,14 @@ type BypassListOptions struct {
 
 // ListOptions contains options for listing packages
 type ListOptions struct {
-	Registry    string    // Filter by registry
-	NamePrefix  string    // Filter by name prefix
-	MinSize     int64     // Minimum package size
-	MaxSize     int64     // Maximum package size
-	ScannedOnly bool      // Only scanned packages
-	SinceDate   time.Time // Packages cached since date
-	Limit       int       // Max results
-	Offset      int       // Pagination offset
-	SortBy      string    // Sort field (name, size, cached_at, download_count)
-	SortDesc    bool      // Sort descending
+	SinceDate   time.Time
+	Registry    string
+	NamePrefix  string
+	SortBy      string
+	MinSize     int64
+	MaxSize     int64
+	Limit       int
+	Offset      int
+	ScannedOnly bool
+	SortDesc    bool
 }

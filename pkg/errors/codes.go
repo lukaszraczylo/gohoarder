@@ -58,11 +58,3 @@ var HTTPStatusCode = map[string]int{
 	ErrCodeServiceUnavailable: 503,
 	ErrCodeCircuitOpen:        503,
 }
-
-// GetHTTPStatus returns the HTTP status code for an error code
-func GetHTTPStatus(code string) int {
-	if status, ok := HTTPStatusCode[code]; ok {
-		return status
-	}
-	return 500 // Default to internal server error
-}

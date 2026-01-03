@@ -19,14 +19,14 @@ import (
 // TestClientGet tests the HTTP client Get method with various scenarios
 func TestClientGet(t *testing.T) {
 	tests := []struct {
-		name           string
 		serverBehavior func(*testing.T) *httptest.Server
-		config         network.Config
 		headers        map[string]string
-		wantErr        bool
-		errContains    string
 		validateBody   func(*testing.T, io.ReadCloser)
 		validateStatus func(*testing.T, int)
+		name           string
+		errContains    string
+		config         network.Config
+		wantErr        bool
 	}{
 		// GOOD: Successful GET request
 		{

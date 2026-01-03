@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/metrics"
@@ -27,15 +28,21 @@ type ScannerInterface interface {
 	CheckVulnerabilities(ctx context.Context, registry, packageName, version string) (blocked bool, reason string, err error)
 }
 
+// AnalyticsInterface defines the interface for analytics tracking
+type AnalyticsInterface interface {
+	TrackDownload(download analytics.PackageDownload)
+}
+
 // Manager coordinates caching operations between storage and metadata
 type Manager struct {
-	storage  storage.StorageBackend
-	metadata metadata.MetadataStore
-	scanner  ScannerInterface
-	config   Config
-	sf       singleflight.Group
-	mu       sync.RWMutex
-	evicting bool
+	storage   storage.StorageBackend
+	metadata  metadata.MetadataStore
+	scanner   ScannerInterface
+	analytics AnalyticsInterface
+	sf        singleflight.Group
+	config    Config
+	mu        sync.RWMutex
+	evicting  bool
 }
 
 // Config holds cache manager configuration
@@ -48,15 +55,15 @@ type Config struct {
 
 // CacheEntry represents a cached package
 type CacheEntry struct {
-	Package      *metadata.Package
 	Data         io.ReadCloser
-	FromCache    bool
+	Package      *metadata.Package
 	UpstreamURL  string
 	CacheControl string
+	FromCache    bool
 }
 
 // New creates a new cache manager
-func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanner ScannerInterface, config Config) (*Manager, error) {
+func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanner ScannerInterface, analytics AnalyticsInterface, config Config) (*Manager, error) {
 	if storage == nil {
 		return nil, errors.New(errors.ErrCodeInvalidConfig, "storage backend is required")
 	}
@@ -68,6 +75,11 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 	// Scanner is optional - can be nil if security scanning is disabled
 	if scanner != nil {
 		log.Info().Msg("Cache manager initialized with security scanning enabled")
+	}
+
+	// Analytics is optional - can be nil if analytics tracking is disabled
+	if analytics != nil {
+		log.Info().Msg("Cache manager initialized with analytics tracking enabled")
 	}
 
 	if config.DefaultTTL == 0 {
@@ -87,10 +99,11 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 	}
 
 	manager := &Manager{
-		storage:  storage,
-		metadata: metadata,
-		scanner:  scanner,
-		config:   config,
+		storage:   storage,
+		metadata:  metadata,
+		scanner:   scanner,
+		analytics: analytics,
+		config:    config,
 	}
 
 	// Start background cleanup worker
@@ -133,6 +146,11 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 				// Cache hit!
 				metrics.RecordCacheHit(registry)
 				_ = m.metadata.UpdateDownloadCount(ctx, registry, name, version) // #nosec G104 -- Async update, error logged
+
+				// Track download in analytics if enabled
+				if m.analytics != nil {
+					m.trackDownload(registry, name, version, pkg.Size)
+				}
 
 				// Check for vulnerabilities if scanner is enabled
 				if m.scanner != nil {
@@ -550,6 +568,21 @@ func (m *Manager) Health(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// trackDownload tracks a package download event in analytics
+func (m *Manager) trackDownload(registry, name, version string, size int64) {
+	download := analytics.PackageDownload{
+		Registry:  registry,
+		Name:      name,
+		Version:   version,
+		Timestamp: time.Now(),
+		BytesSize: size,
+		ClientIP:  "", // TODO: Extract from context if available
+		UserAgent: "", // TODO: Extract from context if available
+	}
+
+	m.analytics.TrackDownload(download)
 }
 
 // Close closes the cache manager

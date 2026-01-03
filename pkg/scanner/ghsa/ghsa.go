@@ -20,8 +20,8 @@ const ScannerName = "github-advisory-database"
 
 // Scanner implements the GitHub Advisory Database vulnerability scanner
 type Scanner struct {
-	config     config.GHSAConfig
 	httpClient *http.Client
+	config     config.GHSAConfig
 }
 
 // New creates a new GitHub Advisory Database scanner
@@ -257,10 +257,10 @@ type GHSAAdvisory struct {
 	Description     string              `json:"description"`
 	Severity        string              `json:"severity"`
 	HTMLURL         string              `json:"html_url"`
-	References      []GHSAReference     `json:"references"`
-	Vulnerabilities []GHSAVulnerability `json:"vulnerabilities"`
 	PublishedAt     string              `json:"published_at"`
 	UpdatedAt       string              `json:"updated_at"`
+	References      []GHSAReference     `json:"references"`
+	Vulnerabilities []GHSAVulnerability `json:"vulnerabilities"`
 }
 
 type GHSAReference struct {
@@ -268,9 +268,9 @@ type GHSAReference struct {
 }
 
 type GHSAVulnerability struct {
+	FirstPatchedVersion *GHSAPatchVersion `json:"first_patched_version"`
 	Package             GHSAPackage       `json:"package"`
 	VulnerableVersions  string            `json:"vulnerable_version_range"`
-	FirstPatchedVersion *GHSAPatchVersion `json:"first_patched_version"`
 }
 
 type GHSAPackage struct {

@@ -20,21 +20,21 @@ import (
 type Handler struct {
 	cache           *cache.Manager
 	client          *network.Client
-	upstream        string
-	sumDBURL        string
 	credExtractor   *auth.CredentialExtractor
 	credHasher      *auth.CredentialHasher
 	credValidator   *auth.GoValidator
 	validationCache *auth.ValidationCache
 	gitFetcher      *vcs.GitFetcher
 	moduleBuilder   *vcs.ModuleBuilder
+	upstream        string
+	sumDBURL        string
 }
 
 // Config holds Go proxy configuration
 type Config struct {
-	Upstream  string               // Upstream Go proxy (e.g., proxy.golang.org)
-	SumDBURL  string               // Checksum database URL
-	CredStore *vcs.CredentialStore // Optional credential store for git access
+	CredStore *vcs.CredentialStore
+	Upstream  string
+	SumDBURL  string
 }
 
 // New creates a new Go proxy handler

@@ -11,11 +11,11 @@ import (
 
 // RescanWorker handles periodic re-scanning of cached packages
 type RescanWorker struct {
-	manager       *Manager
 	metadataStore metadata.MetadataStore
 	storage       storage.StorageBackend
-	interval      time.Duration
+	manager       *Manager
 	stopCh        chan struct{}
+	interval      time.Duration
 }
 
 // NewRescanWorker creates a new rescan worker

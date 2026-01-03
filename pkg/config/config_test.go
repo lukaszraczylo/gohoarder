@@ -41,10 +41,10 @@ func (s *ConfigTestSuite) TestDefault() {
 
 func (s *ConfigTestSuite) TestValidate() {
 	tests := []struct {
-		name        string
 		modify      func(*Config)
-		expectError bool
+		name        string
 		errorSubstr string
+		expectError bool
 	}{
 		{
 			name:        "valid_config",
@@ -175,11 +175,11 @@ func (s *ConfigTestSuite) TestValidate() {
 
 func (s *ConfigTestSuite) TestLoad() {
 	tests := []struct {
+		envVars     map[string]string
+		validate    func(*Config)
 		name        string
 		configYAML  string
-		envVars     map[string]string
 		expectError bool
-		validate    func(*Config)
 	}{
 		{
 			name: "valid_yaml_config",
@@ -319,13 +319,6 @@ func (s *ConfigTestSuite) TestLoadMissingFile() {
 	s.Nil(cfg)
 }
 
-func (s *ConfigTestSuite) TestLoadWithDefaults() {
-	// Invalid config path should return defaults
-	cfg := LoadWithDefaults("/invalid/path/config.yaml")
-	s.NotNil(cfg)
-	s.Equal(8080, cfg.Server.Port)
-}
-
 // Benchmark tests
 func BenchmarkDefault(b *testing.B) {
 	for i := 0; i < b.N; i++ {
@@ -344,8 +337,8 @@ func BenchmarkValidate(b *testing.B) {
 // Table-driven edge cases
 func TestConfigEdgeCases(t *testing.T) {
 	tests := []struct {
-		name   string
 		config *Config
+		name   string
 		valid  bool
 	}{
 		{

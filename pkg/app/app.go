@@ -17,7 +17,6 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/cdn"
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/health"
-	"github.com/lukaszraczylo/gohoarder/pkg/lock"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	metafile "github.com/lukaszraczylo/gohoarder/pkg/metadata/file"
 	metasqlite "github.com/lukaszraczylo/gohoarder/pkg/metadata/sqlite"
@@ -30,6 +29,8 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem"
+	"github.com/lukaszraczylo/gohoarder/pkg/storage/s3"
+	"github.com/lukaszraczylo/gohoarder/pkg/storage/smb"
 	"github.com/lukaszraczylo/gohoarder/pkg/vcs"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/rs/zerolog/log"
@@ -50,7 +51,6 @@ type App struct {
 	analyticsEngine *analytics.Engine
 	wsServer        *websocket.Server
 	prewarmWorker   *prewarming.Worker
-	lockManager     *lock.Manager
 	cdnMiddleware   *cdn.Middleware
 }
 
@@ -82,7 +82,33 @@ func (a *App) initializeComponents() error {
 	switch a.config.Storage.Backend {
 	case "filesystem":
 		a.storage, err = filesystem.New(a.config.Storage.Path, a.config.Cache.MaxSizeBytes)
+	case "s3":
+		a.storage, err = s3.New(s3.Config{
+			Region:          a.config.Storage.S3.Region,
+			Bucket:          a.config.Storage.S3.Bucket,
+			Prefix:          a.config.Storage.S3.Prefix,
+			AccessKeyID:     a.config.Storage.S3.AccessKeyID,
+			SecretAccessKey: a.config.Storage.S3.SecretAccessKey,
+			Endpoint:        a.config.Storage.S3.Endpoint,
+			ForcePathStyle:  a.config.Storage.S3.ForcePathStyle,
+			MaxSizeBytes:    a.config.Cache.MaxSizeBytes,
+		})
+	case "smb":
+		a.storage, err = smb.New(smb.Config{
+			Host:         a.config.Storage.SMB.Host,
+			Port:         445, // Default SMB port
+			Share:        a.config.Storage.SMB.Share,
+			Path:         a.config.Storage.Path,
+			Username:     a.config.Storage.SMB.Username,
+			Password:     a.config.Storage.SMB.Password,
+			Domain:       a.config.Storage.SMB.Domain,
+			MaxSizeBytes: a.config.Cache.MaxSizeBytes,
+			PoolSize:     5, // Default connection pool size
+		})
 	default:
+		log.Warn().
+			Str("backend", a.config.Storage.Backend).
+			Msg("Unknown storage backend, defaulting to filesystem")
 		a.storage, err = filesystem.New(a.config.Storage.Path, a.config.Cache.MaxSizeBytes)
 	}
 	if err != nil {
@@ -116,9 +142,16 @@ func (a *App) initializeComponents() error {
 		return fmt.Errorf("failed to initialize scanner: %w", err)
 	}
 
-	// Initialize cache manager with scanner
+	// Initialize analytics engine first (needed by cache)
+	log.Info().Msg("Initializing analytics engine")
+	a.analyticsEngine = analytics.NewEngine(analytics.Config{
+		MaxEvents:     10000,
+		FlushInterval: 5 * time.Minute,
+	})
+
+	// Initialize cache manager with scanner and analytics
 	log.Info().Msg("Initializing cache manager")
-	a.cache, err = cache.New(a.storage, a.metadata, a.scanManager, cache.Config{
+	a.cache, err = cache.New(a.storage, a.metadata, a.scanManager, a.analyticsEngine, cache.Config{
 		DefaultTTL:      a.config.Cache.DefaultTTL,
 		CleanupInterval: 5 * time.Minute,
 	})
@@ -152,13 +185,6 @@ func (a *App) initializeComponents() error {
 		log.Info().Dur("interval", a.config.Security.RescanInterval).Msg("Initializing package rescan worker")
 		a.rescanWorker = scanner.NewRescanWorker(a.scanManager, a.metadata, a.storage, a.config.Security.RescanInterval)
 	}
-
-	// Initialize analytics engine
-	log.Info().Msg("Initializing analytics engine")
-	a.analyticsEngine = analytics.NewEngine(analytics.Config{
-		MaxEvents:     10000,
-		FlushInterval: 5 * time.Minute,
-	})
 
 	// Initialize WebSocket server
 	log.Info().Msg("Initializing WebSocket server")
@@ -248,8 +274,27 @@ func (a *App) setupServer() error {
 	a.app.Get("/api/stats/timeseries", a.handleTimeSeriesStats)
 	a.app.Get("/api/info", a.handleInfo)
 
+	// Analytics endpoints
+	a.app.Get("/api/analytics/top", a.handleAnalyticsTopPackages)
+	a.app.Get("/api/analytics/trending", a.handleAnalyticsTrendingPackages)
+	a.app.Get("/api/analytics/trends", a.handleAnalyticsTrends)
+	a.app.Get("/api/analytics/total", a.handleAnalyticsTotalStats)
+	a.app.Get("/api/analytics/registry/:registry", a.handleAnalyticsRegistryStats)
+	a.app.Get("/api/analytics/package/:registry/:name", a.handleAnalyticsPackageStats)
+	a.app.Get("/api/analytics/search", a.handleAnalyticsSearch)
+
 	// Admin endpoints (bypass management)
 	a.app.All("/api/admin/bypasses/:id?", a.requireAdmin, a.handleAdminBypasses)
+
+	// Admin endpoints (pre-warming)
+	a.app.Get("/api/admin/prewarming/status", a.requireAdmin, a.handlePrewarmingStatus)
+	a.app.Post("/api/admin/prewarming/trigger", a.requireAdmin, a.handlePrewarmingTrigger)
+	a.app.Post("/api/admin/prewarming/package", a.requireAdmin, a.handlePrewarmingPackage)
+
+	// Admin endpoints (API key management)
+	a.app.Post("/api/admin/keys", a.requireAdmin, a.handleGenerateAPIKey)
+	a.app.Get("/api/admin/keys", a.requireAdmin, a.handleListAPIKeys)
+	a.app.Delete("/api/admin/keys/:key_id", a.requireAdmin, a.handleRevokeAPIKey)
 
 	// Proxy handlers (adapted from net/http)
 	// Load git credentials if configured
@@ -270,22 +315,28 @@ func (a *App) setupServer() error {
 		}
 	}
 
+	// Go proxy with CDN caching
 	goProxyHandler := goproxy.New(a.cache, a.networkClient, goproxy.Config{
 		Upstream:  "https://proxy.golang.org",
 		SumDBURL:  "https://sum.golang.org",
 		CredStore: credStore,
 	})
-	a.app.All("/go/*", adaptor.HTTPHandler(http.StripPrefix("/go", goProxyHandler)))
+	goProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/go", goProxyHandler))
+	a.app.All("/go/*", adaptor.HTTPHandler(goProxyWithCDN))
 
+	// NPM proxy with CDN caching
 	npmProxyHandler := npm.New(a.cache, a.networkClient, npm.Config{
 		Upstream: "https://registry.npmjs.org",
 	})
-	a.app.All("/npm/*", adaptor.HTTPHandler(http.StripPrefix("/npm", npmProxyHandler)))
+	npmProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/npm", npmProxyHandler))
+	a.app.All("/npm/*", adaptor.HTTPHandler(npmProxyWithCDN))
 
+	// PyPI proxy with CDN caching
 	pypiProxyHandler := pypi.New(a.cache, a.networkClient, pypi.Config{
 		Upstream: "https://pypi.org/simple",
 	})
-	a.app.All("/pypi/*", adaptor.HTTPHandler(http.StripPrefix("/pypi", pypiProxyHandler)))
+	pypiProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/pypi", pypiProxyHandler))
+	a.app.All("/pypi/*", adaptor.HTTPHandler(pypiProxyWithCDN))
 
 	// Serve frontend static files
 	frontendDir := "frontend/dist"
@@ -395,13 +446,6 @@ func (a *App) Shutdown() error {
 	// Close metadata store
 	if err := a.metadata.Close(); err != nil {
 		log.Error().Err(err).Msg("Error closing metadata store")
-	}
-
-	// Close lock manager if initialized
-	if a.lockManager != nil {
-		if err := a.lockManager.Close(); err != nil {
-			log.Error().Err(err).Msg("Error closing lock manager")
-		}
 	}
 
 	log.Info().Msg("Shutdown complete")

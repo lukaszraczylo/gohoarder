@@ -56,8 +56,8 @@ func TestNew(t *testing.T) {
 func TestString(t *testing.T) {
 	tests := []struct {
 		name     string
-		uuid     UUID
 		expected string
+		uuid     UUID
 	}{
 		{
 			name:     "zero UUID",

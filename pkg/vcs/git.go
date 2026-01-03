@@ -14,9 +14,9 @@ import (
 
 // GitFetcher handles git repository operations
 type GitFetcher struct {
+	credStore *CredentialStore
 	workDir   string
 	timeout   time.Duration
-	credStore *CredentialStore
 }
 
 // NewGitFetcher creates a new git fetcher

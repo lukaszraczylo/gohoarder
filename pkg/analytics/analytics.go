@@ -10,23 +10,23 @@ import (
 
 // PackageDownload represents a package download event
 type PackageDownload struct {
+	Timestamp time.Time
 	Registry  string
 	Name      string
 	Version   string
-	Timestamp time.Time
-	BytesSize int64
 	ClientIP  string
 	UserAgent string
+	BytesSize int64
 }
 
 // PackageStats holds statistics for a package
 type PackageStats struct {
+	LastDownload   time.Time
+	FirstSeen      time.Time
 	Registry       string
 	Name           string
 	TotalDownloads int64
 	UniqueVersions int
-	LastDownload   time.Time
-	FirstSeen      time.Time
 	BytesServed    int64
 }
 
@@ -48,13 +48,13 @@ type PopularPackage struct {
 
 // Engine tracks and analyzes package downloads
 type Engine struct {
-	downloads   []PackageDownload
-	downloadsMu sync.RWMutex
-	stats       map[string]*PackageStats // key: registry:name
-	statsMu     sync.RWMutex
-	maxEvents   int
+	stats       map[string]*PackageStats
 	flushTicker *time.Ticker
 	stopChan    chan struct{}
+	downloads   []PackageDownload
+	maxEvents   int
+	downloadsMu sync.RWMutex
+	statsMu     sync.RWMutex
 }
 
 // Config holds analytics engine configuration

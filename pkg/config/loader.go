@@ -51,12 +51,3 @@ func Load(configPath string) (*Config, error) {
 
 	return cfg, nil
 }
-
-// LoadWithDefaults loads configuration or returns defaults on error
-func LoadWithDefaults(configPath string) *Config {
-	cfg, err := Load(configPath)
-	if err != nil {
-		return Default()
-	}
-	return cfg
-}

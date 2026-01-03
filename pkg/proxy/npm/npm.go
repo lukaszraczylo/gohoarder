@@ -21,11 +21,11 @@ import (
 type Handler struct {
 	cache           *cache.Manager
 	client          *network.Client
-	upstream        string
 	credExtractor   *auth.CredentialExtractor
 	credHasher      *auth.CredentialHasher
 	credValidator   *auth.NPMValidator
 	validationCache *auth.ValidationCache
+	upstream        string
 }
 
 // Config holds NPM proxy configuration

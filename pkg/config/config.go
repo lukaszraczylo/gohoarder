@@ -7,42 +7,42 @@ import (
 
 // Config is the main configuration struct
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server" json:"server"`
 	Storage  StorageConfig  `mapstructure:"storage" json:"storage"`
-	Metadata MetadataConfig `mapstructure:"metadata" json:"metadata"`
 	Cache    CacheConfig    `mapstructure:"cache" json:"cache"`
 	Security SecurityConfig `mapstructure:"security" json:"security"`
-	Auth     AuthConfig     `mapstructure:"auth" json:"auth"`
-	Network  NetworkConfig  `mapstructure:"network" json:"network"`
-	Logging  LoggingConfig  `mapstructure:"logging" json:"logging"`
+	Metadata MetadataConfig `mapstructure:"metadata" json:"metadata"`
 	Handlers HandlersConfig `mapstructure:"handlers" json:"handlers"`
+	Server   ServerConfig   `mapstructure:"server" json:"server"`
+	Logging  LoggingConfig  `mapstructure:"logging" json:"logging"`
+	Network  NetworkConfig  `mapstructure:"network" json:"network"`
+	Auth     AuthConfig     `mapstructure:"auth" json:"auth"`
 }
 
 // ServerConfig contains HTTP server configuration
 type ServerConfig struct {
+	TLS          TLSConfig     `mapstructure:"tls" json:"tls"`
 	Host         string        `mapstructure:"host" json:"host"`
 	Port         int           `mapstructure:"port" json:"port"`
 	ReadTimeout  time.Duration `mapstructure:"read_timeout" json:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout" json:"write_timeout"`
 	IdleTimeout  time.Duration `mapstructure:"idle_timeout" json:"idle_timeout"`
-	TLS          TLSConfig     `mapstructure:"tls" json:"tls"`
 }
 
 // TLSConfig contains TLS/HTTPS configuration
 type TLSConfig struct {
-	Enabled  bool   `mapstructure:"enabled" json:"enabled"`
 	CertFile string `mapstructure:"cert_file" json:"cert_file"`
 	KeyFile  string `mapstructure:"key_file" json:"key_file"`
+	Enabled  bool   `mapstructure:"enabled" json:"enabled"`
 }
 
 // StorageConfig contains storage backend configuration
 type StorageConfig struct {
-	Backend    string                 `mapstructure:"backend" json:"backend"` // filesystem, s3, smb, nfs
+	Options    map[string]interface{} `mapstructure:"options" json:"options"`
+	SMB        SMBConfig              `mapstructure:"smb" json:"smb"`
+	Backend    string                 `mapstructure:"backend" json:"backend"`
 	Path       string                 `mapstructure:"path" json:"path"`
 	Filesystem FilesystemConfig       `mapstructure:"filesystem" json:"filesystem"`
 	S3         S3Config               `mapstructure:"s3" json:"s3"`
-	SMB        SMBConfig              `mapstructure:"smb" json:"smb"`
-	Options    map[string]interface{} `mapstructure:"options" json:"options"`
 }
 
 // FilesystemConfig contains local filesystem storage configuration
@@ -52,12 +52,14 @@ type FilesystemConfig struct {
 
 // S3Config contains S3-compatible storage configuration
 type S3Config struct {
-	Endpoint        string `mapstructure:"endpoint" json:"endpoint"`
-	Region          string `mapstructure:"region" json:"region"`
-	Bucket          string `mapstructure:"bucket" json:"bucket"`
-	AccessKeyID     string `mapstructure:"access_key_id" json:"access_key_id"`
-	SecretAccessKey string `mapstructure:"secret_access_key" json:"-"` // Don't serialize secrets
-	UseSSL          bool   `mapstructure:"use_ssl" json:"use_ssl"`
+	Endpoint        string `mapstructure:"endpoint" json:"endpoint"`                 // Optional: for MinIO, etc.
+	Region          string `mapstructure:"region" json:"region"`                     // AWS region (e.g., us-east-1)
+	Bucket          string `mapstructure:"bucket" json:"bucket"`                     // S3 bucket name
+	Prefix          string `mapstructure:"prefix" json:"prefix"`                     // Optional: key prefix
+	AccessKeyID     string `mapstructure:"access_key_id" json:"access_key_id"`       // AWS access key
+	SecretAccessKey string `mapstructure:"secret_access_key" json:"-"`               // AWS secret key (not serialized)
+	ForcePathStyle  bool   `mapstructure:"force_path_style" json:"force_path_style"` // For MinIO compatibility
+	UseSSL          bool   `mapstructure:"use_ssl" json:"use_ssl"`                   // Deprecated: use endpoint with https://
 }
 
 // SMBConfig contains SMB/CIFS storage configuration
@@ -71,10 +73,10 @@ type SMBConfig struct {
 
 // MetadataConfig contains metadata store configuration
 type MetadataConfig struct {
-	Backend    string           `mapstructure:"backend" json:"backend"` // sqlite, postgresql, file
+	PostgreSQL PostgreSQLConfig `mapstructure:"postgresql" json:"postgresql"`
+	Backend    string           `mapstructure:"backend" json:"backend"`
 	Connection string           `mapstructure:"connection" json:"connection"`
 	SQLite     SQLiteConfig     `mapstructure:"sqlite" json:"sqlite"`
-	PostgreSQL PostgreSQLConfig `mapstructure:"postgresql" json:"postgresql"`
 }
 
 // SQLiteConfig contains SQLite-specific configuration
@@ -86,33 +88,33 @@ type SQLiteConfig struct {
 // PostgreSQLConfig contains PostgreSQL-specific configuration
 type PostgreSQLConfig struct {
 	Host     string `mapstructure:"host" json:"host"`
-	Port     int    `mapstructure:"port" json:"port"`
 	Database string `mapstructure:"database" json:"database"`
 	User     string `mapstructure:"user" json:"user"`
-	Password string `mapstructure:"password" json:"-"` // Don't serialize secrets
+	Password string `mapstructure:"password" json:"-"`
 	SSLMode  string `mapstructure:"ssl_mode" json:"ssl_mode"`
+	Port     int    `mapstructure:"port" json:"port"`
 }
 
 // CacheConfig contains cache management configuration
 type CacheConfig struct {
+	TTLOverrides    map[string]time.Duration `mapstructure:"ttl_overrides" json:"ttl_overrides"`
 	DefaultTTL      time.Duration            `mapstructure:"default_ttl" json:"default_ttl"`
 	CleanupInterval time.Duration            `mapstructure:"cleanup_interval" json:"cleanup_interval"`
 	MaxSizeBytes    int64                    `mapstructure:"max_size_bytes" json:"max_size_bytes"`
 	PerProjectQuota int64                    `mapstructure:"per_project_quota" json:"per_project_quota"`
-	TTLOverrides    map[string]time.Duration `mapstructure:"ttl_overrides" json:"ttl_overrides"` // Per ecosystem
 }
 
 // SecurityConfig contains security scanning configuration
 type SecurityConfig struct {
-	Enabled           bool                    `mapstructure:"enabled" json:"enabled"`
-	ScanOnDownload    bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`         // Scan packages on first download
-	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`           // How often to re-scan (e.g., 24h, 168h for weekly)
-	BlockOnSeverity   string                  `mapstructure:"block_on_severity" json:"block_on_severity"`       // none, low, medium, high, critical
-	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`         // Max vulns per severity before blocking
-	UpdateDBOnStartup bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"` // Update vulnerability databases on startup
-	AllowedPackages   []string                `mapstructure:"allowed_packages" json:"allowed_packages"`         // Packages that bypass security checks (format: "registry/name@version" or "registry/name")
-	IgnoredCVEs       []string                `mapstructure:"ignored_cves" json:"ignored_cves"`                 // CVE IDs to ignore globally (e.g., "CVE-2021-23337")
 	Scanners          ScannersConfig          `mapstructure:"scanners" json:"scanners"`
+	BlockOnSeverity   string                  `mapstructure:"block_on_severity" json:"block_on_severity"`
+	AllowedPackages   []string                `mapstructure:"allowed_packages" json:"allowed_packages"`
+	IgnoredCVEs       []string                `mapstructure:"ignored_cves" json:"ignored_cves"`
+	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`
+	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`
+	Enabled           bool                    `mapstructure:"enabled" json:"enabled"`
+	ScanOnDownload    bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`
+	UpdateDBOnStartup bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"`
 }
 
 // VulnerabilityThresholds defines max allowed vulnerabilities per severity
@@ -126,36 +128,36 @@ type VulnerabilityThresholds struct {
 // ScannersConfig contains individual scanner configurations
 type ScannersConfig struct {
 	Trivy       TrivyConfig       `mapstructure:"trivy" json:"trivy"`
-	OSV         OSVConfig         `mapstructure:"osv" json:"osv"`
+	GHSA        GHSAConfig        `mapstructure:"ghsa" json:"ghsa"`
 	Static      StaticConfig      `mapstructure:"static" json:"static"`
+	OSV         OSVConfig         `mapstructure:"osv" json:"osv"`
 	Grype       GrypeConfig       `mapstructure:"grype" json:"grype"`
 	Govulncheck GovulncheckConfig `mapstructure:"govulncheck" json:"govulncheck"`
 	NpmAudit    NpmAuditConfig    `mapstructure:"npm_audit" json:"npm_audit"`
 	PipAudit    PipAuditConfig    `mapstructure:"pip_audit" json:"pip_audit"`
-	GHSA        GHSAConfig        `mapstructure:"ghsa" json:"ghsa"`
 }
 
 // TrivyConfig contains Trivy scanner configuration
 type TrivyConfig struct {
-	Enabled bool          `mapstructure:"enabled" json:"enabled"`
-	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
 	CacheDB string        `mapstructure:"cache_db" json:"cache_db"`
+	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
 }
 
 // OSVConfig contains OSV scanner configuration
 type OSVConfig struct {
-	Enabled bool          `mapstructure:"enabled" json:"enabled"`
 	APIURL  string        `mapstructure:"api_url" json:"api_url"`
 	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
 }
 
 // StaticConfig contains static analysis configuration
 type StaticConfig struct {
-	Enabled         bool     `mapstructure:"enabled" json:"enabled"`
+	AllowedLicenses []string `mapstructure:"allowed_licenses" json:"allowed_licenses"`
 	MaxPackageSize  int64    `mapstructure:"max_package_size" json:"max_package_size"`
+	Enabled         bool     `mapstructure:"enabled" json:"enabled"`
 	CheckChecksums  bool     `mapstructure:"check_checksums" json:"check_checksums"`
 	BlockSuspicious bool     `mapstructure:"block_suspicious" json:"block_suspicious"`
-	AllowedLicenses []string `mapstructure:"allowed_licenses" json:"allowed_licenses"`
 }
 
 // GrypeConfig contains Grype scanner configuration
@@ -184,16 +186,16 @@ type PipAuditConfig struct {
 
 // GHSAConfig contains GitHub Advisory Database scanner configuration
 type GHSAConfig struct {
-	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	Token   string        `mapstructure:"token" json:"-"`
 	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
-	Token   string        `mapstructure:"token" json:"-"` // GitHub token for higher rate limits (don't serialize)
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
 }
 
 // AuthConfig contains authentication configuration
 type AuthConfig struct {
-	Enabled       bool          `mapstructure:"enabled" json:"enabled"`
 	KeyExpiration time.Duration `mapstructure:"key_expiration" json:"key_expiration"`
 	BcryptCost    int           `mapstructure:"bcrypt_cost" json:"bcrypt_cost"`
+	Enabled       bool          `mapstructure:"enabled" json:"enabled"`
 	AuditLog      bool          `mapstructure:"audit_log" json:"audit_log"`
 }
 
@@ -245,24 +247,24 @@ type HandlersConfig struct {
 
 // GoHandlerConfig contains Go proxy configuration
 type GoHandlerConfig struct {
-	Enabled            bool   `mapstructure:"enabled" json:"enabled"`
 	UpstreamProxy      string `mapstructure:"upstream_proxy" json:"upstream_proxy"`
 	ChecksumDB         string `mapstructure:"checksum_db" json:"checksum_db"`
+	GitCredentialsFile string `mapstructure:"git_credentials_file" json:"git_credentials_file"`
+	Enabled            bool   `mapstructure:"enabled" json:"enabled"`
 	VerifyChecksums    bool   `mapstructure:"verify_checksums" json:"verify_checksums"`
-	GitCredentialsFile string `mapstructure:"git_credentials_file" json:"git_credentials_file"` // Path to git credentials JSON file
 }
 
 // NPMHandlerConfig contains NPM registry configuration
 type NPMHandlerConfig struct {
-	Enabled          bool   `mapstructure:"enabled" json:"enabled"`
 	UpstreamRegistry string `mapstructure:"upstream_registry" json:"upstream_registry"`
+	Enabled          bool   `mapstructure:"enabled" json:"enabled"`
 }
 
 // PyPIHandlerConfig contains PyPI configuration
 type PyPIHandlerConfig struct {
-	Enabled      bool   `mapstructure:"enabled" json:"enabled"`
 	UpstreamURL  string `mapstructure:"upstream_url" json:"upstream_url"`
 	SimpleAPIURL string `mapstructure:"simple_api_url" json:"simple_api_url"`
+	Enabled      bool   `mapstructure:"enabled" json:"enabled"`
 }
 
 // Default returns a configuration with sensible defaults

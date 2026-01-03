@@ -3,14 +3,10 @@ package s3
 import (
 	"bytes"
 	"context"
-	"crypto/md5" // #nosec G501 -- MD5 used for S3 Content-MD5 header, not cryptographic security
-	"crypto/sha256"
-	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -18,261 +14,210 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
-	"github.com/lukaszraczylo/gohoarder/pkg/metrics"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/rs/zerolog/log"
 )
 
-// S3Storage implements storage.StorageBackend for AWS S3
-type S3Storage struct {
-	client *s3.Client
-	bucket string
-	prefix string
-	quota  int64
-	mu     sync.RWMutex
-	used   int64
-}
-
-// Config holds S3 configuration
+// Config holds S3 storage configuration
 type Config struct {
-	Bucket          string
 	Region          string
-	Endpoint        string // For S3-compatible services (MinIO, etc.)
+	Bucket          string
+	Prefix          string
 	AccessKeyID     string
 	SecretAccessKey string
-	Prefix          string // Optional prefix for all keys
-	Quota           int64  // Quota in bytes (0 = unlimited)
-	ForcePathStyle  bool   // For S3-compatible services
+	Endpoint        string // Optional: for S3-compatible services like MinIO
+	ForcePathStyle  bool   // Optional: for S3-compatible services
+	MaxSizeBytes    int64
+}
+
+// S3Storage implements storage.StorageBackend using AWS S3
+type S3Storage struct {
+	client       *s3.Client
+	bucket       string
+	prefix       string
+	maxSizeBytes int64
 }
 
 // New creates a new S3 storage backend
-func New(ctx context.Context, cfg Config) (*S3Storage, error) {
+func New(cfg Config) (*S3Storage, error) {
 	if cfg.Bucket == "" {
-		return nil, errors.New(errors.ErrCodeInvalidConfig, "S3 bucket is required")
+		return nil, fmt.Errorf("S3 bucket is required")
 	}
 
 	if cfg.Region == "" {
-		return nil, errors.New(errors.ErrCodeInvalidConfig, "S3 region is required")
+		cfg.Region = "us-east-1" // Default region
 	}
 
 	// Build AWS config
-	var awsCfg aws.Config
+	var awsConfig aws.Config
 	var err error
 
+	// Build config options
+	configOpts := []func(*config.LoadOptions) error{
+		config.WithRegion(cfg.Region),
+	}
+
+	// Add credentials if provided
 	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
-		// Use static credentials
-		awsCfg, err = config.LoadDefaultConfig(ctx,
-			config.WithRegion(cfg.Region),
-			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+		configOpts = append(configOpts, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(
 				cfg.AccessKeyID,
 				cfg.SecretAccessKey,
 				"",
-			)),
-		)
-	} else {
-		// Use default credential chain
-		awsCfg, err = config.LoadDefaultConfig(ctx,
-			config.WithRegion(cfg.Region),
-		)
+			),
+		))
 	}
 
+	awsConfig, err = config.LoadDefaultConfig(context.Background(), configOpts...)
 	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to load AWS config")
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	// Create S3 client
-	var s3Options []func(*s3.Options)
-
-	if cfg.Endpoint != "" {
-		s3Options = append(s3Options, func(o *s3.Options) {
+	// Create S3 client with service-specific options
+	client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
+		// Use custom endpoint if provided (for MinIO, S3-compatible services, etc.)
+		if cfg.Endpoint != "" {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
-			o.UsePathStyle = cfg.ForcePathStyle
-		})
+		}
+		if cfg.ForcePathStyle {
+			o.UsePathStyle = true
+		}
+	})
+
+	storage := &S3Storage{
+		client:       client,
+		bucket:       cfg.Bucket,
+		prefix:       strings.TrimSuffix(cfg.Prefix, "/"),
+		maxSizeBytes: cfg.MaxSizeBytes,
 	}
 
-	client := s3.NewFromConfig(awsCfg, s3Options...)
+	log.Info().
+		Str("bucket", cfg.Bucket).
+		Str("region", cfg.Region).
+		Str("prefix", cfg.Prefix).
+		Msg("S3 storage initialized")
 
-	s3Storage := &S3Storage{
-		client: client,
-		bucket: cfg.Bucket,
-		prefix: strings.TrimSuffix(cfg.Prefix, "/"),
-		quota:  cfg.Quota,
-	}
-
-	// Calculate initial usage
-	if err := s3Storage.calculateUsage(ctx); err != nil {
-		log.Warn().Err(err).Msg("Failed to calculate initial S3 storage usage")
-	}
-
-	return s3Storage, nil
+	return storage, nil
 }
 
-// Get retrieves a file from S3
+// Get retrieves data from S3
 func (s *S3Storage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	s3Key := s.buildKey(key)
+	fullKey := s.buildKey(key)
 
-	input := &s3.GetObjectInput{
+	log.Debug().Str("key", fullKey).Msg("Getting object from S3")
+
+	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
-		Key:    aws.String(s3Key),
-	}
+		Key:    aws.String(fullKey),
+	})
 
-	result, err := s.client.GetObject(ctx, input)
 	if err != nil {
 		if isNotFoundError(err) {
-			metrics.RecordStorageOperation("s3", "get", "not_found")
-			return nil, errors.NotFound(fmt.Sprintf("file not found: %s", key))
+			return nil, errors.NotFound(fmt.Sprintf("S3 object not found: %s", key))
 		}
-		metrics.RecordStorageOperation("s3", "get", "error")
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get object from S3")
 	}
 
-	metrics.RecordStorageOperation("s3", "get", "success")
 	return result.Body, nil
 }
 
-// Put stores a file in S3
+// Put stores data in S3
 func (s *S3Storage) Put(ctx context.Context, key string, data io.Reader, opts *storage.PutOptions) error {
-	s3Key := s.buildKey(key)
+	fullKey := s.buildKey(key)
 
-	// Read data into buffer to calculate checksums and size
-	var buf bytes.Buffer
-	md5Hash := md5.New() // #nosec G401 -- MD5 used for S3 integrity check, not cryptographic security
-	sha256Hash := sha256.New()
-	multiWriter := io.MultiWriter(&buf, md5Hash, sha256Hash)
-
-	written, err := io.Copy(multiWriter, data)
+	// Read data into buffer to get size
+	buf := new(bytes.Buffer)
+	size, err := io.Copy(buf, data)
 	if err != nil {
-		metrics.RecordStorageOperation("s3", "put", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to read data")
+		return fmt.Errorf("failed to read data: %w", err)
 	}
 
-	// Check quota before upload
-	if s.quota > 0 {
-		s.mu.RLock()
-		used := s.used
-		s.mu.RUnlock()
+	log.Debug().
+		Str("key", fullKey).
+		Int64("size", size).
+		Msg("Putting object to S3")
 
-		if used+written > s.quota {
-			metrics.RecordStorageOperation("s3", "put", "quota_exceeded")
-			return errors.QuotaExceeded(s.quota)
+	// Check quota if set
+	if s.maxSizeBytes > 0 {
+		currentUsage, err := s.calculateUsage(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to calculate current usage, skipping quota check")
+		} else if currentUsage+size > s.maxSizeBytes {
+			return errors.QuotaExceeded(s.maxSizeBytes)
 		}
 	}
 
-	// Verify checksums if provided
-	if opts != nil {
-		md5Sum := hex.EncodeToString(md5Hash.Sum(nil))
-		sha256Sum := hex.EncodeToString(sha256Hash.Sum(nil))
-
-		if opts.ChecksumMD5 != "" && opts.ChecksumMD5 != md5Sum {
-			metrics.RecordStorageOperation("s3", "put", "checksum_error")
-			return errors.New(errors.ErrCodeChecksumMismatch, "MD5 checksum mismatch")
-		}
-
-		if opts.ChecksumSHA256 != "" && opts.ChecksumSHA256 != sha256Sum {
-			metrics.RecordStorageOperation("s3", "put", "checksum_error")
-			return errors.New(errors.ErrCodeChecksumMismatch, "SHA256 checksum mismatch")
-		}
-	}
-
-	// Prepare metadata
-	metadata := make(map[string]string)
+	// Convert metadata to S3 metadata format
+	s3Metadata := make(map[string]string)
 	if opts != nil && opts.Metadata != nil {
-		metadata = opts.Metadata
-	}
-
-	// Build put input
-	input := &s3.PutObjectInput{
-		Bucket:   aws.String(s.bucket),
-		Key:      aws.String(s3Key),
-		Body:     bytes.NewReader(buf.Bytes()),
-		Metadata: metadata,
-	}
-
-	if opts != nil && opts.ContentType != "" {
-		input.ContentType = aws.String(opts.ContentType)
+		for k, v := range opts.Metadata {
+			s3Metadata[k] = v
+		}
 	}
 
 	// Upload to S3
-	_, err = s.client.PutObject(ctx, input)
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:   aws.String(s.bucket),
+		Key:      aws.String(fullKey),
+		Body:     bytes.NewReader(buf.Bytes()),
+		Metadata: s3Metadata,
+	})
+
 	if err != nil {
-		metrics.RecordStorageOperation("s3", "put", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to upload to S3")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to put object to S3")
 	}
 
-	// Update usage
-	s.mu.Lock()
-	s.used += written
-	currentUsed := s.used
-	s.mu.Unlock()
-
-	metrics.RecordStorageOperation("s3", "put", "success")
-	metrics.UpdateCacheSize("s3", currentUsed)
 	return nil
 }
 
-// Delete removes a file from S3
+// Delete removes data from S3
 func (s *S3Storage) Delete(ctx context.Context, key string) error {
-	s3Key := s.buildKey(key)
+	fullKey := s.buildKey(key)
 
-	// Get size before deletion for quota tracking
-	statInfo, err := s.Stat(ctx, key)
-	if err != nil {
-		return err
-	}
+	log.Debug().Str("key", fullKey).Msg("Deleting object from S3")
 
-	input := &s3.DeleteObjectInput{
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
-		Key:    aws.String(s3Key),
-	}
+		Key:    aws.String(fullKey),
+	})
 
-	_, err = s.client.DeleteObject(ctx, input)
 	if err != nil {
-		metrics.RecordStorageOperation("s3", "delete", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to delete from S3")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to delete object from S3")
 	}
 
-	// Update usage
-	s.mu.Lock()
-	s.used -= statInfo.Size
-	currentUsed := s.used
-	s.mu.Unlock()
-
-	metrics.RecordStorageOperation("s3", "delete", "success")
-	metrics.UpdateCacheSize("s3", currentUsed)
 	return nil
 }
 
-// Exists checks if a file exists in S3
+// Exists checks if data exists in S3
 func (s *S3Storage) Exists(ctx context.Context, key string) (bool, error) {
-	s3Key := s.buildKey(key)
+	fullKey := s.buildKey(key)
 
-	input := &s3.HeadObjectInput{
+	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
-		Key:    aws.String(s3Key),
-	}
+		Key:    aws.String(fullKey),
+	})
 
-	_, err := s.client.HeadObject(ctx, input)
 	if err != nil {
 		if isNotFoundError(err) {
 			return false, nil
 		}
-		return false, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to check existence in S3")
+		return false, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to check object existence in S3")
 	}
 
 	return true, nil
 }
 
-// List lists files with prefix in S3
+// List returns a list of objects with the given prefix
 func (s *S3Storage) List(ctx context.Context, prefix string, opts *storage.ListOptions) ([]storage.StorageObject, error) {
-	s3Prefix := s.buildKey(prefix)
+	fullPrefix := s.buildKey(prefix)
 
-	input := &s3.ListObjectsV2Input{
-		Bucket: aws.String(s.bucket),
-		Prefix: aws.String(s3Prefix),
-	}
+	log.Debug().Str("prefix", fullPrefix).Msg("Listing objects in S3")
 
 	var objects []storage.StorageObject
-	paginator := s3.NewListObjectsV2Paginator(s.client, input)
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(fullPrefix),
+	})
 
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -281,56 +226,58 @@ func (s *S3Storage) List(ctx context.Context, prefix string, opts *storage.ListO
 		}
 
 		for _, obj := range page.Contents {
-			key := s.stripPrefix(*obj.Key)
-			objects = append(objects, storage.StorageObject{
-				Key:      key,
-				Size:     *obj.Size,
-				Modified: *obj.LastModified,
-				ETag:     strings.Trim(*obj.ETag, "\""),
-			})
-		}
-	}
+			if obj.Key != nil {
+				// Strip prefix from key
+				key := s.stripPrefix(*obj.Key)
 
-	// Apply pagination if requested
-	if opts != nil {
-		start := opts.Offset
-		end := len(objects)
-		if opts.MaxResults > 0 && start+opts.MaxResults < end {
-			end = start + opts.MaxResults
-		}
-		if start < len(objects) {
-			objects = objects[start:end]
-		} else {
-			objects = []storage.StorageObject{}
+				object := storage.StorageObject{
+					Key:  key,
+					Size: aws.ToInt64(obj.Size),
+				}
+
+				if obj.LastModified != nil {
+					object.Modified = *obj.LastModified
+				}
+
+				if obj.ETag != nil {
+					object.ETag = *obj.ETag
+				}
+
+				objects = append(objects, object)
+			}
 		}
 	}
 
 	return objects, nil
 }
 
-// Stat gets file metadata from S3
+// Stat returns metadata about stored data
 func (s *S3Storage) Stat(ctx context.Context, key string) (*storage.StorageInfo, error) {
-	s3Key := s.buildKey(key)
+	fullKey := s.buildKey(key)
 
-	input := &s3.HeadObjectInput{
+	result, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
-		Key:    aws.String(s3Key),
-	}
+		Key:    aws.String(fullKey),
+	})
 
-	result, err := s.client.HeadObject(ctx, input)
 	if err != nil {
 		if isNotFoundError(err) {
-			return nil, errors.NotFound(fmt.Sprintf("file not found: %s", key))
+			return nil, errors.NotFound(fmt.Sprintf("S3 object not found: %s", key))
 		}
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to stat object in S3")
 	}
 
 	info := &storage.StorageInfo{
-		Key:      key,
-		Size:     *result.ContentLength,
-		Modified: *result.LastModified,
-		ETag:     strings.Trim(*result.ETag, "\""),
-		Metadata: result.Metadata,
+		Key:  key,
+		Size: aws.ToInt64(result.ContentLength),
+	}
+
+	if result.LastModified != nil {
+		info.Modified = *result.LastModified
+	}
+
+	if result.ETag != nil {
+		info.ETag = *result.ETag
 	}
 
 	if result.ContentType != nil {
@@ -340,33 +287,27 @@ func (s *S3Storage) Stat(ctx context.Context, key string) (*storage.StorageInfo,
 	return info, nil
 }
 
-// GetQuota returns quota information
+// GetQuota returns current usage and quota information
 func (s *S3Storage) GetQuota(ctx context.Context) (*storage.QuotaInfo, error) {
-	s.mu.RLock()
-	used := s.used
-	s.mu.RUnlock()
-
-	available := s.quota - used
-	if available < 0 {
-		available = 0
+	usage, err := s.calculateUsage(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	return &storage.QuotaInfo{
-		Used:      used,
-		Available: available,
-		Limit:     s.quota,
+		Used:  usage,
+		Limit: s.maxSizeBytes,
 	}, nil
 }
 
-// Health checks S3 health
+// Health checks if the S3 backend is healthy
 func (s *S3Storage) Health(ctx context.Context) error {
-	// Try to list bucket to verify connectivity
-	input := &s3.ListObjectsV2Input{
+	// Try to list objects (lightweight operation)
+	_, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket:  aws.String(s.bucket),
 		MaxKeys: aws.Int32(1),
-	}
+	})
 
-	_, err := s.client.ListObjectsV2(ctx, input)
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "S3 health check failed")
 	}
@@ -374,60 +315,51 @@ func (s *S3Storage) Health(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the storage backend
+// Close closes the S3 storage backend
 func (s *S3Storage) Close() error {
-	// No cleanup needed for S3 client
+	log.Info().Msg("S3 storage closed")
 	return nil
 }
 
-// buildKey builds the full S3 key with prefix
+// buildKey constructs the full S3 key with prefix
 func (s *S3Storage) buildKey(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	if s.prefix != "" {
-		return s.prefix + "/" + key
+	if s.prefix == "" {
+		return key
 	}
-	return key
+	return s.prefix + "/" + key
 }
 
-// stripPrefix removes the configured prefix from an S3 key
-func (s *S3Storage) stripPrefix(s3Key string) string {
-	if s.prefix != "" {
-		return strings.TrimPrefix(s3Key, s.prefix+"/")
+// stripPrefix removes the prefix from an S3 key
+func (s *S3Storage) stripPrefix(key string) string {
+	if s.prefix == "" {
+		return key
 	}
-	return s3Key
+	return strings.TrimPrefix(key, s.prefix+"/")
 }
 
-// calculateUsage calculates current S3 storage usage
-func (s *S3Storage) calculateUsage(ctx context.Context) error {
-	var total int64
+// calculateUsage calculates total storage usage
+func (s *S3Storage) calculateUsage(ctx context.Context) (int64, error) {
+	var totalSize int64
 
-	input := &s3.ListObjectsV2Input{
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.bucket),
-	}
-
-	if s.prefix != "" {
-		input.Prefix = aws.String(s.prefix + "/")
-	}
-
-	paginator := s3.NewListObjectsV2Paginator(s.client, input)
+		Prefix: aws.String(s.prefix),
+	})
 
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return err
+			return 0, fmt.Errorf("failed to calculate usage: %w", err)
 		}
 
 		for _, obj := range page.Contents {
-			total += *obj.Size
+			if obj.Size != nil {
+				totalSize += aws.ToInt64(obj.Size)
+			}
 		}
 	}
 
-	s.mu.Lock()
-	s.used = total
-	s.mu.Unlock()
-
-	metrics.UpdateCacheSize("s3", total)
-	return nil
+	return totalSize, nil
 }
 
 // isNotFoundError checks if an error is a "not found" error
@@ -436,8 +368,21 @@ func isNotFoundError(err error) bool {
 		return false
 	}
 
+	// Check for specific S3 error types
 	var notFound *types.NotFound
 	var noSuchKey *types.NoSuchKey
 
-	return stderrors.As(err, &notFound) || stderrors.As(err, &noSuchKey)
+	// Use errors.As to check for wrapped errors
+	if ok := stderrors.As(err, &notFound); ok {
+		return true
+	}
+	if ok := stderrors.As(err, &noSuchKey); ok {
+		return true
+	}
+
+	// Check error message as fallback
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "NoSuchKey") ||
+		strings.Contains(errMsg, "NotFound") ||
+		strings.Contains(errMsg, "404")
 }

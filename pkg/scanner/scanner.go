@@ -36,10 +36,10 @@ type DatabaseUpdater interface {
 
 // Manager manages multiple security scanners
 type Manager struct {
+	metadataStore metadata.MetadataStore
+	config        config.SecurityConfig
 	scanners      []Scanner
 	enabled       bool
-	config        config.SecurityConfig
-	metadataStore metadata.MetadataStore
 }
 
 // New creates a new scanner manager with configured scanners

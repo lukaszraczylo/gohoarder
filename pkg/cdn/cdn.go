@@ -4,10 +4,7 @@ import (
 	"crypto/md5" // #nosec G501 -- MD5 used for ETag generation, not cryptographic security
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -214,38 +211,11 @@ func (m *Middleware) generateETag(body []byte) string {
 	return `"` + hex.EncodeToString(hash[:]) + `"`
 }
 
-// SetLastModified sets the Last-Modified header
-func SetLastModified(w http.ResponseWriter, t time.Time) {
-	w.Header().Set("Last-Modified", t.UTC().Format(http.TimeFormat))
-}
-
-// SetCacheControl sets a custom Cache-Control header
-func SetCacheControl(w http.ResponseWriter, cc CacheControl) {
-	w.Header().Set("Cache-Control", cc.String())
-}
-
-// SetNoCache sets headers to prevent caching
-func SetNoCache(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-}
-
-// SetImmutable sets headers for immutable content (content-addressed files)
-func SetImmutable(w http.ResponseWriter, maxAge int) {
-	cc := CacheControl{
-		Public:    true,
-		MaxAge:    maxAge,
-		Immutable: true,
-	}
-	w.Header().Set("Cache-Control", cc.String())
-}
-
 // responseWriter wraps http.ResponseWriter to capture response
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
 	body       []byte
+	statusCode int
 }
 
 func (rw *responseWriter) WriteHeader(statusCode int) {
@@ -260,101 +230,4 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	}
 	rw.body = append(rw.body, b...)
 	return rw.ResponseWriter.Write(b)
-}
-
-// HandleRange handles HTTP Range requests for partial content
-func HandleRange(w http.ResponseWriter, r *http.Request, content io.ReadSeeker, size int64, modTime time.Time) error {
-	// Set Last-Modified header
-	SetLastModified(w, modTime)
-
-	// Check for Range header
-	rangeHeader := r.Header.Get("Range")
-	if rangeHeader == "" {
-		// No range request - serve full content
-		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-		w.Header().Set("Accept-Ranges", "bytes")
-		w.WriteHeader(http.StatusOK)
-		_, err := io.Copy(w, content)
-		return err
-	}
-
-	// Parse range header (simplified - only handles single range)
-	// Format: bytes=start-end
-	var start, end int64
-	n, err := fmt.Sscanf(rangeHeader, "bytes=%d-%d", &start, &end)
-	if err != nil || n != 2 {
-		// Invalid range - serve full content
-		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-		w.Header().Set("Accept-Ranges", "bytes")
-		w.WriteHeader(http.StatusOK)
-		_, err := io.Copy(w, content)
-		return err
-	}
-
-	// Validate range
-	if start < 0 || start >= size || end < start || end >= size {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
-		return nil
-	}
-
-	// Seek to start position
-	if _, err := content.Seek(start, io.SeekStart); err != nil {
-		return err
-	}
-
-	// Calculate content length
-	contentLength := end - start + 1
-
-	// Set headers for partial content
-	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
-	w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.WriteHeader(http.StatusPartialContent)
-
-	// Copy range to response
-	_, err = io.CopyN(w, content, contentLength)
-	return err
-}
-
-// DefaultCacheControl returns sensible defaults for different content types
-func DefaultCacheControl(contentType string, versioned bool) CacheControl {
-	if versioned {
-		// Content-addressed or versioned resources can be cached forever
-		return CacheControl{
-			Public:    true,
-			MaxAge:    31536000, // 1 year
-			Immutable: true,
-		}
-	}
-
-	// Default caching based on content type
-	switch contentType {
-	case "application/json":
-		return CacheControl{
-			Public:  true,
-			MaxAge:  3600, // 1 hour
-			SMaxAge: 7200, // 2 hours for shared caches
-		}
-	case "application/octet-stream", "application/x-gzip", "application/zip":
-		// Binary packages
-		return CacheControl{
-			Public:  true,
-			MaxAge:  86400,  // 1 day
-			SMaxAge: 604800, // 1 week for shared caches
-		}
-	case "text/html":
-		// HTML should revalidate
-		return CacheControl{
-			Public:         true,
-			MaxAge:         0,
-			MustRevalidate: true,
-		}
-	default:
-		return CacheControl{
-			Public:  true,
-			MaxAge:  3600, // 1 hour default
-			SMaxAge: 7200,
-		}
-	}
 }

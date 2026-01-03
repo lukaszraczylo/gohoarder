@@ -25,8 +25,8 @@ const (
 
 // Scanner implements the Scanner interface using OSV.dev API
 type Scanner struct {
-	config     config.OSVConfig
 	httpClient *http.Client
+	config     config.OSVConfig
 }
 
 // OSVRequest represents the request structure for OSV API
@@ -48,13 +48,13 @@ type OSVResponse struct {
 
 // OSVVulnerability represents a vulnerability in OSV format
 type OSVVulnerability struct {
+	DatabaseSpecific map[string]interface{} `json:"database_specific,omitempty"`
 	ID               string                 `json:"id"`
 	Summary          string                 `json:"summary"`
 	Details          string                 `json:"details"`
 	Severity         []OSVSeverity          `json:"severity,omitempty"`
 	References       []OSVReference         `json:"references,omitempty"`
 	Affected         []OSVAffected          `json:"affected"`
-	DatabaseSpecific map[string]interface{} `json:"database_specific,omitempty"`
 }
 
 // OSVSeverity represents severity information
@@ -71,11 +71,11 @@ type OSVReference struct {
 
 // OSVAffected represents affected package versions
 type OSVAffected struct {
+	DatabaseSpecific  map[string]interface{} `json:"database_specific,omitempty"`
+	EcosystemSpecific map[string]interface{} `json:"ecosystem_specific,omitempty"`
 	Package           PackageInfo            `json:"package"`
 	Ranges            []OSVRange             `json:"ranges,omitempty"`
 	Versions          []string               `json:"versions,omitempty"`
-	DatabaseSpecific  map[string]interface{} `json:"database_specific,omitempty"`
-	EcosystemSpecific map[string]interface{} `json:"ecosystem_specific,omitempty"`
 }
 
 // OSVRange represents version ranges

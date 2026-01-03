@@ -153,9 +153,9 @@ func (s *Scanner) convertGrypeResult(grypeResult *GrypeResult, registry, package
 
 // GrypeResult represents Grype JSON output structure
 type GrypeResult struct {
-	Matches    []GrypeMatch    `json:"matches"`
-	Descriptor GrypeDescriptor `json:"descriptor"`
 	Source     GrypeSource     `json:"source"`
+	Descriptor GrypeDescriptor `json:"descriptor"`
+	Matches    []GrypeMatch    `json:"matches"`
 }
 
 type GrypeDescriptor struct {
@@ -164,13 +164,13 @@ type GrypeDescriptor struct {
 }
 
 type GrypeSource struct {
-	Type   string                 `json:"type"`
 	Target map[string]interface{} `json:"target"`
+	Type   string                 `json:"type"`
 }
 
 type GrypeMatch struct {
-	Vulnerability GrypeVulnerability `json:"vulnerability"`
 	Artifact      GrypeArtifact      `json:"artifact"`
+	Vulnerability GrypeVulnerability `json:"vulnerability"`
 }
 
 type GrypeVulnerability struct {

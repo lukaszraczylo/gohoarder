@@ -137,19 +137,9 @@ func RecordCacheMiss(handler string) {
 	CacheRequests.WithLabelValues("miss", handler).Inc()
 }
 
-// RecordCacheError records a cache error
-func RecordCacheError(handler string) {
-	CacheRequests.WithLabelValues("error", handler).Inc()
-}
-
 // UpdateCacheSize updates the cache size metric
 func UpdateCacheSize(backend string, bytes int64) {
 	CacheSizeBytes.WithLabelValues(backend).Set(float64(bytes))
-}
-
-// UpdateCacheItems updates the cache items metric
-func UpdateCacheItems(handler string, count int64) {
-	CacheItemsTotal.WithLabelValues(handler).Set(float64(count))
 }
 
 // RecordCacheEviction records a cache eviction
@@ -162,24 +152,9 @@ func RecordStorageOperation(backend, operation, status string) {
 	StorageOperations.WithLabelValues(backend, operation, status).Inc()
 }
 
-// UpdateStorageQuota updates the storage quota metric
-func UpdateStorageQuota(project string, bytes int64) {
-	StorageQuotaBytes.WithLabelValues(project).Set(float64(bytes))
-}
-
 // RecordUpstreamRequest records an upstream request
 func RecordUpstreamRequest(registry, status string) {
 	UpstreamRequests.WithLabelValues(registry, status).Inc()
-}
-
-// RecordSecurityScan records a security scan
-func RecordSecurityScan(scanner, result string) {
-	SecurityScans.WithLabelValues(scanner, result).Inc()
-}
-
-// RecordVulnerability records a vulnerability finding
-func RecordVulnerability(severity string) {
-	VulnerabilitiesFound.WithLabelValues(severity).Inc()
 }
 
 // UpdateCircuitBreakerState updates the circuit breaker state

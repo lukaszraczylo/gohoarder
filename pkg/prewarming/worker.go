@@ -24,22 +24,22 @@ type Worker struct {
 	cache         *cache.Manager
 	analytics     *analytics.Engine
 	client        *network.Client
+	stopChan      chan struct{}
+	wg            sync.WaitGroup
 	interval      time.Duration
 	maxConcurrent int
 	enabled       bool
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
 }
 
 // Config holds pre-warming worker configuration
 type Config struct {
-	Enabled       bool
-	Interval      time.Duration
-	MaxConcurrent int
-	TopPackages   int
 	CacheManager  *cache.Manager
 	Analytics     *analytics.Engine
 	NetworkClient *network.Client
+	Interval      time.Duration
+	MaxConcurrent int
+	TopPackages   int
+	Enabled       bool
 }
 
 // NewWorker creates a new pre-warming worker

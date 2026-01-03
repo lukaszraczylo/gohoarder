@@ -21,25 +21,25 @@ const (
 
 // Check represents a single health check
 type Check struct {
+	Fn     func(context.Context) (Status, string) `json:"-"`
 	Name   string                                 `json:"name"`
 	Status Status                                 `json:"status"`
 	Error  string                                 `json:"error,omitempty"`
-	Fn     func(context.Context) (Status, string) `json:"-"`
 }
 
 // Response is the health check response
 type Response struct {
-	Success  bool        `json:"success"`
 	Data     *HealthData `json:"data,omitempty"`
 	Metadata *Metadata   `json:"metadata,omitempty"`
+	Success  bool        `json:"success"`
 }
 
 // HealthData contains health check data
 type HealthData struct {
+	Components map[string]*Component `json:"components"`
 	Status     Status                `json:"status"`
 	Version    string                `json:"version"`
 	Uptime     string                `json:"uptime"`
-	Components map[string]*Component `json:"components"`
 }
 
 // Component represents a system component
@@ -57,8 +57,8 @@ type Metadata struct {
 
 // Checker manages health checks
 type Checker struct {
-	checks    []*Check
 	startTime time.Time
+	checks    []*Check
 	mu        sync.RWMutex
 }
 

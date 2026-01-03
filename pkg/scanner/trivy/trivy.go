@@ -25,18 +25,18 @@ type Scanner struct {
 
 // TrivyResult represents Trivy JSON output structure
 type TrivyResult struct {
-	SchemaVersion int               `json:"SchemaVersion"`
+	Metadata      TrivyMetadata     `json:"Metadata"`
 	ArtifactName  string            `json:"ArtifactName"`
 	ArtifactType  string            `json:"ArtifactType"`
-	Metadata      TrivyMetadata     `json:"Metadata"`
 	Results       []TrivyVulnResult `json:"Results"`
+	SchemaVersion int               `json:"SchemaVersion"`
 }
 
 type TrivyMetadata struct {
 	OS          *TrivyOS          `json:"OS,omitempty"`
+	ImageConfig *TrivyImageConfig `json:"ImageConfig,omitempty"`
 	RepoTags    []string          `json:"RepoTags,omitempty"`
 	RepoDigests []string          `json:"RepoDigests,omitempty"`
-	ImageConfig *TrivyImageConfig `json:"ImageConfig,omitempty"`
 }
 
 type TrivyOS struct {
@@ -64,8 +64,8 @@ type TrivyVulnerability struct {
 	Severity         string   `json:"Severity"`
 	Title            string   `json:"Title"`
 	Description      string   `json:"Description"`
-	References       []string `json:"References"`
 	PrimaryURL       string   `json:"PrimaryURL"`
+	References       []string `json:"References"`
 }
 
 // New creates a new Trivy scanner

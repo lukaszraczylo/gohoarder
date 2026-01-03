@@ -24,23 +24,23 @@ type Client struct {
 
 // Config holds client configuration
 type Config struct {
-	Timeout         time.Duration // Request timeout
-	MaxRetries      int           // Max retry attempts
-	RetryDelay      time.Duration // Initial retry delay
-	RateLimit       float64       // Requests per second (0 = unlimited)
-	RateBurst       int           // Rate limiter burst
-	CircuitBreaker  CircuitBreakerConfig
 	UserAgent       string
+	CircuitBreaker  CircuitBreakerConfig
+	Timeout         time.Duration
+	MaxRetries      int
+	RetryDelay      time.Duration
+	RateLimit       float64
+	RateBurst       int
 	MaxConnsPerHost int
 }
 
 // RetryConfig holds retry configuration
 type RetryConfig struct {
+	FixedDelays  []time.Duration
 	MaxAttempts  int
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 	Multiplier   float64
-	FixedDelays  []time.Duration // If set, use these delays instead of exponential backoff
 }
 
 // CircuitBreakerConfig holds circuit breaker configuration
@@ -63,11 +63,11 @@ const (
 
 // CircuitBreaker implements the circuit breaker pattern
 type CircuitBreaker struct {
+	lastFailureTime time.Time
 	config          CircuitBreakerConfig
 	state           CircuitBreakerState
 	failures        int
 	successes       int
-	lastFailureTime time.Time
 	halfOpenCalls   int
 	mu              sync.RWMutex
 }

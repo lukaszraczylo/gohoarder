@@ -35,23 +35,3 @@ func Init(cfg Config) error {
 
 	return nil
 }
-
-// Get returns the global logger
-func Get() *zerolog.Logger {
-	return &log.Logger
-}
-
-// WithFields returns a logger with additional fields
-func WithFields(fields map[string]interface{}) *zerolog.Logger {
-	logger := log.Logger
-	for k, v := range fields {
-		logger = logger.With().Interface(k, v).Logger()
-	}
-	return &logger
-}
-
-// WithRequestID returns a logger with request ID
-func WithRequestID(requestID string) *zerolog.Logger {
-	logger := log.With().Str("request_id", requestID).Logger()
-	return &logger
-}

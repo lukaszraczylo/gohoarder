@@ -197,12 +197,12 @@ func (m *MockMetadataStore) AggregateDownloadData(ctx context.Context) error {
 // TestNew tests cache manager creation
 func TestNew(t *testing.T) {
 	tests := []struct {
-		name        string
 		storage     storage.StorageBackend
 		metadata    metadata.MetadataStore
+		name        string
+		errContains string
 		config      Config
 		wantErr     bool
-		errContains string
 	}{
 		// GOOD: Valid configuration
 		{
@@ -262,7 +262,7 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager, err := New(tt.storage, tt.metadata, nil, tt.config)
+			manager, err := New(tt.storage, tt.metadata, nil, nil, tt.config)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -295,15 +295,15 @@ func TestNew(t *testing.T) {
 // TestGet tests cache retrieval with various scenarios
 func TestGet(t *testing.T) {
 	tests := []struct {
+		setupMock     func(*MockStorageBackend, *MockMetadataStore)
+		fetchFunc     func(context.Context) (io.ReadCloser, string, error)
 		name          string
 		registry      string
 		packageName   string
 		version       string
-		setupMock     func(*MockStorageBackend, *MockMetadataStore)
-		fetchFunc     func(context.Context) (io.ReadCloser, string, error)
+		errContains   string
 		wantFromCache bool
 		wantErr       bool
-		errContains   string
 	}{
 		// GOOD: Cache hit
 		{
@@ -489,7 +489,7 @@ func TestGet(t *testing.T) {
 				tt.setupMock(mockStorage, mockMetadata)
 			}
 
-			manager, err := New(mockStorage, mockMetadata, nil, Config{
+			manager, err := New(mockStorage, mockMetadata, nil, nil, Config{
 				DefaultTTL:      24 * time.Hour,
 				CleanupInterval: 1 * time.Hour,
 			})
@@ -523,13 +523,13 @@ func TestGet(t *testing.T) {
 // TestDelete tests package deletion
 func TestDelete(t *testing.T) {
 	tests := []struct {
+		setupMock   func(*MockStorageBackend, *MockMetadataStore)
 		name        string
 		registry    string
 		packageName string
 		version     string
-		setupMock   func(*MockStorageBackend, *MockMetadataStore)
-		wantErr     bool
 		errContains string
+		wantErr     bool
 	}{
 		// GOOD: Successful deletion
 		{
@@ -615,7 +615,7 @@ func TestDelete(t *testing.T) {
 				tt.setupMock(mockStorage, mockMetadata)
 			}
 
-			manager, err := New(mockStorage, mockMetadata, nil, Config{})
+			manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -639,10 +639,10 @@ func TestDelete(t *testing.T) {
 // TestHealth tests health check functionality
 func TestHealth(t *testing.T) {
 	tests := []struct {
-		name        string
 		setupMock   func(*MockStorageBackend, *MockMetadataStore)
-		wantErr     bool
+		name        string
 		errContains string
+		wantErr     bool
 	}{
 		// GOOD: Both healthy
 		{
@@ -692,7 +692,7 @@ func TestHealth(t *testing.T) {
 				tt.setupMock(mockStorage, mockMetadata)
 			}
 
-			manager, err := New(mockStorage, mockMetadata, nil, Config{})
+			manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -727,7 +727,7 @@ func TestGetStats(t *testing.T) {
 
 	mockMetadata.On("GetStats", mock.Anything, "npm").Return(expectedStats, nil)
 
-	manager, err := New(mockStorage, mockMetadata, nil, Config{})
+	manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -741,8 +741,8 @@ func TestGetStats(t *testing.T) {
 // TestClose tests manager cleanup
 func TestClose(t *testing.T) {
 	tests := []struct {
-		name      string
 		setupMock func(*MockStorageBackend, *MockMetadataStore)
+		name      string
 		wantErr   bool
 	}{
 		// GOOD: Clean close
@@ -792,7 +792,7 @@ func TestClose(t *testing.T) {
 				tt.setupMock(mockStorage, mockMetadata)
 			}
 
-			manager, err := New(mockStorage, mockMetadata, nil, Config{})
+			manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 			require.NoError(t, err)
 
 			err = manager.Close() // #nosec G104 -- Cleanup, error not critical
@@ -812,11 +812,11 @@ func TestClose(t *testing.T) {
 // TestEvict tests LRU eviction
 func TestEvict(t *testing.T) {
 	tests := []struct {
-		name        string
-		needed      int64
 		setupMock   func(*MockStorageBackend, *MockMetadataStore)
-		wantErr     bool
+		name        string
 		errContains string
+		needed      int64
+		wantErr     bool
 	}{
 		// GOOD: Successful eviction
 		{
@@ -881,7 +881,7 @@ func TestEvict(t *testing.T) {
 				tt.setupMock(mockStorage, mockMetadata)
 			}
 
-			manager, err := New(mockStorage, mockMetadata, nil, Config{})
+			manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 			require.NoError(t, err)
 
 			ctx := context.Background()
@@ -907,7 +907,7 @@ func TestGenerateStorageKey(t *testing.T) {
 	mockStorage := &MockStorageBackend{}
 	mockMetadata := &MockMetadataStore{}
 
-	manager, err := New(mockStorage, mockMetadata, nil, Config{})
+	manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -954,7 +954,7 @@ func TestConcurrentGet(t *testing.T) {
 		io.NopCloser(bytes.NewReader([]byte("test data"))), nil).Maybe()
 	mockMetadata.On("UpdateDownloadCount", mock.Anything, "npm", "concurrent", "1.0.0").Return(nil).Maybe()
 
-	manager, err := New(mockStorage, mockMetadata, nil, Config{})
+	manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()

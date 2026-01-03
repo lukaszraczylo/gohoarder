@@ -199,9 +199,9 @@ func (s *Scanner) convertResult(auditResult *NpmAuditResult, registry, packageNa
 
 // NpmAuditResult represents npm audit JSON output
 type NpmAuditResult struct {
-	AuditReportVersion int                         `json:"auditReportVersion"`
 	Vulnerabilities    map[string]NpmVulnerability `json:"vulnerabilities"`
 	Metadata           NpmAuditMetadata            `json:"metadata"`
+	AuditReportVersion int                         `json:"auditReportVersion"`
 }
 
 type NpmVulnerability struct {

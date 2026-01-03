@@ -1,42 +1,43 @@
 package smb
 
 import (
-	"bytes"
 	"context"
-	"crypto/md5" // #nosec G501 -- MD5 used for file checksums, not cryptographic security
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hirochachacha/go-smb2"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
-	"github.com/lukaszraczylo/gohoarder/pkg/metrics"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/rs/zerolog/log"
 )
 
-// SMBStorage implements storage.StorageBackend for SMB/CIFS shares
-type SMBStorage struct {
-	host     string
-	share    string
-	basePath string
-	username string
-	password string
-	quota    int64
-	mu       sync.RWMutex
-	used     int64
-	connPool chan *smbConnection
-	poolSize int
+// Config holds SMB storage configuration
+type Config struct {
+	Host         string
+	Share        string
+	Path         string
+	Username     string
+	Password     string
+	Domain       string
+	Port         int
+	MaxSizeBytes int64
+	PoolSize     int
 }
 
-// smbConnection wraps an SMB session and share
+// SMBStorage implements storage.StorageBackend using SMB/CIFS
+type SMBStorage struct {
+	connPool     chan *smbConnection
+	config       Config
+	maxSizeBytes int64
+	poolSize     int
+}
+
+// smbConnection represents a pooled SMB connection
 type smbConnection struct {
 	conn    net.Conn
 	session *smb2.Session
@@ -44,27 +45,14 @@ type smbConnection struct {
 	lastUse time.Time
 }
 
-// Config holds SMB configuration
-type Config struct {
-	Host     string // SMB server hostname or IP
-	Port     int    // SMB server port (default: 445)
-	Share    string // SMB share name
-	BasePath string // Base path within the share
-	Username string // SMB username
-	Password string // SMB password
-	Domain   string // SMB domain (optional)
-	Quota    int64  // Quota in bytes (0 = unlimited)
-	PoolSize int    // Connection pool size (default: 5)
-}
-
 // New creates a new SMB storage backend
-func New(ctx context.Context, cfg Config) (*SMBStorage, error) {
+func New(cfg Config) (*SMBStorage, error) {
 	if cfg.Host == "" {
-		return nil, errors.New(errors.ErrCodeInvalidConfig, "SMB host is required")
+		return nil, fmt.Errorf("SMB host is required")
 	}
 
 	if cfg.Share == "" {
-		return nil, errors.New(errors.ErrCodeInvalidConfig, "SMB share is required")
+		return nil, fmt.Errorf("SMB share is required")
 	}
 
 	if cfg.Port == 0 {
@@ -75,64 +63,68 @@ func New(ctx context.Context, cfg Config) (*SMBStorage, error) {
 		cfg.PoolSize = 5 // Default pool size
 	}
 
-	smbStorage := &SMBStorage{
-		host:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		share:    cfg.Share,
-		basePath: strings.Trim(cfg.BasePath, "/\\"),
-		username: cfg.Username,
-		password: cfg.Password,
-		quota:    cfg.Quota,
-		connPool: make(chan *smbConnection, cfg.PoolSize),
-		poolSize: cfg.PoolSize,
+	// Normalize path
+	cfg.Path = strings.Trim(cfg.Path, "/\\")
+
+	storage := &SMBStorage{
+		config:       cfg,
+		maxSizeBytes: cfg.MaxSizeBytes,
+		poolSize:     cfg.PoolSize,
+		connPool:     make(chan *smbConnection, cfg.PoolSize),
 	}
 
-	// Initialize connection pool
+	// Pre-populate connection pool
 	for i := 0; i < cfg.PoolSize; i++ {
-		conn, err := smbStorage.createConnection(ctx)
+		conn, err := storage.createConnection()
 		if err != nil {
-			// Clean up any created connections
-			close(smbStorage.connPool)
-			for c := range smbStorage.connPool {
-				c.close()
-			}
-			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SMB connection pool")
+			log.Warn().Err(err).Int("attempt", i).Msg("Failed to create initial SMB connection")
+			continue
 		}
-		smbStorage.connPool <- conn
+		storage.connPool <- conn
 	}
 
-	// Calculate initial usage
-	if err := smbStorage.calculateUsage(ctx); err != nil {
-		log.Warn().Err(err).Msg("Failed to calculate initial SMB storage usage")
-	}
+	log.Info().
+		Str("host", cfg.Host).
+		Int("port", cfg.Port).
+		Str("share", cfg.Share).
+		Str("path", cfg.Path).
+		Int("pool_size", cfg.PoolSize).
+		Msg("SMB storage initialized")
 
-	return smbStorage, nil
+	return storage, nil
 }
 
 // createConnection creates a new SMB connection
-func (s *SMBStorage) createConnection(ctx context.Context) (*smbConnection, error) {
-	conn, err := net.Dial("tcp", s.host)
+func (s *SMBStorage) createConnection() (*smbConnection, error) {
+	// Connect to SMB server (use net.JoinHostPort for IPv6 compatibility)
+	addr := net.JoinHostPort(s.config.Host, fmt.Sprintf("%d", s.config.Port))
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to SMB server: %w", err)
 	}
 
-	dialer := &smb2.Dialer{
+	// Create SMB dialer
+	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
-			User:     s.username,
-			Password: s.password,
+			User:     s.config.Username,
+			Password: s.config.Password,
+			Domain:   s.config.Domain,
 		},
 	}
 
-	session, err := dialer.Dial(conn)
+	// Establish SMB session
+	session, err := d.Dial(conn)
 	if err != nil {
-		conn.Close() // #nosec G104 -- Cleanup, error not critical
-		return nil, err
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to establish SMB session: %w", err)
 	}
 
-	share, err := session.Mount(s.share)
+	// Mount share
+	share, err := session.Mount(s.config.Share)
 	if err != nil {
-		_ = session.Logoff() // #nosec G104 -- SMB cleanup
-		conn.Close()         // #nosec G104 -- Cleanup, error not critical
-		return nil, err
+		_ = session.Logoff()
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to mount SMB share: %w", err)
 	}
 
 	return &smbConnection{
@@ -143,25 +135,34 @@ func (s *SMBStorage) createConnection(ctx context.Context) (*smbConnection, erro
 	}, nil
 }
 
-// getConnection gets a connection from the pool
-func (s *SMBStorage) getConnection(ctx context.Context) (*smbConnection, error) {
+// getConnection gets a connection from the pool or creates a new one
+func (s *SMBStorage) getConnection() (*smbConnection, error) {
 	select {
 	case conn := <-s.connPool:
+		// Check if connection is still valid (not older than 5 minutes idle)
+		if time.Since(conn.lastUse) > 5*time.Minute {
+			conn.close()
+			return s.createConnection()
+		}
 		conn.lastUse = time.Now()
 		return conn, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(30 * time.Second):
-		return nil, errors.New(errors.ErrCodeStorageFailure, "timeout waiting for SMB connection")
+	default:
+		// Pool is empty, create new connection
+		return s.createConnection()
 	}
 }
 
 // returnConnection returns a connection to the pool
 func (s *SMBStorage) returnConnection(conn *smbConnection) {
+	if conn == nil {
+		return
+	}
+
 	select {
 	case s.connPool <- conn:
+		// Successfully returned to pool
 	default:
-		// Pool is full, close the connection
+		// Pool is full, close connection
 		conn.close()
 	}
 }
@@ -169,189 +170,161 @@ func (s *SMBStorage) returnConnection(conn *smbConnection) {
 // close closes an SMB connection
 func (c *smbConnection) close() {
 	if c.share != nil {
-		_ = c.share.Umount() // #nosec G104 -- SMB cleanup
+		if err := c.share.Umount(); err != nil {
+			log.Warn().Err(err).Msg("Failed to unmount SMB share")
+		}
 	}
 	if c.session != nil {
-		_ = c.session.Logoff() // #nosec G104 -- SMB cleanup
+		if err := c.session.Logoff(); err != nil {
+			log.Warn().Err(err).Msg("Failed to logoff SMB session")
+		}
 	}
 	if c.conn != nil {
-		c.conn.Close() // #nosec G104 -- Cleanup, error not critical
+		if err := c.conn.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close SMB connection")
+		}
 	}
 }
 
-// Get retrieves a file from SMB share
+// Get retrieves data from SMB share
 func (s *SMBStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	conn, err := s.getConnection(ctx)
+	conn, err := s.getConnection()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
+	defer s.returnConnection(conn)
 
 	path := s.keyToPath(key)
+
+	log.Debug().Str("key", path).Msg("Getting file from SMB")
 
 	// Open file
 	file, err := conn.share.Open(path)
 	if err != nil {
-		s.returnConnection(conn)
 		if os.IsNotExist(err) {
-			metrics.RecordStorageOperation("smb", "get", "not_found")
-			return nil, errors.NotFound(fmt.Sprintf("file not found: %s", key))
+			return nil, errors.NotFound(fmt.Sprintf("SMB file not found: %s", key))
 		}
-		metrics.RecordStorageOperation("smb", "get", "error")
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to open SMB file")
 	}
 
-	// Read entire file into memory and close SMB connection
-	// This is necessary because we need to return the connection to the pool
+	// Read entire file into memory (SMB files must be read completely before closing connection)
 	data, err := io.ReadAll(file)
-	file.Close() // #nosec G104 -- Cleanup, error not critical
-	s.returnConnection(conn)
-
+	if closeErr := file.Close(); closeErr != nil {
+		log.Warn().Err(closeErr).Str("path", path).Msg("Failed to close SMB file after reading")
+	}
 	if err != nil {
-		metrics.RecordStorageOperation("smb", "get", "error")
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to read SMB file")
 	}
 
-	metrics.RecordStorageOperation("smb", "get", "success")
-	return io.NopCloser(bytes.NewReader(data)), nil
+	// Return as ReadCloser
+	return io.NopCloser(strings.NewReader(string(data))), nil
 }
 
-// Put stores a file on SMB share
+// Put stores data on SMB share
 func (s *SMBStorage) Put(ctx context.Context, key string, data io.Reader, opts *storage.PutOptions) error {
-	conn, err := s.getConnection(ctx)
+	conn, err := s.getConnection()
 	if err != nil {
-		return err
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
 
 	path := s.keyToPath(key)
-	dir := filepath.Dir(path)
 
-	// Create directory structure
-	if err := conn.share.MkdirAll(dir, 0755); err != nil {
-		metrics.RecordStorageOperation("smb", "put", "error")
+	log.Debug().Str("key", path).Msg("Putting file to SMB")
+
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := s.ensureDir(conn, dir); err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SMB directory")
 	}
 
-	// Read data into buffer to calculate checksums and size
-	var buf bytes.Buffer
-	md5Hash := md5.New() // #nosec G401 -- MD5 used for file integrity check, not cryptographic security
-	sha256Hash := sha256.New()
-	multiWriter := io.MultiWriter(&buf, md5Hash, sha256Hash)
-
-	written, err := io.Copy(multiWriter, data)
+	// Read data into buffer to check quota
+	buf := new(strings.Builder)
+	size, err := io.Copy(buf, data)
 	if err != nil {
-		metrics.RecordStorageOperation("smb", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to read data")
 	}
 
-	// Check quota
-	if s.quota > 0 {
-		s.mu.RLock()
-		used := s.used
-		s.mu.RUnlock()
-
-		if used+written > s.quota {
-			metrics.RecordStorageOperation("smb", "put", "quota_exceeded")
-			return errors.QuotaExceeded(s.quota)
+	// Check quota if set
+	if s.maxSizeBytes > 0 {
+		currentUsage, err := s.calculateUsage(conn)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to calculate current usage, skipping quota check")
+		} else if currentUsage+size > s.maxSizeBytes {
+			return errors.QuotaExceeded(s.maxSizeBytes)
 		}
 	}
 
-	// Verify checksums if provided
-	if opts != nil {
-		md5Sum := hex.EncodeToString(md5Hash.Sum(nil))
-		sha256Sum := hex.EncodeToString(sha256Hash.Sum(nil))
-
-		if opts.ChecksumMD5 != "" && opts.ChecksumMD5 != md5Sum {
-			metrics.RecordStorageOperation("smb", "put", "checksum_error")
-			return errors.New(errors.ErrCodeChecksumMismatch, "MD5 checksum mismatch")
-		}
-
-		if opts.ChecksumSHA256 != "" && opts.ChecksumSHA256 != sha256Sum {
-			metrics.RecordStorageOperation("smb", "put", "checksum_error")
-			return errors.New(errors.ErrCodeChecksumMismatch, "SHA256 checksum mismatch")
-		}
-	}
-
-	// Create temp file for atomic write
-	tempPath := path + ".tmp"
-	file, err := conn.share.Create(tempPath)
+	// Create/overwrite file
+	file, err := conn.share.Create(path)
 	if err != nil {
-		metrics.RecordStorageOperation("smb", "put", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SMB temp file")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SMB file")
 	}
+	defer file.Close()
 
 	// Write data
-	_, err = io.Copy(file, bytes.NewReader(buf.Bytes()))
-	file.Close() // #nosec G104 -- Cleanup, error not critical
-
+	_, err = file.Write([]byte(buf.String()))
 	if err != nil {
-		_ = conn.share.Remove(tempPath) // #nosec G104 -- SMB cleanup
-		metrics.RecordStorageOperation("smb", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to write SMB file")
 	}
 
-	// Atomic rename
-	if err := conn.share.Rename(tempPath, path); err != nil {
-		_ = conn.share.Remove(tempPath) // #nosec G104 -- SMB cleanup
-		metrics.RecordStorageOperation("smb", "put", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to rename SMB temp file")
-	}
-
-	// Update usage
-	s.mu.Lock()
-	s.used += written
-	currentUsed := s.used
-	s.mu.Unlock()
-
-	metrics.RecordStorageOperation("smb", "put", "success")
-	metrics.UpdateCacheSize("smb", currentUsed)
 	return nil
 }
 
-// Delete removes a file from SMB share
-func (s *SMBStorage) Delete(ctx context.Context, key string) error {
-	conn, err := s.getConnection(ctx)
-	if err != nil {
+// ensureDir ensures a directory exists on SMB share
+func (s *SMBStorage) ensureDir(conn *smbConnection, path string) error {
+	if path == "" || path == "." || path == "/" {
+		return nil
+	}
+
+	// Try to stat the directory
+	_, err := conn.share.Stat(path)
+	if err == nil {
+		return nil // Directory exists
+	}
+
+	// Create parent directory first
+	parent := filepath.Dir(path)
+	if parent != path && parent != "." && parent != "/" {
+		if err := s.ensureDir(conn, parent); err != nil {
+			return err
+		}
+	}
+
+	// Create this directory
+	err = conn.share.Mkdir(path, 0755)
+	if err != nil && !os.IsExist(err) {
 		return err
+	}
+
+	return nil
+}
+
+// Delete removes data from SMB share
+func (s *SMBStorage) Delete(ctx context.Context, key string) error {
+	conn, err := s.getConnection()
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
 
 	path := s.keyToPath(key)
 
-	// Get size before deletion
-	info, err := conn.share.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			metrics.RecordStorageOperation("smb", "delete", "not_found")
-			return errors.NotFound(fmt.Sprintf("file not found: %s", key))
-		}
-		metrics.RecordStorageOperation("smb", "delete", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to stat SMB file")
-	}
+	log.Debug().Str("key", path).Msg("Deleting file from SMB")
 
-	size := info.Size()
-
-	if err := conn.share.Remove(path); err != nil {
-		metrics.RecordStorageOperation("smb", "delete", "error")
+	err = conn.share.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to delete SMB file")
 	}
 
-	// Update usage
-	s.mu.Lock()
-	s.used -= size
-	currentUsed := s.used
-	s.mu.Unlock()
-
-	metrics.RecordStorageOperation("smb", "delete", "success")
-	metrics.UpdateCacheSize("smb", currentUsed)
 	return nil
 }
 
-// Exists checks if a file exists on SMB share
+// Exists checks if data exists on SMB share
 func (s *SMBStorage) Exists(ctx context.Context, key string) (bool, error) {
-	conn, err := s.getConnection(ctx)
+	conn, err := s.getConnection()
 	if err != nil {
-		return false, err
+		return false, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
 
@@ -368,57 +341,90 @@ func (s *SMBStorage) Exists(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// List lists files with prefix on SMB share
+// List returns a list of objects with the given prefix
 func (s *SMBStorage) List(ctx context.Context, prefix string, opts *storage.ListOptions) ([]storage.StorageObject, error) {
-	conn, err := s.getConnection(ctx)
+	conn, err := s.getConnection()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
 
-	searchPath := s.keyToPath(prefix)
+	basePath := s.keyToPath(prefix)
+
+	log.Debug().Str("prefix", basePath).Msg("Listing files in SMB")
+
 	var objects []storage.StorageObject
 
-	err = s.walkPath(conn.share, searchPath, func(path string, info os.FileInfo) error {
+	// Walk the directory tree
+	err = s.walkPath(conn, basePath, func(path string, info os.FileInfo) error {
 		if info.IsDir() {
 			return nil
 		}
 
+		// Convert path back to key
 		key := s.pathToKey(path)
+
 		objects = append(objects, storage.StorageObject{
 			Key:      key,
 			Size:     info.Size(),
 			Modified: info.ModTime(),
 		})
+
 		return nil
 	})
 
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to list SMB files")
-	}
-
-	// Apply pagination if requested
-	if opts != nil {
-		start := opts.Offset
-		end := len(objects)
-		if opts.MaxResults > 0 && start+opts.MaxResults < end {
-			end = start + opts.MaxResults
-		}
-		if start < len(objects) {
-			objects = objects[start:end]
-		} else {
-			objects = []storage.StorageObject{}
-		}
 	}
 
 	return objects, nil
 }
 
-// Stat gets file metadata from SMB share
-func (s *SMBStorage) Stat(ctx context.Context, key string) (*storage.StorageInfo, error) {
-	conn, err := s.getConnection(ctx)
+// walkPath walks a directory tree on SMB share
+func (s *SMBStorage) walkPath(conn *smbConnection, root string, fn func(string, os.FileInfo) error) error {
+	// Check if root exists
+	info, err := conn.share.Stat(root)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return nil // Empty directory
+		}
+		return err
+	}
+
+	// If root is a file, process it directly
+	if !info.IsDir() {
+		return fn(root, info)
+	}
+
+	// List directory contents
+	entries, err := conn.share.ReadDir(root)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(root, entry.Name())
+
+		if err := fn(fullPath, entry); err != nil {
+			return err
+		}
+
+		// Recurse into subdirectories
+		if entry.IsDir() {
+			if err := s.walkPath(conn, fullPath, fn); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// Stat returns metadata about stored data
+func (s *SMBStorage) Stat(ctx context.Context, key string) (*storage.StorageInfo, error) {
+	conn, err := s.getConnection()
+	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
 
@@ -427,7 +433,7 @@ func (s *SMBStorage) Stat(ctx context.Context, key string) (*storage.StorageInfo
 	info, err := conn.share.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.NotFound(fmt.Sprintf("file not found: %s", key))
+			return nil, errors.NotFound(fmt.Sprintf("SMB file not found: %s", key))
 		}
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to stat SMB file")
 	}
@@ -439,35 +445,35 @@ func (s *SMBStorage) Stat(ctx context.Context, key string) (*storage.StorageInfo
 	}, nil
 }
 
-// GetQuota returns quota information
+// GetQuota returns current usage and quota information
 func (s *SMBStorage) GetQuota(ctx context.Context) (*storage.QuotaInfo, error) {
-	s.mu.RLock()
-	used := s.used
-	s.mu.RUnlock()
+	conn, err := s.getConnection()
+	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
+	}
+	defer s.returnConnection(conn)
 
-	available := s.quota - used
-	if available < 0 {
-		available = 0
+	usage, err := s.calculateUsage(conn)
+	if err != nil {
+		return nil, err
 	}
 
 	return &storage.QuotaInfo{
-		Used:      used,
-		Available: available,
-		Limit:     s.quota,
+		Used:  usage,
+		Limit: s.maxSizeBytes,
 	}, nil
 }
 
-// Health checks SMB health
+// Health checks if the SMB backend is healthy
 func (s *SMBStorage) Health(ctx context.Context) error {
-	conn, err := s.getConnection(ctx)
+	conn, err := s.getConnection()
 	if err != nil {
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "SMB health check failed - connection error")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "SMB health check failed: cannot get connection")
 	}
 	defer s.returnConnection(conn)
 
 	// Try to stat the base path
-	path := s.keyToPath("")
-	_, err = conn.share.Stat(path)
+	_, err = conn.share.Stat(s.config.Path)
 	if err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "SMB health check failed")
 	}
@@ -475,105 +481,62 @@ func (s *SMBStorage) Health(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the storage backend
+// Close closes the SMB storage backend
 func (s *SMBStorage) Close() error {
 	close(s.connPool)
+
+	// Close all connections in pool
 	for conn := range s.connPool {
 		conn.close()
 	}
+
+	log.Info().Msg("SMB storage closed")
 	return nil
 }
 
 // keyToPath converts a storage key to SMB path
 func (s *SMBStorage) keyToPath(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	key = filepath.Clean(key)
+	// Normalize separators to backslash for SMB
+	key = strings.ReplaceAll(key, "/", "\\")
 
-	// Remove path traversal attempts
-	for strings.HasPrefix(key, "../") || strings.HasPrefix(key, "..\\") {
-		key = strings.TrimPrefix(key, "../")
-		key = strings.TrimPrefix(key, "..\\")
+	if s.config.Path == "" {
+		return key
 	}
 
-	key = filepath.Clean(key)
-	if key == ".." || strings.HasPrefix(key, "../") || strings.HasPrefix(key, "..\\") {
-		key = ""
-	}
-
-	if s.basePath != "" {
-		return filepath.Join(s.basePath, key)
-	}
-	return key
+	// Use backslash for SMB paths
+	return s.config.Path + "\\" + key
 }
 
-// pathToKey converts an SMB path back to a storage key
+// pathToKey converts an SMB path to storage key
 func (s *SMBStorage) pathToKey(path string) string {
-	if s.basePath != "" {
-		path = strings.TrimPrefix(path, s.basePath)
-		path = strings.TrimPrefix(path, "/")
-		path = strings.TrimPrefix(path, "\\")
+	// Remove base path
+	if s.config.Path != "" {
+		path = strings.TrimPrefix(path, s.config.Path+"\\")
 	}
-	return filepath.ToSlash(path)
+
+	// Convert backslashes to forward slashes for consistency
+	return strings.ReplaceAll(path, "\\", "/")
 }
 
-// walkPath recursively walks an SMB directory
-func (s *SMBStorage) walkPath(share *smb2.Share, path string, fn func(string, os.FileInfo) error) error {
-	info, err := share.Stat(path)
-	if err != nil {
-		return err
+// calculateUsage calculates total storage usage
+func (s *SMBStorage) calculateUsage(conn *smbConnection) (int64, error) {
+	var totalSize int64
+
+	basePath := s.config.Path
+	if basePath == "" {
+		basePath = "\\"
 	}
 
-	if !info.IsDir() {
-		return fn(path, info)
-	}
-
-	entries, err := share.ReadDir(path)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		entryPath := filepath.Join(path, entry.Name())
-		if entry.IsDir() {
-			if err := s.walkPath(share, entryPath, fn); err != nil {
-				return err
-			}
-		} else {
-			if err := fn(entryPath, entry); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-// calculateUsage calculates current SMB storage usage
-func (s *SMBStorage) calculateUsage(ctx context.Context) error {
-	conn, err := s.getConnection(ctx)
-	if err != nil {
-		return err
-	}
-	defer s.returnConnection(conn)
-
-	var total int64
-	basePath := s.keyToPath("")
-
-	err = s.walkPath(conn.share, basePath, func(path string, info os.FileInfo) error {
+	err := s.walkPath(conn, basePath, func(path string, info os.FileInfo) error {
 		if !info.IsDir() {
-			total += info.Size()
+			totalSize += info.Size()
 		}
 		return nil
 	})
 
-	if err != nil && !os.IsNotExist(err) {
-		return err
+	if err != nil {
+		return 0, fmt.Errorf("failed to calculate usage: %w", err)
 	}
 
-	s.mu.Lock()
-	s.used = total
-	s.mu.Unlock()
-
-	metrics.UpdateCacheSize("smb", total)
-	return nil
+	return totalSize, nil
 }

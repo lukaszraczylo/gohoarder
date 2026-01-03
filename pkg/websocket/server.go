@@ -25,9 +25,9 @@ const (
 
 // Event represents a WebSocket event message
 type Event struct {
-	Type      EventType              `json:"type"`
 	Timestamp time.Time              `json:"timestamp"`
 	Data      map[string]interface{} `json:"data"`
+	Type      EventType              `json:"type"`
 }
 
 // Client represents a WebSocket client connection
@@ -45,15 +45,15 @@ type Server struct {
 	broadcast  chan Event
 	register   chan *Client
 	unregister chan *Client
-	mu         sync.RWMutex
 	upgrader   websocket.Upgrader
+	mu         sync.RWMutex
 }
 
 // Config holds WebSocket server configuration
 type Config struct {
+	CheckOrigin     func(r *http.Request) bool
 	ReadBufferSize  int
 	WriteBufferSize int
-	CheckOrigin     func(r *http.Request) bool
 }
 
 // NewServer creates a new WebSocket server
@@ -307,8 +307,8 @@ func (c *Client) writePump() {
 // handleMessage processes incoming client messages
 func (c *Client) handleMessage(message []byte) {
 	var msg struct {
-		Action string      `json:"action"`
 		Data   interface{} `json:"data"`
+		Action string      `json:"action"`
 	}
 
 	if err := json.Unmarshal(message, &msg); err != nil {
@@ -378,11 +378,4 @@ func (c *Client) sendPong() {
 	case c.send <- message:
 	default:
 	}
-}
-
-// GetConnectedClients returns the number of connected clients
-func (s *Server) GetConnectedClients() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.clients)
 }

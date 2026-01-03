@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -46,43 +45,10 @@ func (s *ErrorsTestSuite) TestNew() {
 	}
 }
 
-func (s *ErrorsTestSuite) TestNewf() {
-	tests := []struct {
-		name     string
-		code     string
-		format   string
-		args     []interface{}
-		expected string
-	}{
-		{
-			name:     "formatted_message",
-			code:     ErrCodePackageNotFound,
-			format:   "Package %s@%s not found",
-			args:     []interface{}{"react", "18.2.0"},
-			expected: "Package react@18.2.0 not found",
-		},
-		{
-			name:     "no_args",
-			code:     ErrCodeInternalServer,
-			format:   "Internal error",
-			args:     []interface{}{},
-			expected: "Internal error",
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			err := Newf(tt.code, tt.format, tt.args...)
-			s.Equal(tt.code, err.Code)
-			s.Equal(tt.expected, err.Message)
-		})
-	}
-}
-
 func (s *ErrorsTestSuite) TestWithDetails() {
 	tests := []struct {
-		name    string
 		details interface{}
+		name    string
 	}{
 		{
 			name:    "map_details",
@@ -106,12 +72,6 @@ func (s *ErrorsTestSuite) TestWithDetails() {
 	}
 }
 
-func (s *ErrorsTestSuite) TestWithTrace() {
-	trace := []string{"file1.go:10", "file2.go:20"}
-	err := New(ErrCodeInternalServer, "test").WithTrace(trace)
-	s.Equal(trace, err.Trace)
-}
-
 func (s *ErrorsTestSuite) TestWithCause() {
 	cause := errors.New("underlying error")
 	err := New(ErrCodeStorageFailure, "test").WithCause(cause)
@@ -127,15 +87,6 @@ func (s *ErrorsTestSuite) TestWrap() {
 	s.Equal("database connection failed", wrapped.Message)
 	s.Equal(cause, wrapped.Cause)
 	s.True(errors.Is(wrapped, cause))
-}
-
-func (s *ErrorsTestSuite) TestWrapf() {
-	cause := errors.New("connection refused")
-	wrapped := Wrapf(cause, ErrCodeUpstreamFailure, "failed to connect to %s", "registry.npmjs.org")
-
-	s.Equal(ErrCodeUpstreamFailure, wrapped.Code)
-	s.Equal("failed to connect to registry.npmjs.org", wrapped.Message)
-	s.Equal(cause, wrapped.Cause)
 }
 
 func (s *ErrorsTestSuite) TestErrorString() {
@@ -161,59 +112,6 @@ func (s *ErrorsTestSuite) TestErrorString() {
 			s.Equal(tt.expected, tt.err.Error())
 		})
 	}
-}
-
-func (s *ErrorsTestSuite) TestCommonConstructors() {
-	tests := []struct {
-		name     string
-		fn       func() *Error
-		wantCode string
-	}{
-		{
-			name:     "bad_request",
-			fn:       func() *Error { return BadRequest("invalid input") },
-			wantCode: ErrCodeBadRequest,
-		},
-		{
-			name:     "unauthorized",
-			fn:       func() *Error { return Unauthorized("invalid token") },
-			wantCode: ErrCodeUnauthorized,
-		},
-		{
-			name:     "forbidden",
-			fn:       func() *Error { return Forbidden("access denied") },
-			wantCode: ErrCodeForbidden,
-		},
-		{
-			name:     "not_found",
-			fn:       func() *Error { return NotFound("resource missing") },
-			wantCode: ErrCodeNotFound,
-		},
-		{
-			name:     "internal_server",
-			fn:       func() *Error { return InternalServer("server error") },
-			wantCode: ErrCodeInternalServer,
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			err := tt.fn()
-			s.Equal(tt.wantCode, err.Code)
-		})
-	}
-}
-
-func (s *ErrorsTestSuite) TestPackageNotFound() {
-	err := PackageNotFound("lodash", "4.17.21")
-	s.Equal(ErrCodePackageNotFound, err.Code)
-	s.Equal("Package lodash@4.17.21 not found", err.Message)
-	s.NotNil(err.Details)
-
-	details, ok := err.Details.(map[string]string)
-	s.True(ok)
-	s.Equal("lodash", details["package"])
-	s.Equal("4.17.21", details["version"])
 }
 
 func (s *ErrorsTestSuite) TestQuotaExceeded() {
@@ -274,32 +172,4 @@ func (s *ErrorsTestSuite) TestEdgeCases() {
 		err := New(ErrCodeBadRequest, "test").WithDetails(largeDetails)
 		s.Equal(largeDetails, err.Details)
 	})
-}
-
-// Table-driven test for error codes
-func TestGetHTTPStatus(t *testing.T) {
-	tests := []struct {
-		code           string
-		expectedStatus int
-	}{
-		{ErrCodeBadRequest, 400},
-		{ErrCodeUnauthorized, 401},
-		{ErrCodeForbidden, 403},
-		{ErrCodeNotFound, 404},
-		{ErrCodeConflict, 409},
-		{ErrCodePayloadTooLarge, 413},
-		{ErrCodeChecksumMismatch, 422},
-		{ErrCodeRateLimited, 429},
-		{ErrCodeInternalServer, 500},
-		{ErrCodeDatabaseFailure, 500},
-		{ErrCodeUpstreamFailure, 502},
-		{ErrCodeServiceUnavailable, 503},
-		{"UNKNOWN_CODE", 500}, // Default
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.code, func(t *testing.T) {
-			assert.Equal(t, tt.expectedStatus, GetHTTPStatus(tt.code))
-		})
-	}
 }

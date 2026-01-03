@@ -500,11 +500,10 @@ func (a *App) handleInfo(c *fiber.Ctx) error {
 			"max_cache_size":   a.config.Cache.MaxSizeBytes,
 		},
 		"features": map[string]bool{
-			"distributed_locking": a.lockManager != nil,
-			"security_scanning":   a.config.Security.Enabled,
-			"pre_warming":         a.prewarmWorker != nil,
-			"websockets":          true,
-			"analytics":           true,
+			"security_scanning": a.config.Security.Enabled,
+			"pre_warming":       a.prewarmWorker != nil,
+			"websockets":        true,
+			"analytics":         true,
 		},
 	}
 

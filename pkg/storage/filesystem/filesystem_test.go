@@ -17,8 +17,8 @@ import (
 
 type FilesystemStorageTestSuite struct {
 	suite.Suite
-	tempDir string
 	fs      *FilesystemStorage
+	tempDir string
 }
 
 func (s *FilesystemStorageTestSuite) SetupTest() {
@@ -46,12 +46,12 @@ func TestFilesystemStorageTestSuite(t *testing.T) {
 // Test Put operation
 func (s *FilesystemStorageTestSuite) TestPut() {
 	tests := []struct {
+		opts        *storage.PutOptions
+		errorCheck  func(error) bool
 		name        string
 		key         string
 		data        string
-		opts        *storage.PutOptions
 		expectError bool
-		errorCheck  func(error) bool
 	}{
 		{
 			name:        "successful put",
@@ -122,8 +122,8 @@ func (s *FilesystemStorageTestSuite) TestGet() {
 	tests := []struct {
 		name        string
 		key         string
-		expectError bool
 		expectData  string
+		expectError bool
 	}{
 		{
 			name:        "get existing file",
@@ -258,11 +258,11 @@ func (s *FilesystemStorageTestSuite) TestList() {
 	}
 
 	tests := []struct {
+		opts          *storage.ListOptions
 		name          string
 		prefix        string
-		opts          *storage.ListOptions
-		expectedCount int
 		expectedKeys  []string
+		expectedCount int
 	}{
 		{
 			name:          "list all npm packages",
@@ -422,8 +422,8 @@ func (s *FilesystemStorageTestSuite) TestContextCancellation() {
 	cancel()
 
 	tests := []struct {
-		name string
 		fn   func() error
+		name string
 	}{
 		{
 			name: "Get with cancelled context",
@@ -679,8 +679,8 @@ func (s *FilesystemStorageTestSuite) TestChecksumValidation() {
 	correctMD5 := "7dd7323e8ce3e087972f93d3711ef62b"
 
 	tests := []struct {
-		name        string
 		opts        *storage.PutOptions
+		name        string
 		expectError bool
 	}{
 		{

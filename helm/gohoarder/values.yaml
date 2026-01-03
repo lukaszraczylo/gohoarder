@@ -273,15 +273,30 @@ storage:
 # Metadata storage configuration
 metadata:
   # Backend: sqlite, postgresql
-  # For multiple server replicas: postgresql is recommended (sqlite has concurrency limitations)
+  #
+  # IMPORTANT: SQLite CANNOT be used with SMB/CIFS/NFS network storage!
+  # SQLite requires POSIX file locking which causes "database is locked" errors on network filesystems.
+  #
+  # Choose your configuration:
+  # 1. SQLite with local storage (development/single-node only)
+  #    - Set backend: sqlite
+  #    - Set sqlite.persistence.storageClass to a LOCAL storage class (e.g., "local-path")
+  #    - OR set sqlite.persistence.enabled: false to use emptyDir (data lost on pod restart)
+  #
+  # 2. PostgreSQL with any storage (RECOMMENDED for production)
+  #    - Set backend: postgresql
+  #    - Configure postgresql settings below
+  #
   backend: "sqlite"
 
   # SQLite configuration
+  # WARNING: Do NOT use SMB/CIFS/NFS storage classes with SQLite!
   sqlite:
     # Use PVC for SQLite database
+    # IMPORTANT: storageClass must be LOCAL storage, NOT network storage (smb/nfs)
     persistence:
-      enabled: true
-      storageClass: ""
+      enabled: false  # Changed to false by default - use emptyDir unless you have local storage
+      storageClass: ""  # Must be local-path or similar LOCAL storage class if enabled
       size: "10Gi"
       accessMode: "ReadWriteOnce"
       existingClaim: ""

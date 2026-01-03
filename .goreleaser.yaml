@@ -146,6 +146,13 @@ dockers_v2:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd
+      - pkg
+      - internal
+      - config.yaml.example
 
   # 2. Website - Frontend Dashboard
   - id: gohoarder-frontend
@@ -167,6 +174,8 @@ dockers_v2:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    extra_files:
+      - frontend
 
   # 3. Scanning Engine - Background scanner worker
   - id: gohoarder-scanner
@@ -192,6 +201,13 @@ dockers_v2:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd
+      - pkg
+      - internal
+      - config.yaml.example
 
   # 4. Gateway - Nginx reverse proxy for unified deployment
   - id: gohoarder-gateway
@@ -238,6 +254,13 @@ dockers_v2:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd
+      - pkg
+      - internal
+      - migrations
 
 # Artifact signing with cosign
 signs:

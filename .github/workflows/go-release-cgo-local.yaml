@@ -1,0 +1,275 @@
+name: Go Release (CGO)
+
+on:
+    workflow_call:
+        inputs:
+            go-version:
+                description: "Go version to use"
+                required: false
+                type: string
+                default: ">=1.24"
+            semver-config:
+                description: "Path to semver config file"
+                required: false
+                type: string
+                default: "semver.yaml"
+            rolling-release-tag:
+                description: "Create a rolling release tag (e.g., 'v1')"
+                required: false
+                type: string
+                default: ""
+            # Node.js support (optional)
+            node-enabled:
+                description: "Enable Node.js for frontend builds"
+                required: false
+                type: boolean
+                default: false
+            node-version:
+                description: "Node.js version to use"
+                required: false
+                type: string
+                default: "20"
+            node-build-script:
+                description: "Shell script to build frontend (runs in repo root)"
+                required: false
+                type: string
+                default: ""
+            node-cache-dependency-path:
+                description: "Path to package-lock.json for npm caching"
+                required: false
+                type: string
+                default: "package-lock.json"
+            node-output-path:
+                description: "Path to frontend build output (for artifact upload)"
+                required: false
+                type: string
+                default: ""
+            node-embed-path:
+                description: "Path where frontend should be copied for Go embedding"
+                required: false
+                type: string
+                default: ""
+            # Platform configuration
+            platforms:
+                description: "JSON array of platforms"
+                required: false
+                type: string
+                default: '[{"os":"macos-latest","goos":"darwin","goarch":"arm64","platform":"darwin_arm64"},{"os":"ubuntu-latest","goos":"linux","goarch":"amd64","platform":"linux_amd64"},{"os":"windows-latest","goos":"windows","goarch":"amd64","platform":"windows_amd64"}]'
+            lfs:
+                description: "Enable Git LFS checkout (for repos with large files)"
+                required: false
+                type: boolean
+                default: false
+        outputs:
+            version:
+                description: "The calculated version (without v prefix)"
+                value: ${{ jobs.version.outputs.version }}
+            version_tag:
+                description: "The version tag (with v prefix)"
+                value: ${{ jobs.version.outputs.version_tag }}
+
+jobs:
+    test:
+        name: Test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  lfs: ${{ inputs.lfs }}
+
+            - name: Run workflow prepare script
+              shell: bash
+              run: |
+                  if [ -f "./workflow-prepare.sh" ]; then
+                    chmod +x ./workflow-prepare.sh
+                    ./workflow-prepare.sh
+                  fi
+
+            - name: Run tests
+              uses: lukaszraczylo/shared-actions/.github/actions/go-test@main
+              with:
+                  go-version: ${{ inputs.go-version }}
+
+    frontend:
+        name: Build Frontend
+        if: inputs.node-enabled && inputs.node-build-script != ''
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  lfs: ${{ inputs.lfs }}
+
+            - name: Run workflow prepare script
+              shell: bash
+              run: |
+                  if [ -f "./workflow-prepare.sh" ]; then
+                    chmod +x ./workflow-prepare.sh
+                    ./workflow-prepare.sh
+                  fi
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ inputs.node-version }}
+                  cache: "npm"
+                  cache-dependency-path: ${{ inputs.node-cache-dependency-path }}
+
+            - name: Build frontend
+              shell: bash
+              run: ${{ inputs.node-build-script }}
+
+            - name: Upload frontend artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: frontend-dist
+                  path: ${{ inputs.node-output-path }}
+                  retention-days: 1
+
+    version:
+        name: Calculate Version
+        needs: test
+        runs-on: ubuntu-latest
+        outputs:
+            version: ${{ steps.semver.outputs.version }}
+            version_tag: ${{ steps.semver.outputs.version_tag }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  lfs: ${{ inputs.lfs }}
+
+            - name: Run workflow prepare script
+              shell: bash
+              run: |
+                  if [ -f "./workflow-prepare.sh" ]; then
+                    chmod +x ./workflow-prepare.sh
+                    ./workflow-prepare.sh
+                  fi
+
+            - name: Calculate version
+              id: semver
+              uses: lukaszraczylo/shared-actions/.github/actions/semver@main
+              with:
+                  config-file: ${{ inputs.semver-config }}
+
+    build:
+        name: Build (${{ matrix.platform }})
+        needs: [version, frontend]
+        if: |
+            always() &&
+            needs.version.result == 'success' &&
+            needs.version.outputs.version_tag != '' &&
+            (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+        strategy:
+            fail-fast: false
+            matrix:
+                include: ${{ fromJson(inputs.platforms) }}
+        runs-on: ${{ matrix.os }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  lfs: ${{ inputs.lfs }}
+
+            - name: Run workflow prepare script
+              shell: bash
+              env:
+                  TARGET_GOOS: ${{ matrix.goos }}
+                  TARGET_GOARCH: ${{ matrix.goarch }}
+              run: |
+                  if [ -f "./workflow-prepare.sh" ]; then
+                    chmod +x ./workflow-prepare.sh
+                    ./workflow-prepare.sh
+                  fi
+
+            - name: Setup Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ inputs.go-version }}
+                  cache: true
+
+            - name: Download frontend artifact
+              if: inputs.node-enabled && inputs.node-embed-path != ''
+              uses: actions/download-artifact@v4
+              with:
+                  name: frontend-dist
+                  path: ${{ inputs.node-embed-path }}
+
+            - name: Run GoReleaser (split)
+              uses: lukaszraczylo/shared-actions/.github/actions/goreleaser@main
+              with:
+                  version-tag: ${{ needs.version.outputs.version_tag }}
+                  mode: split
+                  cgo-enabled: "1"
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  goreleaser-key: ${{ secrets.GORELEASER_PRO }}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: release-${{ matrix.platform }}
+                  path: dist/
+                  retention-days: 1
+
+    release:
+        name: Release
+        if: |
+            always() &&
+            needs.version.result == 'success' &&
+            needs.build.result == 'success'
+        needs: [version, build]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            packages: write
+            id-token: write
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  lfs: ${{ inputs.lfs }}
+
+            - name: Run workflow prepare script
+              shell: bash
+              run: |
+                  if [ -f "./workflow-prepare.sh" ]; then
+                    chmod +x ./workflow-prepare.sh
+                    ./workflow-prepare.sh
+                  fi
+
+            - name: Setup Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ inputs.go-version }}
+
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  pattern: release-*
+                  merge-multiple: true
+
+            - name: List artifacts
+              run: ls -la dist/
+
+            - name: Run GoReleaser (merge)
+              uses: lukaszraczylo/shared-actions/.github/actions/goreleaser@main
+              with:
+                  version-tag: ${{ needs.version.outputs.version_tag }}
+                  mode: merge
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  goreleaser-key: ${{ secrets.GORELEASER_PRO }}
+
+            - name: Rolling release
+              if: inputs.rolling-release-tag != ''
+              uses: lukaszraczylo/shared-actions/.github/actions/rolling-release@main
+              with:
+                  tag: ${{ inputs.rolling-release-tag }}
+                  version-tag: ${{ needs.version.outputs.version_tag }}
+                  github-token: ${{ secrets.GITHUB_TOKEN }}

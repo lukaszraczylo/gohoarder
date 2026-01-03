@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   release:
-    uses: lukaszraczylo/shared-actions/.github/workflows/go-release-cgo.yaml@main
+    uses: ./.github/workflows/go-release-cgo-local.yaml
     with:
       go-version: "1.25"
     secrets: inherit

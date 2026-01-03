@@ -13,13 +13,56 @@ before:
     # - ./script/generate-version.sh
 
 # Build configuration
-# Note: Binaries are built inside Docker containers (multi-stage builds)
-# to avoid CGO cross-compilation issues. No standalone builds here.
+# Builds run natively per-platform in split mode (no CGO cross-compilation)
+# Docker images also use multi-stage builds independently
 builds:
   - id: gohoarder
-    skip: true
+    main: ./cmd/gohoarder
+    binary: gohoarder
+    env:
+      - CGO_ENABLED=1
+    tags:
+      - fts5
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/lukaszraczylo/gohoarder/internal/version.Version={{.Version}}
+      - -X github.com/lukaszraczylo/gohoarder/internal/version.GitCommit={{.ShortCommit}}
+      - -X github.com/lukaszraczylo/gohoarder/internal/version.BuildTime={{.Date}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
+
   - id: migrate
-    skip: true
+    main: ./cmd/migrate
+    binary: migrate
+    env:
+      - CGO_ENABLED=1
+    tags:
+      - fts5
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.ShortCommit}}
+      - -X main.BuildTime={{.Date}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
 
 # Archives for releases
 archives:

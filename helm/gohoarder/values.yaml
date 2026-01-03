@@ -285,7 +285,9 @@ metadata:
       size: "10Gi"
       accessMode: "ReadWriteOnce"
       existingClaim: ""
-    walMode: true
+    # WAL mode provides better concurrency but doesn't work on network filesystems (SMB, NFS)
+    # Set to false when using network storage for the metadata volume
+    walMode: false
 
   # PostgreSQL configuration
   postgresql:

@@ -27,6 +27,7 @@ type Config struct {
 	Path         string // Database file path
 	MaxOpenConns int    // Maximum open connections
 	MaxIdleConns int    // Maximum idle connections
+	WALMode      bool   // Enable WAL mode (should be false for network filesystems)
 }
 
 const schema = `
@@ -134,8 +135,14 @@ func New(cfg Config) (*SQLiteStore, error) {
 		cfg.MaxIdleConns = 5
 	}
 
-	// Open database with WAL mode for better concurrency
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=2000", cfg.Path)
+	// Build DSN with journal mode based on configuration
+	// WAL mode is better for concurrency but doesn't work on network filesystems (SMB, NFS)
+	// Use DELETE mode for network filesystems for compatibility
+	journalMode := "DELETE"
+	if cfg.WALMode {
+		journalMode = "WAL"
+	}
+	dsn := fmt.Sprintf("%s?_journal_mode=%s&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=2000", cfg.Path, journalMode)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to open SQLite database")

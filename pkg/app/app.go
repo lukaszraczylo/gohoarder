@@ -120,7 +120,8 @@ func (a *App) initializeComponents() error {
 	switch a.config.Metadata.Backend {
 	case "sqlite":
 		a.metadata, err = metasqlite.New(metasqlite.Config{
-			Path: a.config.Metadata.Connection,
+			Path:    a.config.Metadata.Connection,
+			WALMode: a.config.Metadata.SQLite.WALMode,
 		})
 	case "file":
 		a.metadata, err = metafile.New(metafile.Config{
@@ -128,7 +129,8 @@ func (a *App) initializeComponents() error {
 		})
 	default:
 		a.metadata, err = metasqlite.New(metasqlite.Config{
-			Path: "gohoarder.db",
+			Path:    "gohoarder.db",
+			WALMode: false, // Default to DELETE mode for compatibility
 		})
 	}
 	if err != nil {

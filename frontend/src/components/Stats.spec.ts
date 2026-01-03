@@ -43,9 +43,11 @@ describe('Stats.vue', () => {
       registry: '',
       total_packages: 100,
       total_size: 1073741824, // 1 GB
+      max_cache_size: 10737418240,
       total_downloads: 500,
       scanned_packages: 90,
       vulnerable_packages: 5,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 
@@ -63,9 +65,11 @@ describe('Stats.vue', () => {
       registry: '',
       total_packages: 100,
       total_size: 1073741824,
+      max_cache_size: 10737418240,
       total_downloads: 500,
       scanned_packages: 90,
       vulnerable_packages: 5,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 
@@ -83,9 +87,11 @@ describe('Stats.vue', () => {
       registry: '',
       total_packages: 100,
       total_size: 1073741824,
+      max_cache_size: 10737418240,
       total_downloads: 500,
       scanned_packages: 90,
       vulnerable_packages: 5,
+      blocked_packages: 0,
     }
     store.registries = {
       npm: {
@@ -124,9 +130,11 @@ describe('Stats.vue', () => {
       registry: '',
       total_packages: 100,
       total_size: 1073741824, // 1 GB
+      max_cache_size: 10737418240,
       total_downloads: 500,
       scanned_packages: 90,
       vulnerable_packages: 5,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 
@@ -151,9 +159,11 @@ describe('Stats.vue', () => {
       registry: '',
       total_packages: 3,
       total_size: 0,
+      max_cache_size: 10737418240,
       total_downloads: 0,
       scanned_packages: 0,
       vulnerable_packages: 0,
+      blocked_packages: 0,
     }
     store.registries = {
       npm: { count: 1, size: 0, downloads: 0 },
@@ -177,9 +187,11 @@ describe('Stats.vue', () => {
       registry: '',
       total_packages: 0,
       total_size: 0,
+      max_cache_size: 10737418240,
       total_downloads: 0,
       scanned_packages: 0,
       vulnerable_packages: 0,
+      blocked_packages: 0,
     }
     store.registries = {}
     await wrapper.vm.$nextTick()

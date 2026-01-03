@@ -47,9 +47,11 @@ describe('Dashboard.vue', () => {
       registry: '',
       total_packages: 2,
       total_size: 3072,
+      max_cache_size: 10737418240,
       total_downloads: 30,
       scanned_packages: 2,
       vulnerable_packages: 0,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 
@@ -67,9 +69,11 @@ describe('Dashboard.vue', () => {
       registry: '',
       total_packages: 100,
       total_size: 0,
+      max_cache_size: 10737418240,
       total_downloads: 0,
       scanned_packages: 0,
       vulnerable_packages: 0,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 
@@ -85,9 +89,11 @@ describe('Dashboard.vue', () => {
       registry: '',
       total_packages: 0,
       total_size: 0,
+      max_cache_size: 10737418240,
       total_downloads: 500,
       scanned_packages: 0,
       vulnerable_packages: 0,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 
@@ -103,9 +109,11 @@ describe('Dashboard.vue', () => {
       registry: '',
       total_packages: 0,
       total_size: 1048576, // 1 MB
+      max_cache_size: 10737418240,
       total_downloads: 0,
       scanned_packages: 0,
       vulnerable_packages: 0,
+      blocked_packages: 0,
     }
     await wrapper.vm.$nextTick()
 

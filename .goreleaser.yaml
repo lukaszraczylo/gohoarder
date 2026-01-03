@@ -7,14 +7,10 @@ project_name: gohoarder
 before:
   hooks:
     - go mod tidy
-    # Generate semantic version if not provided via git tag
-    # This script can be used by CI/CD to inject custom versions
-    # Usage: export GORELEASER_CURRENT_TAG=$(./script/generate-version.sh)
-    # - ./script/generate-version.sh
 
 # Build configuration
-# Builds run natively per-platform in split mode (no CGO cross-compilation)
-# Docker images also use multi-stage builds independently
+# Binary builds for direct downloads (darwin/arm64, linux/amd64)
+# Binaries use split mode to avoid CGO cross-compilation
 builds:
   - id: gohoarder
     main: ./cmd/gohoarder
@@ -123,129 +119,125 @@ release:
   prerelease: auto
 
 # Docker images (v2 - modern syntax)
+# All Dockerfiles are self-contained multi-stage builds
+# GoReleaser orchestrates buildx and passes build args
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
   - id: gohoarder-server
     images:
       - ghcr.io/lukaszraczylo/gohoarder-server
+    tags:
+      - "{{ .Version }}"
+      - latest
     platforms:
       - linux/amd64
       - linux/arm64
+    dockerfile: Dockerfile.server
     build_args:
       VERSION: "{{ .Version }}"
       GIT_COMMIT: "{{ .ShortCommit }}"
       BUILD_TIME: "{{ .Date }}"
-    tags:
-      - "{{ .Version }}"
-      - latest
-    dockerfile: Dockerfile.server
-    sbom: false  # Disable SBOM attestations (requires docker-container driver)
-    labels:
-      org.opencontainers.image.title: GoHoarder Server
-      org.opencontainers.image.description: Universal package cache proxy server
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-    extra_files:
-      - config.yaml.example
+    flags:
+      - "--pull"
+      - "--label=org.opencontainers.image.title=GoHoarder Server"
+      - "--label=org.opencontainers.image.description=Universal package cache proxy server"
+      - "--label=org.opencontainers.image.url=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.source=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
   # 2. Website - Frontend Dashboard
   - id: gohoarder-frontend
     images:
       - ghcr.io/lukaszraczylo/gohoarder-frontend
-    platforms:
-      - linux/amd64
-      - linux/arm64
     tags:
       - "{{ .Version }}"
       - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile.frontend
-    sbom: false  # Disable SBOM attestations (requires docker-container driver)
-    labels:
-      org.opencontainers.image.title: GoHoarder Frontend
-      org.opencontainers.image.description: GoHoarder web dashboard
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-    extra_files:
-      - frontend
+    flags:
+      - "--pull"
+      - "--label=org.opencontainers.image.title=GoHoarder Frontend"
+      - "--label=org.opencontainers.image.description=GoHoarder web dashboard"
+      - "--label=org.opencontainers.image.url=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.source=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
   # 3. Scanning Engine - Background scanner worker
   - id: gohoarder-scanner
     images:
       - ghcr.io/lukaszraczylo/gohoarder-scanner
+    tags:
+      - "{{ .Version }}"
+      - latest
     platforms:
       - linux/amd64
       - linux/arm64
+    dockerfile: Dockerfile.scanner
     build_args:
       VERSION: "{{ .Version }}"
       GIT_COMMIT: "{{ .ShortCommit }}"
       BUILD_TIME: "{{ .Date }}"
-    tags:
-      - "{{ .Version }}"
-      - latest
-    dockerfile: Dockerfile.scanner
-    sbom: false  # Disable SBOM attestations (requires docker-container driver)
-    labels:
-      org.opencontainers.image.title: GoHoarder Scanner
-      org.opencontainers.image.description: GoHoarder vulnerability scanning engine
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-    extra_files:
-      - config.yaml.example
+    flags:
+      - "--pull"
+      - "--label=org.opencontainers.image.title=GoHoarder Scanner"
+      - "--label=org.opencontainers.image.description=GoHoarder vulnerability scanning engine"
+      - "--label=org.opencontainers.image.url=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.source=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
   # 4. Gateway - Nginx reverse proxy for unified deployment
   - id: gohoarder-gateway
     images:
       - ghcr.io/lukaszraczylo/gohoarder-gateway
-    platforms:
-      - linux/amd64
-      - linux/arm64
     tags:
       - "{{ .Version }}"
       - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile.gateway
-    sbom: false  # Disable SBOM attestations (requires docker-container driver)
-    labels:
-      org.opencontainers.image.title: GoHoarder Gateway
-      org.opencontainers.image.description: Nginx reverse proxy for unified GoHoarder deployment
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
+    flags:
+      - "--pull"
+      - "--label=org.opencontainers.image.title=GoHoarder Gateway"
+      - "--label=org.opencontainers.image.description=Nginx reverse proxy for unified GoHoarder deployment"
+      - "--label=org.opencontainers.image.url=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.source=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
   # 5. Migration Engine - Database migration tool
   - id: gohoarder-migrate
     images:
       - ghcr.io/lukaszraczylo/gohoarder-migrate
+    tags:
+      - "{{ .Version }}"
+      - latest
     platforms:
       - linux/amd64
       - linux/arm64
+    dockerfile: Dockerfile.migrate
     build_args:
       VERSION: "{{ .Version }}"
       GIT_COMMIT: "{{ .ShortCommit }}"
       BUILD_TIME: "{{ .Date }}"
-    tags:
-      - "{{ .Version }}"
-      - latest
-    dockerfile: Dockerfile.migrate
-    sbom: false  # Disable SBOM attestations (requires docker-container driver)
-    labels:
-      org.opencontainers.image.title: GoHoarder Migrate
-      org.opencontainers.image.description: Database migration tool for GoHoarder V2 schema
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
+    flags:
+      - "--pull"
+      - "--label=org.opencontainers.image.title=GoHoarder Migrate"
+      - "--label=org.opencontainers.image.description=Database migration tool for GoHoarder V2 schema"
+      - "--label=org.opencontainers.image.url=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.source=https://github.com/lukaszraczylo/gohoarder"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
 # Artifact signing with cosign
 signs:

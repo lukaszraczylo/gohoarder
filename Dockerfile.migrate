@@ -4,12 +4,14 @@ ARG TARGETARCH
 
 FROM alpine:latest
 
-# Install runtime dependencies
+# Install runtime dependencies (including CGO/SQLite dependencies)
 RUN apk add --no-cache \
     ca-certificates \
     postgresql-client \
     mysql-client \
     busybox-extras \
+    sqlite-libs \
+    musl \
     && update-ca-certificates
 
 # Create non-root user

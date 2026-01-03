@@ -34,9 +34,11 @@ export interface Stats {
   registry: string
   total_packages: number
   total_size: number
+  max_cache_size: number
   total_downloads: number
   scanned_packages: number
   vulnerable_packages: number
+  blocked_packages: number
 }
 
 export const usePackageStore = defineStore('packages', () => {

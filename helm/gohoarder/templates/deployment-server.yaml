@@ -36,8 +36,7 @@ spec:
         args:
         - |
           mkdir -p /var/cache/gohoarder /var/lib/gohoarder/metadata /tmp/gohoarder
-          chown -R 1000:1000 /var/cache/gohoarder /var/lib/gohoarder /tmp/gohoarder
-          chmod 750 /var/cache/gohoarder /var/lib/gohoarder
+          chmod 750 /var/cache/gohoarder /var/lib/gohoarder 2>/dev/null || true
         volumeMounts:
         - name: storage
           mountPath: /var/cache/gohoarder
@@ -46,7 +45,11 @@ spec:
         - name: tmp
           mountPath: /tmp/gohoarder
         securityContext:
-          runAsUser: 0
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
       containers:
       - name: server
         securityContext:

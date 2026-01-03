@@ -53,7 +53,7 @@ ENV SCANNER_MODE=true \
     SCANNER_INTERVAL=300
 
 # Run the scanner in background mode
-# Note: You may need to add a scanner-specific command to your CLI
-# For now, this assumes the serve command can run in scanner mode
+# The scanner runs the same serve command but uses SCANNER_MODE env var
+# and configuration to determine its role
 ENTRYPOINT ["/usr/local/bin/gohoarder"]
-CMD ["serve", "--scanner-only"]
+CMD ["serve"]

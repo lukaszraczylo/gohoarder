@@ -79,43 +79,17 @@ release:
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
   - id: gohoarder-server
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-server
-    goarch: amd64
-    build_flags:
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
       - "--build-arg=BUILD_TIME={{ .Date }}"
-      - "--build-arg=TARGETOS=linux"
-      - "--build-arg=TARGETARCH=amd64"
     tags:
-      - "{{ .Version }}-amd64"
-      - latest-amd64
-    dockerfile: Dockerfile.server
-    labels:
-      org.opencontainers.image.title: GoHoarder Server
-      org.opencontainers.image.description: Universal package cache proxy server
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-    extra_files:
-      - config.yaml.example
-
-  - id: gohoarder-server-arm64
-    images:
-      - ghcr.io/lukaszraczylo/gohoarder-server
-    goarch: arm64
-    build_flags:
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_TIME={{ .Date }}"
-      - "--build-arg=TARGETOS=linux"
-      - "--build-arg=TARGETARCH=arm64"
-    tags:
-      - "{{ .Version }}-arm64"
-      - latest-arm64
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.server
     labels:
       org.opencontainers.image.title: GoHoarder Server
@@ -130,31 +104,14 @@ dockers_v2:
 
   # 2. Website - Frontend Dashboard
   - id: gohoarder-frontend
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-frontend
-    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
     tags:
-      - "{{ .Version }}-amd64"
-      - latest-amd64
-    dockerfile: Dockerfile.frontend
-    labels:
-      org.opencontainers.image.title: GoHoarder Frontend
-      org.opencontainers.image.description: GoHoarder web dashboard
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-    extra_files:
-      - frontend
-
-  - id: gohoarder-frontend-arm64
-    images:
-      - ghcr.io/lukaszraczylo/gohoarder-frontend
-    goarch: arm64
-    tags:
-      - "{{ .Version }}-arm64"
-      - latest-arm64
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.frontend
     labels:
       org.opencontainers.image.title: GoHoarder Frontend
@@ -169,43 +126,17 @@ dockers_v2:
 
   # 3. Scanning Engine - Background scanner worker
   - id: gohoarder-scanner
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-scanner
-    goarch: amd64
-    build_flags:
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
       - "--build-arg=BUILD_TIME={{ .Date }}"
-      - "--build-arg=TARGETOS=linux"
-      - "--build-arg=TARGETARCH=amd64"
     tags:
-      - "{{ .Version }}-amd64"
-      - latest-amd64
-    dockerfile: Dockerfile.scanner
-    labels:
-      org.opencontainers.image.title: GoHoarder Scanner
-      org.opencontainers.image.description: GoHoarder vulnerability scanning engine
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-    extra_files:
-      - config.yaml.example
-
-  - id: gohoarder-scanner-arm64
-    images:
-      - ghcr.io/lukaszraczylo/gohoarder-scanner
-    goarch: arm64
-    build_flags:
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_TIME={{ .Date }}"
-      - "--build-arg=TARGETOS=linux"
-      - "--build-arg=TARGETARCH=arm64"
-    tags:
-      - "{{ .Version }}-arm64"
-      - latest-arm64
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.scanner
     labels:
       org.opencontainers.image.title: GoHoarder Scanner
@@ -220,29 +151,14 @@ dockers_v2:
 
   # 4. Gateway - Nginx reverse proxy for unified deployment
   - id: gohoarder-gateway
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-gateway
-    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
     tags:
-      - "{{ .Version }}-amd64"
-      - latest-amd64
-    dockerfile: Dockerfile.gateway
-    labels:
-      org.opencontainers.image.title: GoHoarder Gateway
-      org.opencontainers.image.description: Nginx reverse proxy for unified GoHoarder deployment
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-
-  - id: gohoarder-gateway-arm64
-    images:
-      - ghcr.io/lukaszraczylo/gohoarder-gateway
-    goarch: arm64
-    tags:
-      - "{{ .Version }}-arm64"
-      - latest-arm64
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.gateway
     labels:
       org.opencontainers.image.title: GoHoarder Gateway
@@ -255,41 +171,17 @@ dockers_v2:
 
   # 5. Migration Engine - Database migration tool
   - id: gohoarder-migrate
+    use: buildx
     images:
       - ghcr.io/lukaszraczylo/gohoarder-migrate
-    goarch: amd64
-    build_flags:
+    build_flag_templates:
+      - "--platform=linux/amd64,linux/arm64"
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
       - "--build-arg=BUILD_TIME={{ .Date }}"
-      - "--build-arg=TARGETOS=linux"
-      - "--build-arg=TARGETARCH=amd64"
     tags:
-      - "{{ .Version }}-amd64"
-      - latest-amd64
-    dockerfile: Dockerfile.migrate
-    labels:
-      org.opencontainers.image.title: GoHoarder Migrate
-      org.opencontainers.image.description: Database migration tool for GoHoarder V2 schema
-      org.opencontainers.image.url: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.source: https://github.com/lukaszraczylo/gohoarder
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-
-  - id: gohoarder-migrate-arm64
-    images:
-      - ghcr.io/lukaszraczylo/gohoarder-migrate
-    goarch: arm64
-    build_flags:
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=GIT_COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_TIME={{ .Date }}"
-      - "--build-arg=TARGETOS=linux"
-      - "--build-arg=TARGETARCH=arm64"
-    tags:
-      - "{{ .Version }}-arm64"
-      - latest-arm64
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.migrate
     labels:
       org.opencontainers.image.title: GoHoarder Migrate
@@ -321,50 +213,3 @@ docker_signs:
       - sign
       - "${artifact}@${digest}"
       - "--yes"
-
-# Docker manifests for multi-arch support
-docker_manifests:
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-server:{{ .Version }}
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-server:{{ .Version }}-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-server:{{ .Version }}-arm64
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-server:latest
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-server:latest-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-server:latest-arm64
-
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-frontend:{{ .Version }}
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-frontend:{{ .Version }}-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-frontend:{{ .Version }}-arm64
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-frontend:latest
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-frontend:latest-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-frontend:latest-arm64
-
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-scanner:{{ .Version }}
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-scanner:{{ .Version }}-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-scanner:{{ .Version }}-arm64
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-scanner:latest
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-scanner:latest-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-scanner:latest-arm64
-
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-gateway:{{ .Version }}
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-gateway:{{ .Version }}-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-gateway:{{ .Version }}-arm64
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-gateway:latest
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-gateway:latest-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-gateway:latest-arm64
-
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-migrate:{{ .Version }}
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-migrate:{{ .Version }}-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-migrate:{{ .Version }}-arm64
-  - name_template: ghcr.io/lukaszraczylo/gohoarder-migrate:latest
-    image_templates:
-      - ghcr.io/lukaszraczylo/gohoarder-migrate:latest-amd64
-      - ghcr.io/lukaszraczylo/gohoarder-migrate:latest-arm64

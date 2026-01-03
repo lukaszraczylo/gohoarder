@@ -114,7 +114,7 @@ func (s *AuthHandlersTestSuite) TestHandleGenerateAPIKey() {
 			req := httptest.NewRequest("POST", "/api/admin/keys", bytes.NewReader(bodyBytes))
 			req.Header.Set("Content-Type", "application/json")
 
-			resp, err := s.app.Test(req)
+			resp, err := s.app.Test(req, 5000) // 5 second timeout for CI environments
 			s.Require().NoError(err)
 			s.Equal(tt.expectedStatus, resp.StatusCode)
 
@@ -144,7 +144,7 @@ func (s *AuthHandlersTestSuite) TestHandleListAPIKeys() {
 	s.authManager.GenerateAPIKey("test-key-3", auth.RoleAdmin, nil)
 
 	req := httptest.NewRequest("GET", "/api/admin/keys", nil)
-	resp, err := s.app.Test(req)
+	resp, err := s.app.Test(req, 5000) // 5 second timeout for CI environments
 	s.Require().NoError(err)
 	s.Equal(200, resp.StatusCode)
 
@@ -189,7 +189,7 @@ func (s *AuthHandlersTestSuite) TestHandleRevokeAPIKey() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			req := httptest.NewRequest("DELETE", "/api/admin/keys/"+tt.keyID, nil)
-			resp, err := s.app.Test(req)
+			resp, err := s.app.Test(req, 5000) // 5 second timeout for CI environments
 			s.Require().NoError(err)
 			s.Equal(tt.expectedStatus, resp.StatusCode)
 
@@ -207,7 +207,7 @@ func (s *AuthHandlersTestSuite) TestHandleGenerateAPIKeyInvalidJSON() {
 	req := httptest.NewRequest("POST", "/api/admin/keys", bytes.NewReader([]byte("invalid json")))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.app.Test(req)
+	resp, err := s.app.Test(req, 5000) // 5 second timeout for CI environments
 	s.Require().NoError(err)
 	s.Equal(400, resp.StatusCode)
 }
@@ -221,7 +221,7 @@ func (s *AuthHandlersTestSuite) TestGenerateAndRevokeKeyFlow() {
 
 	req1 := httptest.NewRequest("POST", "/api/admin/keys", bytes.NewReader(bodyBytes))
 	req1.Header.Set("Content-Type", "application/json")
-	resp1, err := s.app.Test(req1)
+	resp1, err := s.app.Test(req1, 5000) // 5 second timeout for CI environments
 	s.Require().NoError(err)
 	s.Equal(201, resp1.StatusCode)
 
@@ -235,7 +235,7 @@ func (s *AuthHandlersTestSuite) TestGenerateAndRevokeKeyFlow() {
 
 	// List keys - should include our new key
 	req2 := httptest.NewRequest("GET", "/api/admin/keys", nil)
-	resp2, err := s.app.Test(req2)
+	resp2, err := s.app.Test(req2, 5000) // 5 second timeout for CI environments
 	s.Require().NoError(err)
 	s.Equal(200, resp2.StatusCode)
 
@@ -257,13 +257,13 @@ func (s *AuthHandlersTestSuite) TestGenerateAndRevokeKeyFlow() {
 
 	// Revoke the key
 	req3 := httptest.NewRequest("DELETE", "/api/admin/keys/"+keyID, nil)
-	resp3, err := s.app.Test(req3)
+	resp3, err := s.app.Test(req3, 5000) // 5 second timeout for CI environments
 	s.Require().NoError(err)
 	s.Equal(200, resp3.StatusCode)
 
 	// List keys again - should not include the revoked key
 	req4 := httptest.NewRequest("GET", "/api/admin/keys", nil)
-	resp4, err := s.app.Test(req4)
+	resp4, err := s.app.Test(req4, 5000) // 5 second timeout for CI environments
 	s.Require().NoError(err)
 	s.Equal(200, resp4.StatusCode)
 

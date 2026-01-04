@@ -9,6 +9,8 @@ before:
     - go mod tidy
     # Download and setup Zig for cross-compilation (Linux only)
     - bash -c 'if [ "$(uname -s)" = "Linux" ]; then wget https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz -O /tmp/zig.tar.xz && ls -lh /tmp/zig.tar.xz && tar -xvf /tmp/zig.tar.xz -C /tmp && echo "/tmp/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH; fi'
+    # Build frontend (Vue SPA with Vite)
+    - bash -c 'cd frontend && pnpm install && pnpm build'
 
 # Build configuration
 # All binaries built using Zig for consistent cross-compilation

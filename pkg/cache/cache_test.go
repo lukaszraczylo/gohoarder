@@ -343,6 +343,7 @@ func TestGet(t *testing.T) {
 				s.On("Put", mock.Anything, "npm/lodash/4.17.21", mock.Anything, mock.Anything).Return(nil)
 				m.On("SavePackage", mock.Anything, mock.Anything).Return(nil)
 				s.On("Get", mock.Anything, "npm/lodash/4.17.21").Return(io.NopCloser(strings.NewReader("upstream data")), nil)
+				m.On("UpdateDownloadCount", mock.Anything, "npm", "lodash", "4.17.21").Return(nil)
 			},
 			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
 				return io.NopCloser(strings.NewReader("upstream data")), "https://registry.npmjs.org/lodash", nil
@@ -374,6 +375,7 @@ func TestGet(t *testing.T) {
 				s.On("Put", mock.Anything, "npm/expired-pkg/1.0.0", mock.Anything, mock.Anything).Return(nil)
 				m.On("SavePackage", mock.Anything, mock.Anything).Return(nil)
 				s.On("Get", mock.Anything, "npm/expired-pkg/1.0.0").Return(io.NopCloser(strings.NewReader("refreshed data")), nil)
+				m.On("UpdateDownloadCount", mock.Anything, "npm", "expired-pkg", "1.0.0").Return(nil)
 			},
 			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
 				return io.NopCloser(strings.NewReader("refreshed data")), "https://registry.npmjs.org/expired-pkg", nil
@@ -435,6 +437,7 @@ func TestGet(t *testing.T) {
 				m.On("SavePackage", mock.Anything, mock.Anything).Return(nil)
 				// Second Get succeeds (after re-storing)
 				s.On("Get", mock.Anything, "npm/inconsistent/1.0.0").Return(io.NopCloser(strings.NewReader("recovered data")), nil).Once()
+				m.On("UpdateDownloadCount", mock.Anything, "npm", "inconsistent", "1.0.0").Return(nil)
 			},
 			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
 				return io.NopCloser(strings.NewReader("recovered data")), "https://registry.npmjs.org/inconsistent", nil

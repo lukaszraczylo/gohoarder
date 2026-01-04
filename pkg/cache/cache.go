@@ -320,6 +320,22 @@ servePkg:
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to retrieve just-stored package")
 	}
 
+	// Track download count for first-time download (cache miss)
+	// This ensures download count increments regardless of cache hit/miss
+	if err := m.metadata.UpdateDownloadCount(ctx, registry, name, version); err != nil {
+		log.Warn().
+			Err(err).
+			Str("registry", registry).
+			Str("package", name).
+			Str("version", version).
+			Msg("Failed to update download count for newly cached package")
+	}
+
+	// Track download in analytics if enabled
+	if m.analytics != nil {
+		m.trackDownload(registry, name, version, storedPkg.Size)
+	}
+
 	return &CacheEntry{
 		Package:     storedPkg,
 		Data:        storedData,

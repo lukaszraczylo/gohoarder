@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -234,7 +235,9 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 	}
 
 	// Skip security scan wait for metadata entries (index pages, lists, etc.)
-	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata"
+	// Also skip Go module metadata files (.mod, .info)
+	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
+		strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
 
 	// Wait briefly for initial scan to complete if scanner is enabled
 	// This prevents serving vulnerable packages on first request
@@ -410,7 +413,9 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 	}
 
 	// Save metadata (skip metadata entries like index pages, lists, etc.)
-	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata"
+	// Also skip Go module metadata files (.mod, .info) - they're not scannable packages
+	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
+		strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
 	if !isMetadataEntry {
 		if err := m.metadata.SavePackage(ctx, pkg); err != nil {
 			// Clean up storage if metadata save fails

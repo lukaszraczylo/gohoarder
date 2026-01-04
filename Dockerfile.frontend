@@ -35,8 +35,9 @@ EOF
 
 RUN chmod +x /docker-entrypoint.d/40-inject-config.sh
 
-# Create nginx configuration template with backend proxy support
-RUN cat > /etc/nginx/templates/default.conf.template <<'EOF'
+# Create nginx templates directory and configuration template with backend proxy support
+RUN mkdir -p /etc/nginx/templates && \
+    cat > /etc/nginx/templates/default.conf.template <<'EOF'
 # Upstream backend server
 upstream backend {
     server ${BACKEND_HOST}:${BACKEND_PORT};

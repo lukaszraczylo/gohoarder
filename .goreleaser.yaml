@@ -7,11 +7,8 @@ project_name: gohoarder
 before:
   hooks:
     - go mod tidy
-    # Download and setup Zig for cross-compilation
-    - wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -O /tmp/zig.tar.xz
-    - tar -xf /tmp/zig.tar.xz -C /tmp
-    - sudo cp -r /tmp/zig-linux-x86_64-0.13.0 /usr/local/zig
-    - sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig
+    # Download and setup Zig for cross-compilation (Linux only)
+    - bash -c 'if [ "$(uname -s)" = "Linux" ]; then wget -q https://ziglang.org/download/0.16.0/zig-linux-x86_64-0.16.0.tar.xz -O /tmp/zig.tar.xz && tar -xf /tmp/zig.tar.xz -C /tmp && sudo cp -r /tmp/zig-linux-x86_64-0.16.0 /usr/local/zig && sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig; fi'
 
 # Build configuration
 # All binaries built using Zig for consistent cross-compilation
@@ -42,6 +39,7 @@ builds:
       - goos: darwin
         goarch: amd64
     overrides:
+      # Use Zig only for Linux cross-compilation
       - goos: linux
         goarch: amd64
         env:
@@ -54,12 +52,7 @@ builds:
           - CGO_ENABLED=1
           - CC=zig cc -target aarch64-linux-musl
           - CXX=zig c++ -target aarch64-linux-musl
-      - goos: darwin
-        goarch: arm64
-        env:
-          - CGO_ENABLED=1
-          - CC=zig cc -target aarch64-macos-none
-          - CXX=zig c++ -target aarch64-macos-none
+      # darwin/arm64 builds natively on macOS runner (no Zig)
 
   - id: migrate
     main: ./cmd/migrate
@@ -85,6 +78,7 @@ builds:
       - goos: darwin
         goarch: amd64
     overrides:
+      # Use Zig only for Linux cross-compilation
       - goos: linux
         goarch: amd64
         env:
@@ -97,12 +91,7 @@ builds:
           - CGO_ENABLED=1
           - CC=zig cc -target aarch64-linux-musl
           - CXX=zig c++ -target aarch64-linux-musl
-      - goos: darwin
-        goarch: arm64
-        env:
-          - CGO_ENABLED=1
-          - CC=zig cc -target aarch64-macos-none
-          - CXX=zig c++ -target aarch64-macos-none
+      # darwin/arm64 builds natively on macOS runner (no Zig)
 
 # Archives for releases
 archives:

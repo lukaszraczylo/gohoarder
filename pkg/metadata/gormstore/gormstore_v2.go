@@ -583,29 +583,38 @@ func (s *GORMStoreV2) GetTimeSeriesStats(ctx context.Context, period string, reg
 	// Determine which table to query based on period
 	var tableName string
 	var since time.Time
+	var bucketDuration time.Duration
 
 	switch period {
 	case "1h":
 		tableName = "download_stats_hourly"
-		since = time.Now().Add(-1 * time.Hour)
+		since = time.Now().Add(-1 * time.Hour).Truncate(time.Hour)
+		bucketDuration = time.Hour
 	case "1day":
 		tableName = "download_stats_hourly"
-		since = time.Now().Add(-24 * time.Hour)
+		since = time.Now().Add(-24 * time.Hour).Truncate(time.Hour)
+		bucketDuration = time.Hour
 	case "7day":
 		tableName = "download_stats_daily"
-		since = time.Now().Add(-7 * 24 * time.Hour)
+		since = time.Now().Add(-7 * 24 * time.Hour).Truncate(24 * time.Hour)
+		bucketDuration = 24 * time.Hour
 	case "30day":
 		tableName = "download_stats_daily"
-		since = time.Now().Add(-30 * 24 * time.Hour)
+		since = time.Now().Add(-30 * 24 * time.Hour).Truncate(24 * time.Hour)
+		bucketDuration = 24 * time.Hour
 	default:
 		tableName = "download_stats_hourly"
-		since = time.Now().Add(-24 * time.Hour)
+		since = time.Now().Add(-24 * time.Hour).Truncate(time.Hour)
+		bucketDuration = time.Hour
 	}
 
+	now := time.Now()
+
+	// Try to get registry-level aggregate stats first
 	query := s.db.WithContext(ctx).
 		Table(tableName).
 		Select("time_bucket as timestamp, download_count as value").
-		Where("time_bucket >= ?", since)
+		Where("time_bucket >= ? AND time_bucket <= ?", since, now)
 
 	// Filter by registry if specified
 	if registry != "" {
@@ -630,10 +639,45 @@ func (s *GORMStoreV2) GetTimeSeriesStats(ctx context.Context, period string, reg
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get time series stats")
 	}
 
+	// If no aggregate data found, try summing package-level stats
+	if len(results) == 0 {
+		sumQuery := s.db.WithContext(ctx).
+			Table(tableName).
+			Select("time_bucket as timestamp, SUM(download_count) as value").
+			Where("time_bucket >= ? AND time_bucket <= ?", since, now)
+
+		if registry != "" {
+			registryID, err := s.getRegistryID(registry)
+			if err != nil {
+				return nil, err
+			}
+			sumQuery = sumQuery.Where("registry_id = ? AND package_id IS NOT NULL", registryID)
+		} else {
+			sumQuery = sumQuery.Where("package_id IS NOT NULL")
+		}
+
+		sumQuery = sumQuery.Group("time_bucket").Order("time_bucket ASC")
+
+		if err := sumQuery.Scan(&results).Error; err != nil {
+			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get time series stats from package data")
+		}
+	}
+
+	// Create a map of existing data points
+	dataMap := make(map[time.Time]int64)
 	for _, r := range results {
+		dataMap[r.Timestamp] = r.Value
+	}
+
+	// Generate continuous time series with 0 values for missing periods
+	for t := since; t.Before(now) || t.Equal(now); t = t.Add(bucketDuration) {
+		value := int64(0)
+		if v, exists := dataMap[t]; exists {
+			value = v
+		}
 		stats.DataPoints = append(stats.DataPoints, &metadata.TimeSeriesDataPoint{
-			Timestamp: r.Timestamp,
-			Value:     r.Value,
+			Timestamp: t,
+			Value:     value,
 		})
 	}
 

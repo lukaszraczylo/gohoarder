@@ -290,7 +290,9 @@ func (a *App) initializeComponents() error {
 	a.healthChecker.AddCheck("scanner", func(ctx context.Context) (health.Status, string) {
 		if a.config.Security.Enabled {
 			if err := a.scanManager.Health(ctx); err != nil {
-				return health.StatusUnhealthy, err.Error()
+				// Scanner failures (e.g., API rate limits) shouldn't mark server as unhealthy
+				// Server can still serve cached packages, just can't scan new ones
+				return health.StatusDegraded, err.Error()
 			}
 		}
 		return health.StatusHealthy, ""

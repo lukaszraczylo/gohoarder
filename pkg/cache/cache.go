@@ -145,7 +145,37 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 			if err == nil {
 				// Cache hit!
 				metrics.RecordCacheHit(registry)
-				_ = m.metadata.UpdateDownloadCount(ctx, registry, name, version) // #nosec G104 -- Async update, error logged
+
+				// Update download count (log errors for debugging)
+				if err := m.metadata.UpdateDownloadCount(ctx, registry, name, version); err != nil {
+					log.Warn().
+						Err(err).
+						Str("registry", registry).
+						Str("package", name).
+						Str("version", version).
+						Msg("Failed to update download count - package may not exist in database")
+
+					// Try to save package to database if it doesn't exist
+					// This handles the case where storage has files but database was migrated/reset
+					if saveErr := m.metadata.SavePackage(ctx, pkg); saveErr != nil {
+						log.Error().
+							Err(saveErr).
+							Str("registry", registry).
+							Str("package", name).
+							Str("version", version).
+							Msg("Failed to save package to database")
+					} else {
+						// Retry download count update after saving package
+						if retryErr := m.metadata.UpdateDownloadCount(ctx, registry, name, version); retryErr != nil {
+							log.Error().
+								Err(retryErr).
+								Str("registry", registry).
+								Str("package", name).
+								Str("version", version).
+								Msg("Failed to update download count even after saving package")
+						}
+					}
+				}
 
 				// Track download in analytics if enabled
 				if m.analytics != nil {

@@ -489,6 +489,9 @@ func (s *GORMStoreV2) GetStats(ctx context.Context, registry string) (*metadata.
 	// Filter out metadata entries (npm metadata pages, pypi pages, etc.)
 	query = query.Where("version NOT IN (?)", []string{"list", "latest", "metadata", "page"})
 
+	// Filter out Go module metadata files (.mod, .info) - only count actual packages (.zip)
+	query = query.Where("name NOT LIKE ?", "%.mod").Where("name NOT LIKE ?", "%.info")
+
 	// Filter by registry if specified
 	if registry != "" {
 		registryID, err := s.getRegistryID(registry)

@@ -121,13 +121,17 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	// Convert registry to OSV ecosystem
 	ecosystem := s.registryToEcosystem(registry)
 
+	// Clean package name and version for Go modules
+	// Go proxy cache keys include /@v/version.suffix which OSV doesn't understand
+	cleanName, cleanVersion := s.cleanGoModuleName(packageName, version, ecosystem)
+
 	// Build request
 	req := OSVRequest{
 		Package: PackageInfo{
-			Name:      packageName,
+			Name:      cleanName,
 			Ecosystem: ecosystem,
 		},
-		Version: version,
+		Version: cleanVersion,
 	}
 
 	// Marshal request
@@ -197,6 +201,52 @@ func (s *Scanner) registryToEcosystem(registry string) string {
 	default:
 		return registry
 	}
+}
+
+// cleanGoModuleName cleans Go module cache keys to extract the actual module path and version
+// Go proxy cache keys include /@v/version.suffix patterns that need to be cleaned
+// Examples:
+//   - "gorm.io/driver/sqlite/@v/v1.6.0.zip" -> "gorm.io/driver/sqlite", "v1.6.0"
+//   - "github.com/pkg/errors/@v/v0.9.1.mod" -> "github.com/pkg/errors", "v0.9.1"
+//   - "regular-package" -> "regular-package", "version" (unchanged for non-Go)
+func (s *Scanner) cleanGoModuleName(packageName, version, ecosystem string) (string, string) {
+	// Only clean for Go modules
+	if ecosystem != "Go" {
+		return packageName, version
+	}
+
+	// Check if package name contains /@v/ pattern (Go module proxy format)
+	if strings.Contains(packageName, "/@v/") {
+		// Split on /@v/ to get the module path
+		parts := strings.Split(packageName, "/@v/")
+		if len(parts) == 2 {
+			// parts[0] is the clean module path (e.g., "gorm.io/driver/sqlite")
+			// parts[1] might be "v1.6.0.zip" or "v1.6.0.mod" or "v1.6.0.info"
+			cleanName := parts[0]
+
+			// Extract version from the second part if version wasn't already clean
+			// Remove file suffixes like .zip, .mod, .info
+			versionPart := parts[1]
+			versionPart = strings.TrimSuffix(versionPart, ".zip")
+			versionPart = strings.TrimSuffix(versionPart, ".mod")
+			versionPart = strings.TrimSuffix(versionPart, ".info")
+
+			// Use the extracted version if it looks valid, otherwise use the provided version
+			if versionPart != "" && strings.HasPrefix(versionPart, "v") {
+				return cleanName, versionPart
+			}
+
+			return cleanName, version
+		}
+	}
+
+	// Also clean version of any file suffixes
+	cleanVersion := version
+	cleanVersion = strings.TrimSuffix(cleanVersion, ".zip")
+	cleanVersion = strings.TrimSuffix(cleanVersion, ".mod")
+	cleanVersion = strings.TrimSuffix(cleanVersion, ".info")
+
+	return packageName, cleanVersion
 }
 
 // convertOSVResult converts OSV response to metadata.ScanResult

@@ -7,10 +7,16 @@ project_name: gohoarder
 before:
   hooks:
     - go mod tidy
+    # Download and setup Zig for cross-compilation
+    - wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -O /tmp/zig.tar.xz
+    - tar -xf /tmp/zig.tar.xz -C /tmp
+    - sudo cp -r /tmp/zig-linux-x86_64-0.13.0 /usr/local/zig
+    - sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig
 
 # Build configuration
-# Binary builds for direct downloads (darwin/arm64, linux/amd64)
-# Binaries use split mode to avoid CGO cross-compilation
+# All binaries built using Zig for consistent cross-compilation
+# Zig handles CGO cross-compilation without platform-specific toolchains
+# Binaries are injected into Docker images (no Docker compilation)
 builds:
   - id: gohoarder
     main: ./cmd/gohoarder
@@ -35,8 +41,25 @@ builds:
     ignore:
       - goos: darwin
         goarch: amd64
+    overrides:
       - goos: linux
-        goarch: arm64  # Skip linux/arm64 binaries (Docker handles multi-arch)
+        goarch: amd64
+        env:
+          - CGO_ENABLED=1
+          - CC=zig cc -target x86_64-linux-musl
+          - CXX=zig c++ -target x86_64-linux-musl
+      - goos: linux
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CC=zig cc -target aarch64-linux-musl
+          - CXX=zig c++ -target aarch64-linux-musl
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CC=zig cc -target aarch64-macos-none
+          - CXX=zig c++ -target aarch64-macos-none
 
   - id: migrate
     main: ./cmd/migrate
@@ -61,8 +84,25 @@ builds:
     ignore:
       - goos: darwin
         goarch: amd64
+    overrides:
       - goos: linux
-        goarch: arm64  # Skip linux/arm64 binaries (Docker handles multi-arch)
+        goarch: amd64
+        env:
+          - CGO_ENABLED=1
+          - CC=zig cc -target x86_64-linux-musl
+          - CXX=zig c++ -target x86_64-linux-musl
+      - goos: linux
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CC=zig cc -target aarch64-linux-musl
+          - CXX=zig c++ -target aarch64-linux-musl
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CC=zig cc -target aarch64-macos-none
+          - CXX=zig c++ -target aarch64-macos-none
 
 # Archives for releases
 archives:
@@ -125,6 +165,7 @@ release:
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
   # Uses pre-built binary from 'gohoarder' build (no Docker compilation)
+  # linux/arm64 binary is cross-compiled using Zig (fast, no QEMU!)
   - id: gohoarder-server
     ids:
       - gohoarder
@@ -137,7 +178,6 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.server
-    use_buildx: true
     flags:
       - "--pull"
       - "--label=org.opencontainers.image.title=GoHoarder Server"
@@ -176,6 +216,7 @@ dockers_v2:
 
   # 3. Scanning Engine - Background scanner worker
   # Uses pre-built binary from 'gohoarder' build (no Docker compilation)
+  # linux/arm64 binary is cross-compiled using Zig (fast, no QEMU!)
   - id: gohoarder-scanner
     ids:
       - gohoarder
@@ -188,7 +229,6 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.scanner
-    use_buildx: true
     flags:
       - "--pull"
       - "--label=org.opencontainers.image.title=GoHoarder Scanner"
@@ -203,6 +243,7 @@ dockers_v2:
 
   # 4. Migration Engine - Database migration tool
   # Uses pre-built binary from 'migrate' build (no Docker compilation)
+  # linux/arm64 binary is cross-compiled using Zig (fast, no QEMU!)
   - id: gohoarder-migrate
     ids:
       - migrate
@@ -215,7 +256,6 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.migrate
-    use_buildx: true
     flags:
       - "--pull"
       - "--label=org.opencontainers.image.title=GoHoarder Migrate"

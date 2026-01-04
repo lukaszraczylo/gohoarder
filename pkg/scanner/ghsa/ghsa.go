@@ -107,11 +107,17 @@ func (s *Scanner) Health(ctx context.Context) error {
 	}
 	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("github api returned status: %d", resp.StatusCode)
+	// Accept any 2xx or 403 (rate limit) as healthy
+	// Rate limits are expected without a GitHub token and shouldn't fail health checks
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		log.Debug().Msg("GitHub API rate limited (expected without token)")
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("github api returned status: %d", resp.StatusCode)
 }
 
 // mapRegistryToEcosystem maps our registry names to GitHub ecosystem names

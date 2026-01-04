@@ -109,6 +109,17 @@ spec:
         env:
         - name: CONFIG_FILE
           value: /etc/gohoarder/config.yaml
+        # Enable tool-based scanners only in scanner pod (server doesn't have the tools)
+        - name: GOHOARDER_SECURITY_SCANNERS_TRIVY_ENABLED
+          value: "{{ .Values.security.scanners.trivy.enabled }}"
+        - name: GOHOARDER_SECURITY_SCANNERS_GRYPE_ENABLED
+          value: "{{ .Values.security.scanners.grype.enabled }}"
+        - name: GOHOARDER_SECURITY_SCANNERS_GOVULNCHECK_ENABLED
+          value: "{{ .Values.security.scanners.govulncheck.enabled }}"
+        - name: GOHOARDER_SECURITY_SCANNERS_NPM_AUDIT_ENABLED
+          value: "{{ .Values.security.scanners.npmAudit.enabled }}"
+        - name: GOHOARDER_SECURITY_SCANNERS_PIP_AUDIT_ENABLED
+          value: "{{ .Values.security.scanners.pipAudit.enabled }}"
         {{- if and (eq .Values.metadata.backend "postgresql") .Values.metadata.postgresql.existingSecret }}
         - name: POSTGRES_USER
           valueFrom:

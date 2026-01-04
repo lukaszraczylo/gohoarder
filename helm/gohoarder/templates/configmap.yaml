@@ -93,24 +93,30 @@ data:
         low: {{ .Values.security.blockThresholds.low }}
       scanners:
         trivy:
-          enabled: {{ .Values.security.scanners.trivy.enabled }}
+          # Disabled in server config (no trivy binary), enabled via env var in scanner pod
+          enabled: false
           timeout: {{ .Values.security.scanners.trivy.timeout | quote }}
           cache_db: {{ .Values.security.scanners.trivy.cacheDb | quote }}
         osv:
+          # API-based scanner - works in both server and scanner pods
           enabled: {{ .Values.security.scanners.osv.enabled }}
           api_url: {{ .Values.security.scanners.osv.apiUrl | quote }}
           timeout: {{ .Values.security.scanners.osv.timeout | quote }}
         grype:
-          enabled: {{ .Values.security.scanners.grype.enabled }}
+          # Disabled in server config (no grype binary), enabled via env var in scanner pod
+          enabled: false
           timeout: {{ .Values.security.scanners.grype.timeout | quote }}
         govulncheck:
-          enabled: {{ .Values.security.scanners.govulncheck.enabled }}
+          # Disabled in server config (no go/govulncheck binary), enabled via env var in scanner pod
+          enabled: false
           timeout: {{ .Values.security.scanners.govulncheck.timeout | quote }}
         npm_audit:
-          enabled: {{ .Values.security.scanners.npmAudit.enabled }}
+          # Disabled in server config (no npm binary), enabled via env var in scanner pod
+          enabled: false
           timeout: {{ .Values.security.scanners.npmAudit.timeout | quote }}
         pip_audit:
-          enabled: {{ .Values.security.scanners.pipAudit.enabled }}
+          # Disabled in server config (no pip binary), enabled via env var in scanner pod
+          enabled: false
           timeout: {{ .Values.security.scanners.pipAudit.timeout | quote }}
         ghsa:
           enabled: {{ .Values.security.scanners.ghsa.enabled }}

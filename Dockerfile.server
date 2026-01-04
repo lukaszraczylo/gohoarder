@@ -1,10 +1,14 @@
 # Application Engine - GoHoarder Server
 # Multi-stage build to compile with CGO support
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
 
 # Build stage
-FROM --platform=$TARGETOS/$TARGETARCH golang:1.25-alpine AS builder
+# Let buildx handle platform automatically
+FROM golang:1.25-alpine AS builder
+
+# Get build platform from buildx
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 # Install build dependencies for CGO
 RUN apk add --no-cache \

@@ -2,7 +2,9 @@
 # This Dockerfile expects a PRE-BUILT binary from GoReleaser (no compilation)
 # GoReleaser injects the platform-specific binary automatically
 
-FROM alpine:latest
+FROM --platform=$TARGETPLATFORM alpine:latest
+
+ARG TARGETARCH
 
 # Install runtime dependencies (CGO/SQLite requires these)
 RUN apk add --no-cache \
@@ -28,7 +30,8 @@ RUN mkdir -p /var/cache/gohoarder \
 
 # Copy pre-built binary from GoReleaser
 # GoReleaser will automatically inject the correct binary for the target platform
-COPY gohoarder /usr/local/bin/gohoarder
+# In split/merge mode, binaries are in linux/${TARGETARCH}/ subdirectories
+COPY linux/${TARGETARCH}/gohoarder /usr/local/bin/gohoarder
 RUN chmod +x /usr/local/bin/gohoarder
 
 # Copy example config

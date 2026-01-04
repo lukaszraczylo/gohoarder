@@ -8,7 +8,7 @@ before:
   hooks:
     - go mod tidy
     # Download and setup Zig for cross-compilation (Linux only)
-    - bash -c 'if [ "$(uname -s)" = "Linux" ]; then wget -q https://ziglang.org/download/0.16.0/zig-linux-x86_64-0.16.0.tar.xz -O /tmp/zig.tar.xz && tar -xf /tmp/zig.tar.xz -C /tmp && sudo cp -r /tmp/zig-linux-x86_64-0.16.0 /usr/local/zig && sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig; fi'
+    - bash -c 'if [ "$(uname -s)" = "Linux" ]; then wget -q https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz -O /tmp/zig.tar.xz && tar -xf /tmp/zig.tar.xz -C /tmp && sudo cp -r /tmp/zig-linux-x86_64-0.15.2 /usr/local/zig && sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig; fi'
 
 # Build configuration
 # All binaries built using Zig for consistent cross-compilation

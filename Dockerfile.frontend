@@ -44,10 +44,6 @@ upstream backend {
     keepalive 32;
 }
 
-# Rate limiting zones
-limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
-limit_req_zone $binary_remote_addr zone=download_limit:10m rate=5r/s;
-
 # Cache configuration
 proxy_cache_path /var/cache/nginx/static levels=1:2 keys_zone=static_cache:10m max_size=100m inactive=60m use_temp_path=off;
 
@@ -77,9 +73,6 @@ server {
 
     # API endpoints - proxy to backend
     location /api/ {
-        # Rate limiting
-        limit_req zone=api_limit burst=20 nodelay;
-
         # Proxy settings
         proxy_pass http://backend;
         proxy_http_version 1.1;
@@ -120,10 +113,8 @@ server {
         proxy_set_header Connection "";
     }
 
-    # Package download endpoints with rate limiting
+    # Package download endpoints
     location ~ ^/(npm|pypi|go)/ {
-        limit_req zone=download_limit burst=10 nodelay;
-
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

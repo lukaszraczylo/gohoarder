@@ -151,6 +151,17 @@ release:
 # Uses PRE-BUILT binaries from native builds (no Docker compilation - much faster!)
 # GoReleaser injects the platform-specific binary into each Docker image automatically
 # This avoids slow QEMU emulation for cross-architecture builds
+#
+# Split/Merge Build Support (GoReleaser Pro):
+#   - Run `goreleaser release --split` on multiple CI runners in parallel
+#   - Each runner builds a subset of targets (e.g., runner 1: linux/amd64, runner 2: linux/arm64)
+#   - Run `goreleaser release --merge` to combine all partial builds into final release
+#   - Significantly speeds up builds by parallelizing across multiple machines
+#
+# Binary Path Convention:
+#   - Binaries must be in linux/${TARGETARCH}/ subdirectory format
+#   - GoReleaser automatically places binaries there when using --split
+#   - COPY linux/${TARGETARCH}/binary_name in Dockerfiles
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
   # Uses pre-built binary from 'gohoarder' build (no Docker compilation)

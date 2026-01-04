@@ -119,11 +119,15 @@ release:
   prerelease: auto
 
 # Docker images (v2 - modern syntax)
-# All Dockerfiles are self-contained multi-stage builds
-# GoReleaser orchestrates buildx and passes build args
+# Uses PRE-BUILT binaries from native builds (no Docker compilation - much faster!)
+# GoReleaser injects the platform-specific binary into each Docker image automatically
+# This avoids slow QEMU emulation for cross-architecture builds
 dockers_v2:
   # 1. Application Engine - Main GoHoarder server
+  # Uses pre-built binary from 'gohoarder' build (no Docker compilation)
   - id: gohoarder-server
+    ids:
+      - gohoarder
     images:
       - ghcr.io/lukaszraczylo/gohoarder-server
     tags:
@@ -133,10 +137,7 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.server
-    build_args:
-      VERSION: "{{ .Version }}"
-      GIT_COMMIT: "{{ .ShortCommit }}"
-      BUILD_TIME: "{{ .Date }}"
+    use_buildx: true
     flags:
       - "--pull"
       - "--label=org.opencontainers.image.title=GoHoarder Server"
@@ -147,11 +148,6 @@ dockers_v2:
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     extra_files:
-      - go.mod
-      - go.sum
-      - cmd
-      - pkg
-      - internal
       - config.yaml.example
 
   # 2. Website - Frontend Dashboard
@@ -179,7 +175,10 @@ dockers_v2:
       - frontend/dist
 
   # 3. Scanning Engine - Background scanner worker
+  # Uses pre-built binary from 'gohoarder' build (no Docker compilation)
   - id: gohoarder-scanner
+    ids:
+      - gohoarder
     images:
       - ghcr.io/lukaszraczylo/gohoarder-scanner
     tags:
@@ -189,10 +188,7 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.scanner
-    build_args:
-      VERSION: "{{ .Version }}"
-      GIT_COMMIT: "{{ .ShortCommit }}"
-      BUILD_TIME: "{{ .Date }}"
+    use_buildx: true
     flags:
       - "--pull"
       - "--label=org.opencontainers.image.title=GoHoarder Scanner"
@@ -203,15 +199,13 @@ dockers_v2:
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     extra_files:
-      - go.mod
-      - go.sum
-      - cmd
-      - pkg
-      - internal
       - config.yaml.example
 
   # 4. Migration Engine - Database migration tool
+  # Uses pre-built binary from 'migrate' build (no Docker compilation)
   - id: gohoarder-migrate
+    ids:
+      - migrate
     images:
       - ghcr.io/lukaszraczylo/gohoarder-migrate
     tags:
@@ -221,10 +215,7 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.migrate
-    build_args:
-      VERSION: "{{ .Version }}"
-      GIT_COMMIT: "{{ .ShortCommit }}"
-      BUILD_TIME: "{{ .Date }}"
+    use_buildx: true
     flags:
       - "--pull"
       - "--label=org.opencontainers.image.title=GoHoarder Migrate"
@@ -235,11 +226,6 @@ dockers_v2:
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     extra_files:
-      - go.mod
-      - go.sum
-      - cmd
-      - pkg
-      - internal
       - migrations
 
 # Artifact signing with cosign

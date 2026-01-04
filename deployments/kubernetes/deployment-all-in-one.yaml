@@ -1,5 +1,6 @@
 # GoHoarder - Kubernetes Deployment (All-in-One)
 # This manifest deploys all GoHoarder services under a single ingress
+# The frontend includes integrated nginx reverse proxy to the backend
 #
 # Usage:
 # kubectl create namespace gohoarder
@@ -222,6 +223,13 @@ spec:
           value: "1.0.0"
         - name: APP_NAME
           value: GoHoarder
+        # Backend proxy configuration (frontend includes nginx reverse proxy)
+        - name: BACKEND_HOST
+          value: gohoarder-server
+        - name: BACKEND_PORT
+          value: "8080"
+        - name: SERVER_NAME
+          value: hoarder.i.raczylo.com
         livenessProbe:
           httpGet:
             path: /
@@ -326,88 +334,6 @@ spec:
           name: gohoarder-config
 
 ---
-# Deployment - Gateway (Nginx Reverse Proxy)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gohoarder-gateway
-  namespace: gohoarder
-  labels:
-    app.kubernetes.io/name: gohoarder
-    app.kubernetes.io/component: gateway
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gohoarder
-      app.kubernetes.io/component: gateway
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: gohoarder
-        app.kubernetes.io/component: gateway
-    spec:
-      containers:
-      - name: gateway
-        image: ghcr.io/lukaszraczylo/gohoarder-gateway:latest
-        imagePullPolicy: Always
-        ports:
-        - name: http
-          containerPort: 80
-          protocol: TCP
-        env:
-        - name: BACKEND_HOST
-          value: gohoarder-server
-        - name: BACKEND_PORT
-          value: "8080"
-        - name: FRONTEND_HOST
-          value: gohoarder-frontend
-        - name: FRONTEND_PORT
-          value: "80"
-        - name: SERVER_NAME
-          value: hoarder.i.raczylo.com
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 5
-          periodSeconds: 30
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
-
----
-# Service - Gateway
-apiVersion: v1
-kind: Service
-metadata:
-  name: gohoarder-gateway
-  namespace: gohoarder
-  labels:
-    app.kubernetes.io/name: gohoarder
-    app.kubernetes.io/component: gateway
-spec:
-  type: ClusterIP
-  ports:
-  - name: http
-    port: 80
-    targetPort: http
-    protocol: TCP
-  selector:
-    app.kubernetes.io/name: gohoarder
-    app.kubernetes.io/component: gateway
-
----
 # Ingress - Expose via domain
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -436,7 +362,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: gohoarder-gateway
+            name: gohoarder-frontend
             port:
               number: 80
   # Uncomment for HTTPS/TLS
@@ -477,20 +403,20 @@ spec:
         averageUtilization: 80
 
 ---
-# HorizontalPodAutoscaler - Gateway
+# HorizontalPodAutoscaler - Frontend
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: gohoarder-gateway
+  name: gohoarder-frontend
   namespace: gohoarder
   labels:
     app.kubernetes.io/name: gohoarder
-    app.kubernetes.io/component: gateway
+    app.kubernetes.io/component: frontend
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: gohoarder-gateway
+    name: gohoarder-frontend
   minReplicas: 2
   maxReplicas: 10
   metrics:

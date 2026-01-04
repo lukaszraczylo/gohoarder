@@ -44,14 +44,14 @@ builds:
         goarch: amd64
         env:
           - CGO_ENABLED=1
-          - CC=zig cc -target x86_64-linux-musl
-          - CXX=zig c++ -target x86_64-linux-musl
+          - CC=/tmp/zig-x86_64-linux-0.15.2/zig cc -target x86_64-linux-musl
+          - CXX=/tmp/zig-x86_64-linux-0.15.2/zig c++ -target x86_64-linux-musl
       - goos: linux
         goarch: arm64
         env:
           - CGO_ENABLED=1
-          - CC=zig cc -target aarch64-linux-musl
-          - CXX=zig c++ -target aarch64-linux-musl
+          - CC=/tmp/zig-x86_64-linux-0.15.2/zig cc -target aarch64-linux-musl
+          - CXX=/tmp/zig-x86_64-linux-0.15.2/zig c++ -target aarch64-linux-musl
       # darwin/arm64 builds natively on macOS runner (no Zig)
 
   - id: migrate
@@ -83,14 +83,14 @@ builds:
         goarch: amd64
         env:
           - CGO_ENABLED=1
-          - CC=zig cc -target x86_64-linux-musl
-          - CXX=zig c++ -target x86_64-linux-musl
+          - CC=/tmp/zig-x86_64-linux-0.15.2/zig cc -target x86_64-linux-musl
+          - CXX=/tmp/zig-x86_64-linux-0.15.2/zig c++ -target x86_64-linux-musl
       - goos: linux
         goarch: arm64
         env:
           - CGO_ENABLED=1
-          - CC=zig cc -target aarch64-linux-musl
-          - CXX=zig c++ -target aarch64-linux-musl
+          - CC=/tmp/zig-x86_64-linux-0.15.2/zig cc -target aarch64-linux-musl
+          - CXX=/tmp/zig-x86_64-linux-0.15.2/zig c++ -target aarch64-linux-musl
       # darwin/arm64 builds natively on macOS runner (no Zig)
 
 # Archives for releases

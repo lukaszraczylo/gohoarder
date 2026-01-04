@@ -209,28 +209,7 @@ dockers_v2:
       - internal
       - config.yaml.example
 
-  # 4. Gateway - Nginx reverse proxy for unified deployment
-  - id: gohoarder-gateway
-    images:
-      - ghcr.io/lukaszraczylo/gohoarder-gateway
-    tags:
-      - "{{ .Version }}"
-      - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    dockerfile: Dockerfile.gateway
-    flags:
-      - "--pull"
-      - "--label=org.opencontainers.image.title=GoHoarder Gateway"
-      - "--label=org.opencontainers.image.description=Nginx reverse proxy for unified GoHoarder deployment"
-      - "--label=org.opencontainers.image.url=https://github.com/lukaszraczylo/gohoarder"
-      - "--label=org.opencontainers.image.source=https://github.com/lukaszraczylo/gohoarder"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-
-  # 5. Migration Engine - Database migration tool
+  # 4. Migration Engine - Database migration tool
   - id: gohoarder-migrate
     images:
       - ghcr.io/lukaszraczylo/gohoarder-migrate

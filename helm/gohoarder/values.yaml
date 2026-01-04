@@ -507,21 +507,12 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
 
-  # Ingress for frontend
-  frontend:
-    enabled: true
-    host: "gohoarder.local"
-    tls:
-      enabled: false
-      secretName: "gohoarder-frontend-tls"
-
-  # Ingress for API (if you want separate ingress)
-  api:
+  # Single ingress routes all traffic to frontend
+  # Frontend now includes reverse proxy to backend (merged gateway functionality)
+  host: "gohoarder.local"
+  tls:
     enabled: false
-    host: "api.gohoarder.local"
-    tls:
-      enabled: false
-      secretName: "gohoarder-api-tls"
+    secretName: "gohoarder-tls"
 
 # Autoscaling configuration
 autoscaling:

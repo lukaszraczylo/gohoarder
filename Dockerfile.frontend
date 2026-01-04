@@ -1,4 +1,5 @@
-# Website - Frontend Dashboard
+# Website - Frontend Dashboard with integrated reverse proxy
+# Combines frontend serving and backend proxy (previously separate gateway)
 # Build stage
 FROM node:20-alpine AS builder
 
@@ -48,21 +49,129 @@ EOF
 
 RUN chmod +x /docker-entrypoint.d/40-inject-config.sh
 
-# Copy nginx configuration
-RUN cat > /etc/nginx/conf.d/default.conf <<'EOF'
+# Create nginx configuration template with backend proxy support
+RUN cat > /etc/nginx/templates/default.conf.template <<'EOF'
+# Upstream backend server
+upstream backend {
+    server ${BACKEND_HOST}:${BACKEND_PORT};
+    keepalive 32;
+}
+
+# Rate limiting zones
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=download_limit:10m rate=5r/s;
+
+# Cache configuration
+proxy_cache_path /var/cache/nginx/static levels=1:2 keys_zone=static_cache:10m max_size=100m inactive=60m use_temp_path=off;
+
 server {
     listen 80;
-    server_name _;
+    server_name ${SERVER_NAME};
     root /usr/share/nginx/html;
     index index.html;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Client body size for package uploads
+    client_max_body_size 500M;
+    client_body_timeout 300s;
+
+    # Logging
+    access_log /var/log/nginx/access.log combined;
+    error_log /var/log/nginx/error.log warn;
 
     # Compression
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
 
-    # SPA routing
-    location / {
-        try_files $uri $uri/ /index.html;
+    # API endpoints - proxy to backend
+    location /api/ {
+        # Rate limiting
+        limit_req zone=api_limit burst=20 nodelay;
+
+        # Proxy settings
+        proxy_pass http://backend/;
+        proxy_http_version 1.1;
+
+        # Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header Connection "";
+
+        # Timeouts for long-running operations
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+
+        # Buffer settings
+        proxy_buffering on;
+        proxy_buffer_size 4k;
+        proxy_buffers 8 4k;
+        proxy_busy_buffers_size 8k;
+    }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://backend/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        access_log off;
+    }
+
+    # Metrics endpoint
+    location /metrics {
+        proxy_pass http://backend/metrics;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    # Package download endpoints with rate limiting
+    location ~ ^/(npm|pypi|go)/ {
+        limit_req zone=download_limit burst=10 nodelay;
+
+        proxy_pass http://backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+
+        # Extended timeouts for package downloads
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+
+        # Large buffer for package downloads
+        proxy_buffering on;
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+    }
+
+    # WebSocket support
+    location /ws/ {
+        proxy_pass http://backend/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket timeouts
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
     }
 
     # Runtime configuration endpoint
@@ -72,18 +181,22 @@ server {
         add_header Expires "0";
     }
 
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
     # Cache static assets
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
+
+    # Frontend SPA - serve index.html for all other routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
 }
 EOF
+
+# Create cache directory
+RUN mkdir -p /var/cache/nginx/static && \
+    chown -R nginx:nginx /var/cache/nginx
 
 # Expose port
 EXPOSE 80
@@ -95,6 +208,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Environment variables with defaults
 ENV API_BASE_URL=/api \
     APP_VERSION=unknown \
-    APP_NAME=GoHoarder
+    APP_NAME=GoHoarder \
+    BACKEND_HOST=gohoarder-server \
+    BACKEND_PORT=8080 \
+    SERVER_NAME=_
 
-CMD ["nginx", "-g", "daemon off;"]
+# Use nginx template substitution and start nginx
+CMD ["/bin/sh", "-c", "envsubst '$$BACKEND_HOST $$BACKEND_PORT $$SERVER_NAME' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]

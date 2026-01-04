@@ -67,11 +67,18 @@ spec:
           protocol: TCP
         env:
         - name: API_BASE_URL
-          value: {{ .Values.frontend.backendUrl | default (printf "http://%s-server:%d" (include "gohoarder.fullname" .) (.Values.server.service.port | int)) | quote }}
+          value: {{ .Values.frontend.backendUrl | default "/api" | quote }}
         - name: APP_VERSION
           value: {{ .Chart.AppVersion | quote }}
         - name: APP_NAME
           value: "GoHoarder"
+        # Backend proxy configuration (frontend now includes reverse proxy)
+        - name: BACKEND_HOST
+          value: {{ include "gohoarder.fullname" . }}-server
+        - name: BACKEND_PORT
+          value: {{ .Values.server.service.port | quote }}
+        - name: SERVER_NAME
+          value: {{ .Values.frontend.serverName | default "_" | quote }}
         {{- with .Values.frontend.env }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -1,29 +1,15 @@
 # Website - Frontend Dashboard with integrated reverse proxy
 # Combines frontend serving and backend proxy (previously separate gateway)
-# Build stage
-FROM node:20-alpine AS builder
+# EXPECTS: Pre-built frontend files in frontend/dist/ directory
 
-WORKDIR /build
-
-# Copy frontend source
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
-COPY frontend/ ./
-
-# Install pnpm and dependencies
-RUN npm install -g pnpm && \
-    pnpm install --frozen-lockfile
-
-# Build the frontend
-RUN pnpm run build
-
-# Production stage
 FROM nginx:alpine
 
 # Install envsubst for runtime configuration
 RUN apk add --no-cache gettext
 
-# Copy built frontend
-COPY --from=builder /build/dist /usr/share/nginx/html
+# Copy pre-built frontend files
+# These are built on the CI runner and injected via extra_files
+COPY frontend/dist /usr/share/nginx/html
 
 # Create runtime config injection script
 RUN cat > /docker-entrypoint.d/40-inject-config.sh <<'EOF'

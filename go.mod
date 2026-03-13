@@ -6,10 +6,10 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.3
 	github.com/aws/aws-sdk-go-v2/config v1.32.11
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.4
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.0
 	github.com/go-gormigrate/gormigrate/v2 v2.1.5
 	github.com/go-sql-driver/mysql v1.9.3
-	github.com/goccy/go-json v0.10.5
+	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v2 v2.52.12
 	github.com/gorilla/websocket v1.5.3
 	github.com/hirochachacha/go-smb2 v1.1.0

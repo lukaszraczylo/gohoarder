@@ -89,7 +89,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.21 // indirect
-	github.com/mattn/go-sqlite3 v1.14.34 // indirect
+	github.com/mattn/go-sqlite3 v1.14.37 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
 	github.com/moby/patternmatcher v0.6.0 // indirect

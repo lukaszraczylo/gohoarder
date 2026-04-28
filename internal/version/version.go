@@ -1,3 +1,5 @@
+// Package version exposes build-time version metadata (semver, commit, build
+// time, Go toolchain version) for the binary, populated via -ldflags.
 package version
 
 import "runtime"

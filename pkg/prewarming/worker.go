@@ -1,3 +1,5 @@
+// Package prewarming runs background workers that pre-fetch hot packages
+// to reduce first-request latency.
 package prewarming
 
 import (
@@ -202,7 +204,7 @@ func (w *Worker) prewarmPackage(ctx context.Context, pkg PackageInfo, workerID i
 			Msg("Failed to fetch package for pre-warming")
 		return
 	}
-	defer body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = body.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	if statusCode != 200 {
 		log.Warn().

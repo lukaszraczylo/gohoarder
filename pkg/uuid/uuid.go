@@ -1,3 +1,5 @@
+// Package uuid generates RFC 4122 v4 UUIDs used as identifiers across
+// the GoHoarder service.
 package uuid
 
 import (

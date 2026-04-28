@@ -1,3 +1,5 @@
+// Package npmaudit wraps the `npm audit` CLI to surface vulnerability
+// findings for npm packages.
 package npmaudit
 
 import (
@@ -66,7 +68,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Extract the .tgz file
 	if err := s.extractTgz(filePath, tmpDir); err != nil {
@@ -80,8 +82,36 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		packageDir = tmpDir
 	}
 
-	// Run npm audit
-	cmd := exec.CommandContext(ctx, "npm", "audit", "--json", "--package-lock-only")
+	// npm tarballs ship only package.json — there is no lockfile. We must
+	// generate one before `npm audit` can resolve the dependency tree.
+	// NOTE: this performs network egress (npm registry lookups for
+	// transitive deps). Acceptable here because the scanner runs server-
+	// side and the operator already trusts upstream resolution to cache
+	// the package; we use --ignore-scripts to avoid running install hooks.
+	log.Info().
+		Str("scanner", ScannerName).
+		Str("package", packageName).
+		Msg("Generating package-lock.json for npm audit (network egress)")
+
+	installCmd := exec.CommandContext(ctx, "npm", "install",
+		"--package-lock-only",
+		"--omit=dev",
+		"--ignore-scripts",
+		"--no-audit",
+	)
+	installCmd.Dir = packageDir
+	if installOut, err := installCmd.CombinedOutput(); err != nil {
+		log.Warn().
+			Err(err).
+			Str("package", packageName).
+			Str("output", string(installOut)).
+			Msg("npm install --package-lock-only failed; returning scan-error")
+		return s.scanErrorResult(registry, packageName, version,
+			fmt.Sprintf("npm install --package-lock-only failed: %v", err)), nil
+	}
+
+	// Run npm audit against the freshly generated lockfile.
+	cmd := exec.CommandContext(ctx, "npm", "audit", "--json")
 	cmd.Dir = packageDir
 	output, _ := cmd.CombinedOutput() // npm audit returns non-zero when vulns found
 
@@ -90,8 +120,9 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	if len(output) > 0 {
 		if err := json.Unmarshal(output, &auditResult); err != nil {
 			log.Warn().Err(err).Msg("Failed to parse npm audit output")
-			// Return clean result on parse error
-			return s.emptyResult(registry, packageName, version), nil
+			// Parse failure means we couldn't determine vulnerability state — fail closed.
+			return s.scanErrorResult(registry, packageName, version,
+				fmt.Sprintf("failed to parse npm audit output: %v", err)), nil
 		}
 	}
 
@@ -123,7 +154,11 @@ func (s *Scanner) extractTgz(tgzPath, destDir string) error {
 }
 
 // emptyResult returns an empty scan result
-func (s *Scanner) emptyResult(registry, packageName, version string) *metadata.ScanResult {
+
+// scanErrorResult returns a result marked as scan-error so the manager merge
+// and CheckVulnerabilities can fail closed. Use this when the scan could not
+// complete and we therefore have no signal about vulnerabilities.
+func (s *Scanner) scanErrorResult(registry, packageName, version, reason string) *metadata.ScanResult {
 	return &metadata.ScanResult{
 		ID:                 uuid.New().String(),
 		Registry:           registry,
@@ -131,10 +166,12 @@ func (s *Scanner) emptyResult(registry, packageName, version string) *metadata.S
 		PackageVersion:     version,
 		Scanner:            ScannerName,
 		ScannedAt:          time.Now(),
-		Status:             metadata.ScanStatusClean,
+		Status:             metadata.ScanStatusError,
 		VulnerabilityCount: 0,
 		Vulnerabilities:    []metadata.Vulnerability{},
-		Details:            map[string]interface{}{},
+		Details: map[string]interface{}{
+			"error": reason,
+		},
 	}
 }
 

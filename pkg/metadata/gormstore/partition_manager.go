@@ -2,10 +2,18 @@ package gormstore
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
+)
+
+// Whitelist regexes for partition table names — defense in depth before
+// we interpolate them into raw DDL.
+var (
+	downloadEventPartitionRe = regexp.MustCompile(`^download_events_\d{4}_\d{2}$`)
+	auditLogPartitionRe      = regexp.MustCompile(`^audit_log_\d{4}_\d{2}$`)
 )
 
 // PartitionManager handles automatic partition creation and cleanup for PostgreSQL
@@ -21,7 +29,7 @@ func NewPartitionManager(db *gorm.DB) *PartitionManager {
 // EnsurePartitions ensures required partitions exist for current and future months
 func (pm *PartitionManager) EnsurePartitions() error {
 	// Check if we're using PostgreSQL
-	if pm.db.Dialector.Name() != "postgres" {
+	if pm.db.Name() != "postgres" {
 		log.Debug().Msg("Partitioning only supported on PostgreSQL, skipping")
 		return nil
 	}
@@ -286,7 +294,7 @@ func (pm *PartitionManager) createPartitionFunction() error {
 
 // CleanupOldPartitions drops partitions older than the retention period
 func (pm *PartitionManager) CleanupOldPartitions(retentionMonths int) error {
-	if pm.db.Dialector.Name() != "postgres" {
+	if pm.db.Name() != "postgres" {
 		return nil
 	}
 
@@ -300,39 +308,45 @@ func (pm *PartitionManager) CleanupOldPartitions(retentionMonths int) error {
 
 	// Find and drop old download_events partitions
 	var downloadPartitions []string
-	err := pm.db.Raw(`
+	if err := pm.db.Raw(`
 		SELECT tablename FROM pg_tables
 		WHERE tablename LIKE 'download_events_%'
 		AND tablename < 'download_events_' || ?
-	`, cutoffPartition).Scan(&downloadPartitions).Error
-
-	if err != nil {
+	`, cutoffPartition).Scan(&downloadPartitions).Error; err != nil {
 		return err
 	}
 
 	for _, partition := range downloadPartitions {
+		// Defense in depth: even though tablename came from pg_tables, verify it
+		// matches the expected partition naming scheme before interpolating into DDL.
+		if !downloadEventPartitionRe.MatchString(partition) {
+			log.Warn().Str("partition", partition).Msg("Skipping partition with unexpected name")
+			continue
+		}
 		log.Info().Str("partition", partition).Msg("Dropping old partition")
-		if err := pm.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", partition)).Error; err != nil {
-			log.Error().Err(err).Str("partition", partition).Msg("Failed to drop partition")
+		if dropErr := pm.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", partition)).Error; dropErr != nil {
+			log.Error().Err(dropErr).Str("partition", partition).Msg("Failed to drop partition")
 		}
 	}
 
 	// Find and drop old audit_log partitions
 	var auditPartitions []string
-	err = pm.db.Raw(`
+	if err := pm.db.Raw(`
 		SELECT tablename FROM pg_tables
 		WHERE tablename LIKE 'audit_log_%'
 		AND tablename < 'audit_log_' || ?
-	`, cutoffPartition).Scan(&auditPartitions).Error
-
-	if err != nil {
+	`, cutoffPartition).Scan(&auditPartitions).Error; err != nil {
 		return err
 	}
 
 	for _, partition := range auditPartitions {
+		if !auditLogPartitionRe.MatchString(partition) {
+			log.Warn().Str("partition", partition).Msg("Skipping audit partition with unexpected name")
+			continue
+		}
 		log.Info().Str("partition", partition).Msg("Dropping old audit partition")
-		if err := pm.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", partition)).Error; err != nil {
-			log.Error().Err(err).Str("partition", partition).Msg("Failed to drop audit partition")
+		if dropErr := pm.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", partition)).Error; dropErr != nil {
+			log.Error().Err(dropErr).Str("partition", partition).Msg("Failed to drop audit partition")
 		}
 	}
 
@@ -341,7 +355,7 @@ func (pm *PartitionManager) CleanupOldPartitions(retentionMonths int) error {
 
 // GetPartitionInfo returns information about current partitions
 func (pm *PartitionManager) GetPartitionInfo() (map[string]interface{}, error) {
-	if pm.db.Dialector.Name() != "postgres" {
+	if pm.db.Name() != "postgres" {
 		return map[string]interface{}{"status": "not_applicable"}, nil
 	}
 

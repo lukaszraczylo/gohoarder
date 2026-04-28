@@ -172,7 +172,10 @@ describe('Stats.vue', () => {
     }
     await wrapper.vm.$nextTick()
 
-    const containers = wrapper.findAll('.rounded-full')
+    // Scope to the registry icon containers (w-12 h-12 rounded-full),
+    // excluding the storage progress bar which also uses rounded-full.
+    const containers = wrapper.findAll('.w-12.h-12.rounded-full')
+    expect(containers).toHaveLength(3)
     expect(containers[0].classes()).toContain('bg-red-100') // npm
     expect(containers[1].classes()).toContain('bg-blue-100') // pypi
     expect(containers[2].classes()).toContain('bg-cyan-100') // go

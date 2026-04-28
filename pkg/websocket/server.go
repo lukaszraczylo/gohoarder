@@ -1,3 +1,5 @@
+// Package websocket implements the realtime event broadcasting server used
+// by the dashboard frontend.
 package websocket
 
 import (
@@ -37,6 +39,16 @@ type Client struct {
 	server        *Server
 	subscriptions map[EventType]bool
 	mu            sync.RWMutex
+	closeOnce     sync.Once
+}
+
+// closeSend safely closes the client's send channel exactly once.
+// Safe to call concurrently from multiple goroutines (e.g. run loop
+// unregister and shutdown closeAllClients).
+func (c *Client) closeSend() {
+	c.closeOnce.Do(func() {
+		close(c.send)
+	})
 }
 
 // Server manages WebSocket connections and event broadcasting
@@ -68,7 +80,7 @@ func NewServer(cfg Config) *Server {
 		clients:    make(map[*Client]bool),
 		broadcast:  make(chan Event, 256),
 		register:   make(chan *Client),
-		unregister: make(chan *Client),
+		unregister: make(chan *Client, 256),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  cfg.ReadBufferSize,
 			WriteBufferSize: cfg.WriteBufferSize,
@@ -109,7 +121,7 @@ func (s *Server) run(ctx context.Context) {
 			s.mu.Lock()
 			if _, ok := s.clients[client]; ok {
 				delete(s.clients, client)
-				close(client.send)
+				client.closeSend()
 			}
 			s.mu.Unlock()
 			log.Debug().
@@ -147,10 +159,15 @@ func (s *Server) broadcastEvent(event Event) {
 			select {
 			case client.send <- message:
 			default:
-				// Client send buffer full - close connection
-				go func(c *Client) {
-					s.unregister <- c
-				}(client)
+				// Client send buffer full - schedule unregister.
+				// Non-blocking send; unregister chan is buffered, so we
+				// avoid spawning goroutines that pile up under a stuck
+				// run() consumer. If the buffer is full the client will
+				// be cleaned up on its next failed write/ping.
+				select {
+				case s.unregister <- client:
+				default:
+				}
 			}
 		}
 	}
@@ -173,9 +190,11 @@ func (s *Server) pingClients() {
 			time.Now().Add(10*time.Second),
 		); err != nil {
 			log.Debug().Err(err).Msg("Failed to ping client")
-			go func(c *Client) {
-				s.unregister <- c
-			}(client)
+			// Non-blocking send; see broadcastEvent for rationale.
+			select {
+			case s.unregister <- client:
+			default:
+			}
 		}
 	}
 }
@@ -186,8 +205,8 @@ func (s *Server) closeAllClients() {
 	defer s.mu.Unlock()
 
 	for client := range s.clients {
-		client.conn.Close() // #nosec G104 -- Cleanup, error not critical
-		close(client.send)
+		_ = client.conn.Close() // #nosec G104 -- Cleanup, error not critical
+		client.closeSend()
 	}
 	s.clients = make(map[*Client]bool)
 }
@@ -205,6 +224,33 @@ func (s *Server) Broadcast(eventType EventType, data map[string]interface{}) {
 	default:
 		log.Warn().Msg("Broadcast channel full - dropping event")
 	}
+}
+
+// BroadcastEvent satisfies the events.Broadcaster contract used by
+// cache/scanner sub-systems. It accepts a string event type and an
+// arbitrary payload (typically map[string]any) and forwards to the
+// typed Broadcast path.
+//
+// Non-blocking: enqueues onto the broadcast channel and drops the
+// event if the channel is full. Safe for concurrent use.
+func (s *Server) BroadcastEvent(eventType string, payload any) {
+	var data map[string]interface{}
+	switch p := payload.(type) {
+	case map[string]interface{}:
+		data = p
+	case nil:
+		data = map[string]interface{}{}
+	default:
+		// Wrap unknown payloads so the wire format stays consistent.
+		// Sub-systems are expected to pass map[string]any; this branch
+		// is defensive only.
+		log.Warn().
+			Str("event_type", eventType).
+			Msg("BroadcastEvent received non-map payload; wrapping under 'payload' key")
+		data = map[string]interface{}{"payload": payload}
+	}
+
+	s.Broadcast(EventType(eventType), data)
 }
 
 // HandleWebSocket upgrades HTTP connection to WebSocket
@@ -237,7 +283,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (c *Client) readPump() {
 	defer func() {
 		c.server.unregister <- c
-		c.conn.Close() // #nosec G104 -- Cleanup, error not critical
+		_ = c.conn.Close() // #nosec G104 -- Cleanup, error not critical
 	}()
 
 	_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) // #nosec G104 -- Websocket deadline
@@ -265,7 +311,7 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(54 * time.Second)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close() // #nosec G104 -- Cleanup, error not critical
+		_ = c.conn.Close() // #nosec G104 -- Cleanup, error not critical
 	}()
 
 	for {

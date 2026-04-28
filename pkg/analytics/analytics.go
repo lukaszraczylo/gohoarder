@@ -1,3 +1,5 @@
+// Package analytics tracks and analyzes package download events with
+// in-memory aggregation and periodic background flushing.
 package analytics
 
 import (
@@ -46,15 +48,22 @@ type PopularPackage struct {
 	Trend           float64 // Growth rate
 }
 
-// Engine tracks and analyzes package downloads
+// Engine tracks and analyzes package downloads.
+//
+// Lock ordering: never hold both downloadsMu and statsMu at the same time.
+// Code paths must acquire only one of the two; if they need both views, they
+// must take a snapshot under the first lock and release it before taking the
+// second.
 type Engine struct {
 	stats       map[string]*PackageStats
 	flushTicker *time.Ticker
 	stopChan    chan struct{}
+	doneChan    chan struct{}
 	downloads   []PackageDownload
 	maxEvents   int
 	downloadsMu sync.RWMutex
 	statsMu     sync.RWMutex
+	closeOnce   sync.Once
 }
 
 // Config holds analytics engine configuration
@@ -78,6 +87,7 @@ func NewEngine(cfg Config) *Engine {
 		maxEvents:   cfg.MaxEvents,
 		flushTicker: time.NewTicker(cfg.FlushInterval),
 		stopChan:    make(chan struct{}),
+		doneChan:    make(chan struct{}),
 	}
 
 	// Load existing stats from metadata store
@@ -94,19 +104,26 @@ func NewEngine(cfg Config) *Engine {
 	return engine
 }
 
-// TrackDownload records a package download event
+// TrackDownload records a package download event.
+//
+// Locks are taken sequentially (never nested) to avoid the lock-ordering
+// inversion between downloadsMu and statsMu that exists elsewhere in the
+// engine: append to the buffer under downloadsMu, release it, then update
+// stats under statsMu.
 func (e *Engine) TrackDownload(download PackageDownload) {
+	// Append to buffer and decide whether buffer is full.
 	e.downloadsMu.Lock()
-	defer e.downloadsMu.Unlock()
-
-	// Add to event buffer
 	e.downloads = append(e.downloads, download)
+	bufferFull := len(e.downloads) >= e.maxEvents
+	e.downloadsMu.Unlock()
 
-	// Update in-memory stats
+	// Update in-memory stats outside downloadsMu to keep the two locks
+	// strictly disjoint.
 	e.updateStats(download)
 
-	// Flush if buffer is full
-	if len(e.downloads) >= e.maxEvents {
+	// Flush if buffer is full. The flush goroutine acquires downloadsMu
+	// itself; we must not hold any lock when spawning it.
+	if bufferFull {
 		go e.flush()
 	}
 
@@ -183,28 +200,47 @@ func (e *Engine) GetTopPackages(limit int) []PopularPackage {
 	return packages
 }
 
-// GetTrendingPackages returns packages with growing popularity
+// GetTrendingPackages returns packages with growing popularity.
+//
+// The implementation takes a snapshot of stats under statsMu, releases it,
+// and only then queries the downloads buffer. This preserves the invariant
+// that downloadsMu and statsMu are never held simultaneously.
 func (e *Engine) GetTrendingPackages(limit int) []PopularPackage {
+	// Snapshot stats under statsMu only.
+	type statsSnapshot struct {
+		registry  string
+		name      string
+		downloads int64
+	}
 	e.statsMu.RLock()
-	defer e.statsMu.RUnlock()
+	snapshot := make([]statsSnapshot, 0, len(e.stats))
+	for _, stats := range e.stats {
+		snapshot = append(snapshot, statsSnapshot{
+			registry:  stats.Registry,
+			name:      stats.Name,
+			downloads: stats.TotalDownloads,
+		})
+	}
+	e.statsMu.RUnlock()
 
 	sevenDaysAgo := time.Now().Add(-7 * 24 * time.Hour)
 
-	packages := make([]PopularPackage, 0)
-	for _, stats := range e.stats {
-		// Calculate recent downloads (last 7 days)
-		recent := e.getRecentDownloads(stats.Registry, stats.Name, sevenDaysAgo)
+	packages := make([]PopularPackage, 0, len(snapshot))
+	for _, s := range snapshot {
+		// Calculate recent downloads (last 7 days). Acquires downloadsMu
+		// only; statsMu is no longer held here.
+		recent := e.getRecentDownloads(s.registry, s.name, sevenDaysAgo)
 
 		// Calculate trend (simple growth rate)
 		trend := 0.0
-		if stats.TotalDownloads > 0 {
-			trend = float64(recent) / float64(stats.TotalDownloads) * 100
+		if s.downloads > 0 {
+			trend = float64(recent) / float64(s.downloads) * 100
 		}
 
 		packages = append(packages, PopularPackage{
-			Registry:        stats.Registry,
-			Name:            stats.Name,
-			Downloads:       stats.TotalDownloads,
+			Registry:        s.registry,
+			Name:            s.name,
+			Downloads:       s.downloads,
 			RecentDownloads: recent,
 			Trend:           trend,
 		})
@@ -297,8 +333,10 @@ func (e *Engine) GetTotalStats() map[string]interface{} {
 	}
 }
 
-// flushLoop periodically flushes download events to metadata store
+// flushLoop periodically flushes download events to metadata store.
+// Closes doneChan after the final flush so Close can wait for it.
 func (e *Engine) flushLoop() {
+	defer close(e.doneChan)
 	for {
 		select {
 		case <-e.flushTicker.C:
@@ -336,12 +374,22 @@ func (e *Engine) loadStats() {
 	log.Debug().Msg("Loading analytics stats from metadata store")
 }
 
-// Close stops the analytics engine
+// Close stops the analytics engine. Safe to call multiple times.
+//
+// Shutdown sequence:
+//  1. signal stopChan (sync.Once-guarded so we never close twice)
+//  2. stop the ticker
+//  3. wait for flushLoop to drain and run its final flush via doneChan
+//
+// We do not call flush() directly here — flushLoop owns the final flush, so
+// there is exactly one flush at shutdown.
 func (e *Engine) Close() {
-	close(e.stopChan)
-	e.flushTicker.Stop()
-	e.flush() // Final flush
-	log.Info().Msg("Analytics engine stopped")
+	e.closeOnce.Do(func() {
+		close(e.stopChan)
+		e.flushTicker.Stop()
+		<-e.doneChan
+		log.Info().Msg("Analytics engine stopped")
+	})
 }
 
 // GetRegistryStats returns per-registry statistics

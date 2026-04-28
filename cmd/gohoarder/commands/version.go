@@ -23,16 +23,16 @@ var VersionCmd = &cobra.Command{
 		if jsonOutput {
 			data, err := json.MarshalIndent(info, "", "  ")
 			if err != nil {
-				fmt.Fprintf(cmd.OutOrStderr(), "Error: %v\n", err)
+				_, _ = fmt.Fprintf(cmd.OutOrStderr(), "Error: %v\n", err)
 				return
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), string(data))
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "GoHoarder %s\n", info.Version)
-			fmt.Fprintf(cmd.OutOrStdout(), "Git Commit: %s\n", info.GitCommit)
-			fmt.Fprintf(cmd.OutOrStdout(), "Built: %s\n", info.BuildTime)
-			fmt.Fprintf(cmd.OutOrStdout(), "Go Version: %s\n", info.GoVersion)
-			fmt.Fprintf(cmd.OutOrStdout(), "Platform: %s\n", info.Platform)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "GoHoarder %s\n", info.Version)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Git Commit: %s\n", info.GitCommit)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Built: %s\n", info.BuildTime)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Go Version: %s\n", info.GoVersion)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Platform: %s\n", info.Platform)
 		}
 	},
 }

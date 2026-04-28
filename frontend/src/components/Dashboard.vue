@@ -1,6 +1,23 @@
 <template>
   <div>
-    <h2 class="text-3xl font-bold text-gray-900 mb-8">Dashboard</h2>
+    <div class="flex items-center justify-between mb-8">
+      <h2 class="text-3xl font-bold text-gray-900">Dashboard</h2>
+      <div
+        class="flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium"
+        :class="
+          rt.connected
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            : 'bg-gray-100 border-gray-200 text-gray-500'
+        "
+        data-testid="ws-live-indicator"
+      >
+        <span
+          class="w-2 h-2 rounded-full"
+          :class="rt.connected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'"
+        ></span>
+        {{ rt.connected ? 'Live' : 'Offline' }}
+      </div>
+    </div>
 
     <!-- Error Alert -->
     <Alert v-if="error" variant="destructive" class="mb-4">
@@ -22,7 +39,7 @@
             <div class="space-y-2">
               <p class="text-sm font-medium text-muted-foreground">Total Packages</p>
               <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatNumber(stats?.total_packages || 0) }}
+                {{ formatNumber(displayStats?.total_packages || 0) }}
               </p>
             </div>
             <div class="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
@@ -38,7 +55,7 @@
             <div class="space-y-2">
               <p class="text-sm font-medium text-muted-foreground">Total Size</p>
               <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatBytes(stats?.total_size || 0) }}
+                {{ formatBytes(displayStats?.total_size || 0) }}
               </p>
             </div>
             <div class="w-12 h-12 bg-sky-50 rounded-xl flex items-center justify-center">
@@ -54,7 +71,7 @@
             <div class="space-y-2">
               <p class="text-sm font-medium text-muted-foreground">Total Downloads</p>
               <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatNumber(stats?.total_downloads || 0) }}
+                {{ formatNumber(displayStats?.total_downloads || 0) }}
               </p>
             </div>
             <div class="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center">
@@ -70,7 +87,7 @@
             <div class="space-y-2">
               <p class="text-sm font-medium text-muted-foreground">Scanned Packages</p>
               <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatNumber(stats?.scanned_packages || 0) }}
+                {{ formatNumber(displayStats?.scanned_packages || 0) }}
               </p>
             </div>
             <div class="w-12 h-12 bg-violet-50 rounded-xl flex items-center justify-center">
@@ -80,6 +97,31 @@
         </CardContent>
       </Card>
     </div>
+
+    <!-- Realtime Feed -->
+    <Card v-if="recentRealtimeEvents.length > 0" class="border-0 shadow-lg mb-10" data-testid="ws-event-feed">
+      <CardContent class="p-6">
+        <h3 class="text-xl font-semibold text-foreground mb-4">
+          <i class="fas fa-bolt mr-2 text-amber-500"></i>Live Activity
+        </h3>
+        <ul class="space-y-2">
+          <li
+            v-for="(evt, idx) in recentRealtimeEvents"
+            :key="`${evt.timestamp}-${idx}`"
+            class="flex items-center gap-3 text-sm"
+          >
+            <component :is="iconForEvent(evt.type)" class="w-4 h-4 text-muted-foreground" />
+            <span class="font-medium">{{ labelForEvent(evt.type) }}</span>
+            <span class="text-muted-foreground truncate">
+              {{ describeEvent(evt) }}
+            </span>
+            <span class="ml-auto text-xs text-muted-foreground">
+              {{ formatTimestamp(evt.timestamp) }}
+            </span>
+          </li>
+        </ul>
+      </CardContent>
+    </Card>
 
     <!-- Downloads Chart -->
     <Card class="border-0 shadow-lg mb-10">
@@ -178,10 +220,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import axios from 'axios'
+import {
+  Package as PackageIcon,
+  Download as DownloadIcon,
+  Trash2 as TrashIcon,
+  ShieldCheck as ShieldIcon,
+  Activity as ActivityIcon,
+} from 'lucide-vue-next'
 import { usePackageStore } from '../stores/packages'
+import { useRealtimeStore } from '../stores/realtime'
+import type { EventType, RealtimeEvent } from '@/lib/ws'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -190,6 +241,56 @@ import { getRegistryBadgeClass } from '@/composables/useBadgeStyles'
 
 const store = usePackageStore()
 const { packages, stats, loading, error } = storeToRefs(store)
+
+const rt = useRealtimeStore()
+const { lastStats, events: rtEvents } = storeToRefs(rt)
+
+// Realtime stats override polled stats when available; otherwise fall back.
+const displayStats = computed(() => lastStats.value ?? stats.value)
+
+const recentRealtimeEvents = computed<RealtimeEvent[]>(() => {
+  const list = rtEvents.value
+  return list.slice(Math.max(list.length - 5, 0)).reverse()
+})
+
+const EVENT_LABELS: Record<EventType, string> = {
+  package_cached: 'Cached',
+  package_deleted: 'Deleted',
+  package_downloaded: 'Downloaded',
+  scan_complete: 'Scan complete',
+  stats_update: 'Stats update',
+}
+
+const EVENT_ICONS: Record<EventType, Component> = {
+  package_cached: PackageIcon,
+  package_deleted: TrashIcon,
+  package_downloaded: DownloadIcon,
+  scan_complete: ShieldIcon,
+  stats_update: ActivityIcon,
+}
+
+function iconForEvent(type: EventType): Component {
+  return EVENT_ICONS[type] ?? ActivityIcon
+}
+
+function labelForEvent(type: EventType): string {
+  return EVENT_LABELS[type] ?? type
+}
+
+function describeEvent(evt: RealtimeEvent): string {
+  const p = evt.payload
+  const name = typeof p.name === 'string' ? p.name : ''
+  const version = typeof p.version === 'string' ? `@${p.version}` : ''
+  const registry = typeof p.registry === 'string' ? `[${p.registry}] ` : ''
+  if (evt.type === 'stats_update') return ''
+  if (name) return `${registry}${name}${version}`
+  return ''
+}
+
+function formatTimestamp(ts: number): string {
+  if (!ts) return ''
+  return new Date(ts).toLocaleTimeString()
+}
 
 // Chart periods and data
 const selectedPeriod = ref<string>('1day')
@@ -286,6 +387,10 @@ watch(selectedPeriod, () => {
 })
 
 onMounted(async () => {
+  // Connect to realtime stream first so we can pick up live events while
+  // initial polling resolves. Singleton survives navigation, so we
+  // intentionally do not disconnect on unmount.
+  rt.connect()
   await store.fetchStats()
   await store.fetchPackages()
   await fetchTimeSeriesData()

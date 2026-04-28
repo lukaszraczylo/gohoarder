@@ -32,7 +32,7 @@ func TestCDNMiddlewareTestSuite(t *testing.T) {
 func (s *CDNMiddlewareTestSuite) TestCacheControlHeader() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test response"))
+		_, _ = w.Write([]byte("test response"))
 	})
 
 	wrappedHandler := s.middleware.Handler(handler)
@@ -51,7 +51,7 @@ func (s *CDNMiddlewareTestSuite) TestCacheControlHeader() {
 func (s *CDNMiddlewareTestSuite) TestETagGeneration() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test response content"))
+		_, _ = w.Write([]byte("test response content"))
 	})
 
 	wrappedHandler := s.middleware.Handler(handler)
@@ -71,7 +71,7 @@ func (s *CDNMiddlewareTestSuite) TestETagConsistencyAcrossRequests() {
 	responseBody := []byte("test response content")
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseBody)
+		_, _ = w.Write(responseBody)
 	})
 
 	wrappedHandler := s.middleware.Handler(handler)
@@ -95,7 +95,7 @@ func (s *CDNMiddlewareTestSuite) TestETagConsistencyAcrossRequests() {
 func (s *CDNMiddlewareTestSuite) TestVaryHeader() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test"))
+		_, _ = w.Write([]byte("test"))
 	})
 
 	wrappedHandler := s.middleware.Handler(handler)
@@ -246,7 +246,7 @@ func (s *CDNMiddlewareTestSuite) TestETagConsistency() {
 func (s *CDNMiddlewareTestSuite) TestNoCacheFor4xxErrors() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	})
 
 	wrappedHandler := s.middleware.Handler(handler)
@@ -264,7 +264,7 @@ func (s *CDNMiddlewareTestSuite) TestNoCacheFor4xxErrors() {
 func (s *CDNMiddlewareTestSuite) TestNoCacheFor5xxErrors() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("error"))
+		_, _ = w.Write([]byte("error"))
 	})
 
 	wrappedHandler := s.middleware.Handler(handler)

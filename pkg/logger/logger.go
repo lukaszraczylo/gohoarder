@@ -1,3 +1,5 @@
+// Package logger configures the zerolog-based application logger used by
+// the GoHoarder server and CLI commands.
 package logger
 
 import (

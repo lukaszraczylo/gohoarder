@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
@@ -15,6 +16,7 @@ type RescanWorker struct {
 	storage       storage.StorageBackend
 	manager       *Manager
 	stopCh        chan struct{}
+	stopOnce      sync.Once
 	interval      time.Duration
 }
 
@@ -64,9 +66,11 @@ func (w *RescanWorker) Start(ctx context.Context) {
 	}
 }
 
-// Stop stops the rescan worker
+// Stop stops the rescan worker. Safe to call multiple times.
 func (w *RescanWorker) Stop() {
-	close(w.stopCh)
+	w.stopOnce.Do(func() {
+		close(w.stopCh)
+	})
 }
 
 // rescanPackages re-scans packages that need updating

@@ -1,3 +1,5 @@
+// Package trivy wraps the Aqua Security `trivy` CLI to scan packages for
+// known vulnerabilities and license issues.
 package trivy
 
 import (

@@ -1,3 +1,5 @@
+// Package pypi implements the HTTP handler that proxies PyPI registry
+// requests through the GoHoarder cache.
 package pypi
 
 import (
@@ -6,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +20,36 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// defaultAllowedPyPIHosts is the hardcoded SSRF allowlist for hosts that
+// original_url query params may target. Subdomains of pythonhosted.org are
+// also accepted (handled in isAllowedPyPIHost).
+var defaultAllowedPyPIHosts = []string{
+	"pypi.org",
+	"files.pythonhosted.org",
+	"pythonhosted.org",
+}
+
+// isAllowedPyPIHost reports whether host is on the allowlist or a subdomain
+// of pythonhosted.org. Comparison is case-insensitive on host only.
+func isAllowedPyPIHost(host string, allowed []string) bool {
+	host = strings.ToLower(host)
+	// Strip optional port
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	for _, a := range allowed {
+		a = strings.ToLower(a)
+		if host == a {
+			return true
+		}
+	}
+	// Allow any subdomain of pythonhosted.org (e.g. files.pythonhosted.org)
+	if strings.HasSuffix(host, ".pythonhosted.org") {
+		return true
+	}
+	return false
+}
+
 // Handler implements the PyPI Simple API (PEP 503)
 type Handler struct {
 	cache           *cache.Manager
@@ -26,11 +59,15 @@ type Handler struct {
 	credValidator   *auth.PyPIValidator
 	validationCache *auth.ValidationCache
 	upstream        string
+	allowedHosts    []string
 }
 
 // Config holds PyPI proxy configuration
 type Config struct {
 	Upstream string // Upstream PyPI index (e.g., pypi.org/simple)
+	// AllowedHosts is an SSRF allowlist for hosts that original_url query
+	// params may target. If empty, defaultAllowedPyPIHosts is used.
+	AllowedHosts []string
 }
 
 // New creates a new PyPI proxy handler
@@ -39,10 +76,16 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 		config.Upstream = "https://pypi.org/simple"
 	}
 
+	allowed := config.AllowedHosts
+	if len(allowed) == 0 {
+		allowed = defaultAllowedPyPIHosts
+	}
+
 	return &Handler{
 		cache:           cacheManager,
 		client:          client,
 		upstream:        config.Upstream,
+		allowedHosts:    allowed,
 		credExtractor:   auth.NewCredentialExtractor(),
 		credHasher:      auth.NewCredentialHasher(),
 		credValidator:   auth.NewPyPIValidator(),
@@ -87,7 +130,7 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close()
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -98,7 +141,11 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 		http.Error(w, "Failed to fetch PyPI index", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() {
+		if cerr := entry.Data.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close PyPI index body")
+		}
+	}()
 
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
@@ -115,7 +162,7 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close()
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -126,7 +173,11 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "Failed to fetch package page", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() {
+		if cerr := entry.Data.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close PyPI package page body")
+		}
+	}()
 
 	// Read page into memory for URL rewriting
 	var buf bytes.Buffer
@@ -175,6 +226,23 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		if !strings.HasPrefix(originalURL, "http://") && !strings.HasPrefix(originalURL, "https://") {
 			originalURL = "https://pypi.org" + originalURL
 		}
+
+		// SSRF protection: validate parsed host against allowlist before
+		// fetching. Rejects 169.254.169.254, internal services, etc.
+		parsed, parseErr := url.Parse(originalURL)
+		if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			log.Warn().Str("original_url", originalURL).Msg("Rejected invalid original_url")
+			http.Error(w, "Invalid original_url", http.StatusBadRequest)
+			return
+		}
+		if !isAllowedPyPIHost(parsed.Host, h.allowedHosts) {
+			log.Warn().
+				Str("original_url", originalURL).
+				Str("host", parsed.Host).
+				Msg("Rejected original_url host not on allowlist")
+			http.Error(w, "original_url host not allowed", http.StatusBadRequest)
+			return
+		}
 	}
 
 	log.Debug().
@@ -199,7 +267,7 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close()
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, originalURL, nil
@@ -218,7 +286,11 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "Failed to fetch package file", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() {
+		if cerr := entry.Data.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close PyPI package file body")
+		}
+	}()
 
 	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
 	if entry.Package != nil && entry.Package.RequiresAuth {
@@ -396,9 +468,8 @@ func rewritePackagePageURLs(html, packageName, proxyBaseURL string) string {
 			// This preserves the original CDN URL so we can fetch from the correct location
 			baseURL := strings.TrimSuffix(proxyBaseURL, "/simple")
 
-			// URL encode the original URL
-			encodedURL := strings.ReplaceAll(originalURL, "&", "%26")
-			encodedURL = strings.ReplaceAll(encodedURL, "=", "%3D")
+			// URL encode the original URL — covers &, =, ?, #, +, /, etc.
+			encodedURL := url.QueryEscape(originalURL)
 
 			newURL := fmt.Sprintf(`href="%s/%s/%s?original_url=%s"`, baseURL, packageName, filenameMatch, encodedURL)
 			return newURL

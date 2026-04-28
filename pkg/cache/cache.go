@@ -1,3 +1,5 @@
+// Package cache implements the unified cache manager that coordinates
+// metadata, storage, scanning, and singleflight for upstream packages.
 package cache
 
 import (
@@ -7,17 +9,18 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
+	"github.com/lukaszraczylo/gohoarder/pkg/events"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/metrics"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
+	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
 )
@@ -36,14 +39,43 @@ type AnalyticsInterface interface {
 
 // Manager coordinates caching operations between storage and metadata
 type Manager struct {
-	storage   storage.StorageBackend
-	metadata  metadata.MetadataStore
-	scanner   ScannerInterface
-	analytics AnalyticsInterface
-	sf        singleflight.Group
-	config    Config
-	mu        sync.RWMutex
-	evicting  bool
+	storage     storage.StorageBackend
+	metadata    metadata.MetadataStore
+	scanner     ScannerInterface
+	analytics   AnalyticsInterface
+	broadcaster events.Broadcaster
+	stopCh      chan struct{}
+	sf          singleflight.Group
+	config      Config
+	cleanupWG   sync.WaitGroup
+	mu          sync.RWMutex
+	bcMu        sync.RWMutex
+	closeOnce   sync.Once
+	evicting    bool
+}
+
+// SetBroadcaster wires an events.Broadcaster onto the manager so cache
+// lifecycle events (cached / downloaded) are published. Pass nil to
+// disable broadcasting. Safe to call after construction; concurrent
+// access is guarded.
+func (m *Manager) SetBroadcaster(b events.Broadcaster) {
+	m.bcMu.Lock()
+	m.broadcaster = b
+	m.bcMu.Unlock()
+}
+
+// emit publishes an event via the configured broadcaster, if any.
+// Fire-and-forget: never blocks the caller. The websocket server's
+// BroadcastEvent is itself non-blocking (channel-drop on overflow),
+// so we call directly rather than spawning a goroutine.
+func (m *Manager) emit(eventType string, payload map[string]interface{}) {
+	m.bcMu.RLock()
+	b := m.broadcaster
+	m.bcMu.RUnlock()
+	if b == nil {
+		return
+	}
+	b.BroadcastEvent(eventType, payload)
 }
 
 // Config holds cache manager configuration
@@ -52,6 +84,7 @@ type Config struct {
 	CleanupInterval   time.Duration // How often to run cleanup
 	EvictionThreshold float64       // Trigger eviction when usage > threshold (0.0-1.0)
 	MaxConcurrent     int           // Max concurrent upstream fetches
+	MaxPackageSize    int64         // Maximum package size in bytes (0 = default 2GB)
 }
 
 // CacheEntry represents a cached package
@@ -99,15 +132,21 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 		config.MaxConcurrent = 100
 	}
 
+	if config.MaxPackageSize == 0 {
+		config.MaxPackageSize = 2 * 1024 * 1024 * 1024 // 2GB default
+	}
+
 	manager := &Manager{
 		storage:   storage,
 		metadata:  metadata,
 		scanner:   scanner,
 		analytics: analytics,
 		config:    config,
+		stopCh:    make(chan struct{}),
 	}
 
 	// Start background cleanup worker
+	manager.cleanupWG.Add(1)
 	go manager.cleanupWorker()
 
 	return manager, nil
@@ -119,6 +158,9 @@ func (m *Manager) Get(ctx context.Context, registry, name, version string, fetch
 	key := fmt.Sprintf("%s/%s/%s", registry, name, version)
 
 	result, err, _ := m.sf.Do(key, func() (interface{}, error) {
+		// getOrFetch returns a CacheEntry with Data == nil. Each caller
+		// re-opens its own storage reader below to avoid sharing a
+		// single io.ReadCloser across concurrent waiters.
 		return m.getOrFetch(ctx, registry, name, version, fetchFunc)
 	})
 
@@ -126,7 +168,25 @@ func (m *Manager) Get(ctx context.Context, registry, name, version string, fetch
 		return nil, err
 	}
 
-	return result.(*CacheEntry), nil
+	entry := result.(*CacheEntry)
+	if entry == nil || entry.Package == nil {
+		return nil, errors.New(errors.ErrCodeStorageFailure, "cache entry missing package metadata")
+	}
+
+	// Open a fresh ReadCloser per caller from storage.
+	data, err := m.storage.Get(ctx, entry.Package.StorageKey)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to retrieve cached package")
+	}
+
+	// Return a copy so concurrent waiters don't share the Data field.
+	return &CacheEntry{
+		Data:         data,
+		Package:      entry.Package,
+		UpstreamURL:  entry.UpstreamURL,
+		CacheControl: entry.CacheControl,
+		FromCache:    entry.FromCache,
+	}, nil
 }
 
 // getOrFetch implements the actual get-or-fetch logic
@@ -141,16 +201,20 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 			// Delete expired package
 			_ = m.deletePackage(ctx, pkg) // #nosec G104 -- Async cleanup
 		} else {
-			// Try to get from storage
-			data, err := m.storage.Get(ctx, pkg.StorageKey)
-			if err == nil {
+			// Probe storage by opening then immediately closing the reader.
+			// Singleflight callers can't share a live ReadCloser; each caller in
+			// Get() opens its own reader after the singleflight returns.
+			data, getErr := m.storage.Get(ctx, pkg.StorageKey)
+			if getErr == nil {
+				_ = data.Close() // #nosec G104 -- probe only; Get() reopens per caller
+
 				// Cache hit!
 				metrics.RecordCacheHit(registry)
 
 				// Update download count (log errors for debugging)
-				if err := m.metadata.UpdateDownloadCount(ctx, registry, name, version); err != nil {
+				if updErr := m.metadata.UpdateDownloadCount(ctx, registry, name, version); updErr != nil {
 					log.Warn().
-						Err(err).
+						Err(updErr).
 						Str("registry", registry).
 						Str("package", name).
 						Str("version", version).
@@ -185,20 +249,30 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 
 				// Check for vulnerabilities if scanner is enabled
 				if m.scanner != nil {
-					blocked, reason, err := m.scanner.CheckVulnerabilities(ctx, registry, name, version)
-					if err != nil {
-						log.Warn().Err(err).Str("package", name).Msg("Failed to check vulnerabilities")
+					blocked, reason, vulnErr := m.scanner.CheckVulnerabilities(ctx, registry, name, version)
+					if vulnErr != nil {
+						log.Warn().Err(vulnErr).Str("package", name).Msg("Failed to check vulnerabilities")
 					}
 					if blocked {
-						metrics.RecordCacheHit(registry) // Record as blocked
-						_ = data.Close()                 // #nosec G104                     // Close the data reader
 						return nil, errors.New(errors.ErrCodeSecurityViolation, reason)
 					}
 				}
 
+				// Broadcast cache-hit serve event. Fire-and-forget; the
+				// underlying transport is non-blocking. Only emitted on
+				// the cache-hit path — the miss-then-fetch path is
+				// covered by EventPackageCached emitted from store().
+				m.emit(string(websocket.EventPackageDownloaded), map[string]interface{}{
+					"registry":  registry,
+					"name":      name,
+					"version":   version,
+					"cache_hit": true,
+				})
+
+				// Data is intentionally nil; Get() opens a fresh reader per caller.
 				return &CacheEntry{
 					Package:   pkg,
-					Data:      data,
+					Data:      nil,
 					FromCache: true,
 				}, nil
 			}
@@ -224,7 +298,7 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 		metrics.RecordUpstreamRequest(registry, "error")
 		return nil, errors.Wrap(err, errors.ErrCodeUpstreamFailure, "failed to fetch from upstream")
 	}
-	defer data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	metrics.RecordUpstreamRequest(registry, "success")
 
@@ -240,7 +314,8 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 		strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
 
 	// Wait briefly for initial scan to complete if scanner is enabled
-	// This prevents serving vulnerable packages on first request
+	// This prevents serving vulnerable packages on first request.
+	// SECURITY: timeouts MUST fail closed — never serve unscanned content.
 	if m.scanner != nil && !isMetadataEntry {
 		// Wait up to 30 seconds for scan to complete
 		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -249,16 +324,18 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
+	scanWait:
 		for {
 			select {
 			case <-scanCtx.Done():
-				// Timeout or context cancelled - proceed anyway
-				// Package is cached, will be blocked on next request if vulnerable
+				// Fail closed: do NOT serve unscanned packages on timeout/cancel.
+				// Package remains cached; subsequent requests can retry once
+				// the scan completes.
 				log.Warn().
 					Str("package", name).
 					Str("version", version).
-					Msg("Scan timeout - allowing first download, will block on subsequent requests if vulnerable")
-				goto servePkg
+					Msg("Scan timeout - refusing to serve unscanned package (fail-closed)")
+				return nil, errors.New(errors.ErrCodeServiceUnavailable, "package scan in progress, retry shortly")
 
 			case <-ticker.C:
 				// First check if scan has completed by checking the SecurityScanned flag
@@ -311,16 +388,9 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 					Str("package", name).
 					Str("version", version).
 					Msg("Scan completed, package is clean")
-				goto servePkg
+				break scanWait
 			}
 		}
-	}
-
-servePkg:
-	// Re-open from storage for consistency
-	storedData, err := m.storage.Get(ctx, storedPkg.StorageKey)
-	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to retrieve just-stored package")
 	}
 
 	// Track download count for first-time download (cache miss)
@@ -339,9 +409,10 @@ servePkg:
 		m.trackDownload(registry, name, version, storedPkg.Size)
 	}
 
+	// Data is intentionally nil; Get() opens a fresh reader per caller.
 	return &CacheEntry{
 		Package:     storedPkg,
-		Data:        storedData,
+		Data:        nil,
 		FromCache:   false,
 		UpstreamURL: upstreamURL,
 	}, nil
@@ -358,10 +429,20 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 	var buf []byte
 	var err error
 
-	// Read all data
-	buf, err = io.ReadAll(data)
+	// Cap upstream read to MaxPackageSize to prevent OOM on hostile/oversized
+	// upstream responses. Read one extra byte so we can detect overflow.
+	maxSize := m.config.MaxPackageSize
+	if maxSize <= 0 {
+		maxSize = 2 * 1024 * 1024 * 1024 // 2GB safety floor
+	}
+	limited := io.LimitReader(data, maxSize+1)
+	buf, err = io.ReadAll(limited)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeUpstreamFailure, "failed to read upstream data")
+	}
+	if int64(len(buf)) > maxSize {
+		return nil, errors.New(errors.ErrCodePayloadTooLarge,
+			fmt.Sprintf("upstream package exceeds max size (%d bytes)", maxSize))
 	}
 
 	// Calculate checksums
@@ -376,7 +457,7 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 	if err == nil && quota.Limit > 0 {
 		if quota.Used+size > quota.Limit {
 			// Trigger eviction
-			if err := m.evict(ctx, size); err != nil {
+			if evictErr := m.evict(ctx, size); evictErr != nil {
 				return nil, errors.QuotaExceeded(quota.Limit)
 			}
 		}
@@ -412,17 +493,40 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		Metadata:       make(map[string]string),
 	}
 
-	// Save metadata (skip metadata entries like index pages, lists, etc.)
-	// Also skip Go module metadata files (.mod, .info) - they're not scannable packages
+	// Persist metadata for ALL entries (including metadata pages and Go .mod/.info).
+	// Skipping persistence for metadata entries caused unconditional upstream re-fetch
+	// on every metadata request. SavePackage upserts safely; the metadata-entry flag
+	// below is still used to skip security scanning (these are not scannable packages).
+	//
+	// TRADEOFF: metadata pages share the cache's DefaultTTL and are not refreshed
+	// based on upstream Cache-Control. Plumbing per-response TTL from registry handlers
+	// is out of scope here and tracked separately.
 	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
 		strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
-	if !isMetadataEntry {
-		if err := m.metadata.SavePackage(ctx, pkg); err != nil {
-			// Clean up storage if metadata save fails
-			_ = m.storage.Delete(ctx, storageKey) // #nosec G104 -- Cleanup, error logged
-			return nil, err
+	if err := m.metadata.SavePackage(ctx, pkg); err != nil {
+		// Clean up storage if metadata save fails
+		_ = m.storage.Delete(ctx, storageKey) // #nosec G104 -- Cleanup, error logged
+		return nil, err
+	}
+
+	// Broadcast cache-store event. The scan_status reflects the
+	// initial state ("pending" if scanning is enabled and applicable;
+	// "skipped" for metadata entries; "disabled" when scanner is nil).
+	scanStatus := "disabled"
+	if m.scanner != nil {
+		if isMetadataEntry {
+			scanStatus = "skipped"
+		} else {
+			scanStatus = "pending"
 		}
 	}
+	m.emit(string(websocket.EventPackageCached), map[string]interface{}{
+		"registry":    registry,
+		"name":        name,
+		"version":     version,
+		"size":        size,
+		"scan_status": scanStatus,
+	})
 
 	// Scan package if scanner is enabled (run in background to not block cache operations)
 	// Skip scanning metadata entries (index pages, lists, etc.)
@@ -446,29 +550,24 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 				cleanupFunc = func() {} // No cleanup needed for direct path
 				log.Debug().Str("package", name).Str("path", filePath).Msg("Scanning package from storage path")
 			} else {
-				// Fallback: Create temp file for remote storage (S3, SMB, etc.)
-				tempFilePath := filepath.Join(os.TempDir(), storageKey)
-
-				// Create parent directories if they don't exist
-				if err := os.MkdirAll(filepath.Dir(tempFilePath), 0750); err != nil {
-					log.Error().Err(err).Str("package", name).Msg("Failed to create temp directory for scanning")
-					return
-				}
-
-				tempFile, err := os.Create(tempFilePath) // #nosec G304 -- Temp file path is constructed from validated package name
+				// Fallback: Create temp file for remote storage (S3, SMB, etc.).
+				// Use os.CreateTemp so the OS picks a safe, unique filename — this
+				// prevents path traversal via storageKey containing "..".
+				tempFile, err := os.CreateTemp(os.TempDir(), "gohoarder-scan-*")
 				if err != nil {
 					log.Error().Err(err).Str("package", name).Msg("Failed to create temp file for scanning")
 					return
 				}
+				tempFilePath := tempFile.Name()
 
 				// Write package data to temp file
 				if _, err := tempFile.Write(buf); err != nil {
-					tempFile.Close()            // #nosec G104 -- Cleanup, error not critical
+					_ = tempFile.Close()        // #nosec G104 -- Cleanup, error not critical
 					_ = os.Remove(tempFilePath) // #nosec G104 -- Cleanup, error not critical
 					log.Error().Err(err).Str("package", name).Msg("Failed to write temp file for scanning")
 					return
 				}
-				tempFile.Close() // #nosec G104 -- Cleanup, error not critical
+				_ = tempFile.Close() // #nosec G104 -- Cleanup, error not critical
 
 				filePath = tempFilePath
 				cleanupFunc = func() { _ = os.Remove(tempFilePath) } // #nosec G104 -- Cleanup
@@ -563,14 +662,22 @@ func (m *Manager) evict(ctx context.Context, needed int64) error {
 	return nil
 }
 
-// cleanupWorker runs periodic cleanup of expired packages
+// cleanupWorker runs periodic cleanup of expired packages.
+// Exits when stopCh is closed (via Close()).
 func (m *Manager) cleanupWorker() {
+	defer m.cleanupWG.Done()
+
 	ticker := time.NewTicker(m.config.CleanupInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		ctx := context.Background()
-		m.cleanup(ctx)
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			ctx := context.Background()
+			m.cleanup(ctx)
+		}
 	}
 }
 
@@ -643,9 +750,17 @@ func (m *Manager) trackDownload(registry, name, version string, size int64) {
 	m.analytics.TrackDownload(download)
 }
 
-// Close closes the cache manager
+// Close closes the cache manager.
+// Stops the cleanup worker, then closes storage and metadata backends.
+// Safe to call multiple times.
 func (m *Manager) Close() error {
 	var err error
+
+	// Stop cleanup worker (idempotent via sync.Once).
+	m.closeOnce.Do(func() {
+		close(m.stopCh)
+		m.cleanupWG.Wait()
+	})
 
 	if closeErr := m.storage.Close(); closeErr != nil {
 		err = closeErr

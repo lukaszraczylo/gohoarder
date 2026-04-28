@@ -1,11 +1,18 @@
+// Package scanner orchestrates pluggable vulnerability scanners and
+// records their results against cached packages.
 package scanner
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
+	hoardererrors "github.com/lukaszraczylo/gohoarder/pkg/errors"
+	"github.com/lukaszraczylo/gohoarder/pkg/events"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/ghsa"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/govulncheck"
@@ -14,6 +21,8 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/osv"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/pipaudit"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/trivy"
+	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
+	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/rs/zerolog/log"
 )
 
@@ -37,9 +46,32 @@ type DatabaseUpdater interface {
 // Manager manages multiple security scanners
 type Manager struct {
 	metadataStore metadata.MetadataStore
-	config        config.SecurityConfig
+	broadcaster   events.Broadcaster
 	scanners      []Scanner
+	config        config.SecurityConfig
+	bcMu          sync.RWMutex
 	enabled       bool
+}
+
+// SetBroadcaster wires an events.Broadcaster onto the scanner so scan
+// lifecycle events are published. Pass nil to disable broadcasting.
+// Safe for concurrent use.
+func (m *Manager) SetBroadcaster(b events.Broadcaster) {
+	m.bcMu.Lock()
+	m.broadcaster = b
+	m.bcMu.Unlock()
+}
+
+// emit publishes an event via the configured broadcaster, if any.
+// Non-blocking: the underlying transport handles overflow by dropping.
+func (m *Manager) emit(eventType string, payload map[string]interface{}) {
+	m.bcMu.RLock()
+	b := m.broadcaster
+	m.bcMu.RUnlock()
+	if b == nil {
+		return
+	}
+	b.BroadcastEvent(eventType, payload)
 }
 
 // New creates a new scanner manager with configured scanners
@@ -178,11 +210,42 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 			Msg("Scan completed")
 	}
 
-	// If no scanners succeeded, return
+	// If no scanners succeeded, persist a synthetic error result so callers
+	// fail closed (no scan == blocked) rather than silently leaving
+	// SecurityScanned=false which would allow the package to be served.
 	if len(scanResults) == 0 {
 		log.Warn().
 			Str("package", packageName).
-			Msg("All scanners failed, no results to save")
+			Msg("All scanners failed, saving scan-error result for fail-closed enforcement")
+
+		errResult := &metadata.ScanResult{
+			ID:                 uuid.New().String(),
+			Registry:           registry,
+			PackageName:        packageName,
+			PackageVersion:     version,
+			Scanner:            "all",
+			ScannedAt:          time.Now(),
+			Status:             metadata.ScanStatusError,
+			VulnerabilityCount: 0,
+			Vulnerabilities:    []metadata.Vulnerability{},
+			Details: map[string]interface{}{
+				"error": "all configured scanners failed for this package",
+			},
+		}
+		if err := m.metadataStore.SaveScanResult(ctx, errResult); err != nil {
+			log.Error().
+				Err(err).
+				Str("package", packageName).
+				Msg("Failed to save scan-error result")
+			return err
+		}
+		m.emit(string(websocket.EventScanComplete), map[string]interface{}{
+			"registry":            registry,
+			"name":                packageName,
+			"version":             version,
+			"status":              string(errResult.Status),
+			"vulnerability_count": errResult.VulnerabilityCount,
+		})
 		return nil
 	}
 
@@ -205,6 +268,14 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 		Int("unique_cves", len(mergedResult.Vulnerabilities)).
 		Strs("scanners", scannerNames).
 		Msg("Consolidated scan results saved")
+
+	m.emit(string(websocket.EventScanComplete), map[string]interface{}{
+		"registry":            registry,
+		"name":                packageName,
+		"version":             version,
+		"status":              string(mergedResult.Status),
+		"vulnerability_count": mergedResult.VulnerabilityCount,
+	})
 
 	return nil
 }
@@ -285,11 +356,21 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 			}
 		}
 
-		// Update status to worst case
-		if result.Status == metadata.ScanStatusVulnerable {
+		// Update status to worst case.
+		// Order: vulnerable > error > pending > clean. Vulnerable wins because
+		// the cache layer must surface the actual vulns. Otherwise, if any
+		// scanner errored, propagate so CheckVulnerabilities can fail closed.
+		switch result.Status {
+		case metadata.ScanStatusVulnerable:
 			merged.Status = metadata.ScanStatusVulnerable
-		} else if result.Status == metadata.ScanStatusPending && merged.Status != metadata.ScanStatusVulnerable {
-			merged.Status = metadata.ScanStatusPending
+		case metadata.ScanStatusError:
+			if merged.Status != metadata.ScanStatusVulnerable {
+				merged.Status = metadata.ScanStatusError
+			}
+		case metadata.ScanStatusPending:
+			if merged.Status != metadata.ScanStatusVulnerable && merged.Status != metadata.ScanStatusError {
+				merged.Status = metadata.ScanStatusPending
+			}
 		}
 	}
 
@@ -359,11 +440,37 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 		}
 	}
 
-	// Get latest scan result
+	// Get latest scan result.
+	// SECURITY: Fail closed when no scan exists or backend errors.
+	// Previously this returned (false, "", nil) which allowed unscanned
+	// packages through — a fail-open bypass. Cache layer is expected to
+	// wait for the initial scan via SecurityScanned flag; once that flag
+	// is set, GetScanResult MUST return a record. A missing record at this
+	// point indicates either a cleared/lost scan or a transient error;
+	// either way we block.
 	result, err := m.metadataStore.GetScanResult(ctx, registry, packageName, version)
 	if err != nil {
-		// No scan result found - allow download (will be scanned after)
-		return false, "", nil
+		var hErr *hoardererrors.Error
+		if stderrors.As(err, &hErr) && hErr.Code == hoardererrors.ErrCodeNotFound {
+			return true, "no scan available - fail closed", nil
+		}
+		// Real backend error (DB transient, etc.) — also block.
+		log.Warn().
+			Err(err).
+			Str("package", packageName).
+			Msg("Failed to retrieve scan result, failing closed")
+		return true, "scan lookup failed - fail closed", nil
+	}
+	if result == nil {
+		// File-backed metadata store returns (nil, nil) on not-found.
+		return true, "no scan available - fail closed", nil
+	}
+
+	// If the scan itself errored (all scanners failed for this package),
+	// block. A scan-error record means we don't actually know whether the
+	// package is safe.
+	if result.Status == metadata.ScanStatusError {
+		return true, "scan failed - fail closed", nil
 	}
 
 	// Build set of bypassed CVEs for fast lookup

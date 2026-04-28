@@ -3,10 +3,12 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import Dashboard from './Dashboard.vue'
 import { usePackageStore } from '../stores/packages'
+import { useRealtimeStore, __resetRealtimeSingleton } from '../stores/realtime'
 
 describe('Dashboard.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    __resetRealtimeSingleton()
     // Mock the fetch functions to prevent actual API calls
     const store = usePackageStore()
     vi.spyOn(store, 'fetchStats').mockResolvedValue()
@@ -212,5 +214,34 @@ describe('Dashboard.vue', () => {
 
     expect(wrapper.text()).toContain('0')
     expect(wrapper.text()).toContain('0 B')
+  })
+
+  it('renders realtime lastStats over polled stats when present', async () => {
+    const wrapper = mount(Dashboard)
+    const store = usePackageStore()
+    const rt = useRealtimeStore()
+
+    store.loading = false
+    store.stats = {
+      registry: '',
+      total_packages: 10,
+      total_size: 1024,
+      max_cache_size: 10737418240,
+      total_downloads: 5,
+      scanned_packages: 0,
+      vulnerable_packages: 0,
+      blocked_packages: 0,
+    }
+    rt.lastStats = {
+      total_packages: 999,
+      total_size: 2048,
+      total_downloads: 777,
+      scanned_packages: 0,
+    }
+    await wrapper.vm.$nextTick()
+
+    // Realtime values should be visible (override polled values).
+    expect(wrapper.text()).toContain('999')
+    expect(wrapper.text()).toContain('777')
   })
 })

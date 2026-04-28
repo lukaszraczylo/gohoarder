@@ -1,3 +1,5 @@
+// Package vcs provides Git/VCS helpers for resolving Go modules and
+// extracting repository credentials.
 package vcs
 
 import (

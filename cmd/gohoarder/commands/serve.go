@@ -1,3 +1,4 @@
+// Package commands hosts the cobra commands wired into the gohoarder CLI.
 package commands
 
 import (
@@ -35,11 +36,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize logger
-	if err := logger.Init(logger.Config{
+	if logErr := logger.Init(logger.Config{
 		Level:  cfg.Logging.Level,
 		Format: cfg.Logging.Format,
-	}); err != nil {
-		return fmt.Errorf("failed to initialize logger: %w", err)
+	}); logErr != nil {
+		return fmt.Errorf("failed to initialize logger: %w", logErr)
 	}
 
 	log.Info().

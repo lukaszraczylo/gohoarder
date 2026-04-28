@@ -1,3 +1,5 @@
+// Package grype wraps the Anchore `grype` CLI to scan packages for
+// known vulnerabilities.
 package grype
 
 import (

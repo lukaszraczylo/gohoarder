@@ -1,3 +1,5 @@
+// Package s3 implements the S3-compatible Storage backend (AWS S3,
+// MinIO, etc.).
 package s3
 
 import (
@@ -139,9 +141,9 @@ func (s *S3Storage) Put(ctx context.Context, key string, data io.Reader, opts *s
 
 	// Check quota if set
 	if s.maxSizeBytes > 0 {
-		currentUsage, err := s.calculateUsage(ctx)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to calculate current usage, skipping quota check")
+		currentUsage, usageErr := s.calculateUsage(ctx)
+		if usageErr != nil {
+			log.Warn().Err(usageErr).Msg("Failed to calculate current usage, skipping quota check")
 		} else if currentUsage+size > s.maxSizeBytes {
 			return errors.QuotaExceeded(s.maxSizeBytes)
 		}

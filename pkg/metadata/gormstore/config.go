@@ -1,3 +1,5 @@
+// Package gormstore implements the GORM-backed metadata store used for
+// production persistence (Postgres, MySQL, SQLite).
 package gormstore
 
 import (
@@ -13,13 +15,13 @@ type Config struct {
 	Driver string // "sqlite", "postgres", "mysql"
 	DSN    string // Data Source Name
 
+	// GORM settings
+	LogLevel string // "silent", "error", "warn", "info"
+
 	// Connection pool
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
-
-	// GORM settings
-	LogLevel string // "silent", "error", "warn", "info"
 }
 
 // Validate validates the configuration

@@ -73,7 +73,7 @@ func (s *GORMStoreV2TestSuite) TearDownTest() {
 			s.store.db.Exec(fmt.Sprintf("DELETE FROM %s", table))
 		}
 
-		s.store.Close()
+		_ = s.store.Close()
 	}
 }
 
@@ -352,7 +352,7 @@ func (s *GORMStoreV2TestSuite) Test_V2_Count() {
 			CachedAt:     time.Now(),
 			LastAccessed: time.Now(),
 		}
-		err := s.store.SavePackage(s.ctx, pkg)
+		err = s.store.SavePackage(s.ctx, pkg)
 		s.NoError(err)
 	}
 
@@ -376,9 +376,9 @@ func (s *GORMStoreV2TestSuite) Test_V2_GetStats() {
 	}
 
 	// Update download counts
-	s.store.UpdateDownloadCount(s.ctx, "npm", "pkg1", "1.0.0")
-	s.store.UpdateDownloadCount(s.ctx, "npm", "pkg1", "1.0.0")
-	s.store.UpdateDownloadCount(s.ctx, "npm", "pkg2", "1.0.0")
+	_ = s.store.UpdateDownloadCount(s.ctx, "npm", "pkg1", "1.0.0")
+	_ = s.store.UpdateDownloadCount(s.ctx, "npm", "pkg1", "1.0.0")
+	_ = s.store.UpdateDownloadCount(s.ctx, "npm", "pkg2", "1.0.0")
 
 	// Get stats for all registries
 	statsAll, err := s.store.GetStats(s.ctx, "")
@@ -486,7 +486,7 @@ func (s *GORMStoreV2TestSuite) Test_V2_ConcurrentUpdates() {
 	// SQLite: Sequential updates only (write lock prevents concurrent writes)
 	updateCount := 5
 	for i := 0; i < updateCount; i++ {
-		err := s.store.UpdateDownloadCount(s.ctx, "npm", "concurrent-test", "1.0.0")
+		err = s.store.UpdateDownloadCount(s.ctx, "npm", "concurrent-test", "1.0.0")
 		s.NoError(err)
 	}
 

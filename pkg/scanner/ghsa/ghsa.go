@@ -1,3 +1,5 @@
+// Package ghsa implements a vulnerability scanner backed by the GitHub
+// Security Advisory Database.
 package ghsa
 
 import (
@@ -6,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -105,7 +109,7 @@ func (s *Scanner) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("github advisory database not accessible: %w", err)
 	}
-	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = resp.Body.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	// Accept any 2xx or 403 (rate limit) as healthy
 	// Rate limits are expected without a GitHub token and shouldn't fail health checks
@@ -136,9 +140,13 @@ func (s *Scanner) mapRegistryToEcosystem(registry string) string {
 
 // queryAdvisories queries GitHub Advisory Database for a package
 func (s *Scanner) queryAdvisories(ctx context.Context, ecosystem, packageName string) ([]GHSAAdvisory, error) {
-	url := fmt.Sprintf("https://api.github.com/advisories?ecosystem=%s&affects=%s&per_page=100", ecosystem, packageName)
+	endpoint := fmt.Sprintf(
+		"https://api.github.com/advisories?ecosystem=%s&affects=%s&per_page=100",
+		url.QueryEscape(ecosystem),
+		url.QueryEscape(packageName),
+	)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -152,7 +160,7 @@ func (s *Scanner) queryAdvisories(ctx context.Context, ecosystem, packageName st
 	if err != nil {
 		return nil, fmt.Errorf("failed to query advisories: %w", err)
 	}
-	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = resp.Body.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -167,15 +175,194 @@ func (s *Scanner) queryAdvisories(ctx context.Context, ecosystem, packageName st
 	return advisories, nil
 }
 
-// filterAffectedAdvisories filters advisories that affect the given version
+// filterAffectedAdvisories filters advisories that affect the given version.
+// Each advisory may have multiple GHSAVulnerability entries; if any of them
+// applies to our installed version (per its vulnerable_version_range), the
+// advisory is considered affecting.
+//
+// Fail-closed: if the version or any range cannot be parsed, the advisory is
+// included. We err on the side of reporting a possible vulnerability rather
+// than silently dropping it.
 func (s *Scanner) filterAffectedAdvisories(advisories []GHSAAdvisory, version string) []GHSAAdvisory {
-	// Check if this version is affected
-	// GitHub API already filters by package, but we need to check version ranges
-	// For now, we'll include all advisories that match the package
-	// A more sophisticated implementation would parse version ranges
-	affected := append([]GHSAAdvisory(nil), advisories...)
+	if version == "" {
+		// Without a target version, conservatively include everything.
+		return append([]GHSAAdvisory(nil), advisories...)
+	}
 
-	return affected
+	out := make([]GHSAAdvisory, 0, len(advisories))
+	for _, adv := range advisories {
+		if advisoryAffectsVersion(adv, version) {
+			out = append(out, adv)
+		}
+	}
+	return out
+}
+
+// advisoryAffectsVersion reports whether the given installed version falls
+// within any of the advisory's vulnerable version ranges.
+func advisoryAffectsVersion(adv GHSAAdvisory, version string) bool {
+	// If the advisory carries no per-vuln range info, conservatively include.
+	if len(adv.Vulnerabilities) == 0 {
+		return true
+	}
+
+	for _, v := range adv.Vulnerabilities {
+		rangeExpr := strings.TrimSpace(v.VulnerableVersions)
+		if rangeExpr == "" {
+			// No range — assume affected.
+			return true
+		}
+		matched, ok := versionInRange(version, rangeExpr)
+		if !ok {
+			// Parse error → fail-closed: include.
+			log.Debug().
+				Str("ghsa_id", adv.GHSAID).
+				Str("range", rangeExpr).
+				Str("version", version).
+				Msg("Could not parse GHSA vulnerable_version_range, including advisory")
+			return true
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// versionInRange reports whether version satisfies expr. Returns (matched, ok)
+// where ok=false signals a parse error. Supported forms (comma separated AND):
+//
+//	"= X"
+//	"< X"
+//	"<= X"
+//	"> X"
+//	">= X"
+//	">= X, < Y"
+//
+// All clauses must be satisfied for the range to match.
+func versionInRange(version, expr string) (bool, bool) {
+	clauses := strings.Split(expr, ",")
+	for _, c := range clauses {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		op, bound, ok := splitOpAndVersion(c)
+		if !ok {
+			return false, false
+		}
+		cmp, ok := compareVersions(version, bound)
+		if !ok {
+			return false, false
+		}
+		switch op {
+		case "=", "==":
+			if cmp != 0 {
+				return false, true
+			}
+		case "<":
+			if cmp >= 0 {
+				return false, true
+			}
+		case "<=":
+			if cmp > 0 {
+				return false, true
+			}
+		case ">":
+			if cmp <= 0 {
+				return false, true
+			}
+		case ">=":
+			if cmp < 0 {
+				return false, true
+			}
+		default:
+			return false, false
+		}
+	}
+	return true, true
+}
+
+// splitOpAndVersion parses "<op> <version>" pairs (e.g. ">= 1.2.3").
+func splitOpAndVersion(clause string) (op, ver string, ok bool) {
+	clause = strings.TrimSpace(clause)
+	// Longer operators first to avoid prefix shadowing.
+	for _, candidate := range []string{">=", "<=", "==", "=", ">", "<"} {
+		if strings.HasPrefix(clause, candidate) {
+			rest := strings.TrimSpace(strings.TrimPrefix(clause, candidate))
+			if rest == "" {
+				return "", "", false
+			}
+			return candidate, rest, true
+		}
+	}
+	return "", "", false
+}
+
+// compareVersions compares two dot-separated version strings.
+// Returns (cmp, ok). Numeric segments are compared numerically.
+// A pre-release suffix (anything after '-' or '+') is treated as lower-priority
+// than the same version without one, matching common semver intuition for
+// the cases we expect from the GitHub Advisory Database.
+func compareVersions(a, b string) (int, bool) {
+	aBase, aPre := splitPreRelease(a)
+	bBase, bPre := splitPreRelease(b)
+
+	aParts := strings.Split(aBase, ".")
+	bParts := strings.Split(bBase, ".")
+
+	n := len(aParts)
+	if len(bParts) > n {
+		n = len(bParts)
+	}
+	for i := 0; i < n; i++ {
+		var av, bv int
+		var err error
+		if i < len(aParts) {
+			av, err = strconv.Atoi(aParts[i])
+			if err != nil {
+				return 0, false
+			}
+		}
+		if i < len(bParts) {
+			bv, err = strconv.Atoi(bParts[i])
+			if err != nil {
+				return 0, false
+			}
+		}
+		if av != bv {
+			if av < bv {
+				return -1, true
+			}
+			return 1, true
+		}
+	}
+
+	// Bases equal; compare pre-release. No pre-release > has pre-release.
+	switch {
+	case aPre == "" && bPre == "":
+		return 0, true
+	case aPre == "" && bPre != "":
+		return 1, true
+	case aPre != "" && bPre == "":
+		return -1, true
+	default:
+		return strings.Compare(aPre, bPre), true
+	}
+}
+
+// splitPreRelease separates "1.2.3-rc1" into ("1.2.3", "rc1"). Build metadata
+// after '+' is stripped (per semver).
+func splitPreRelease(v string) (base, pre string) {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	if i := strings.Index(v, "+"); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.Index(v, "-"); i >= 0 {
+		return v[:i], v[i+1:]
+	}
+	return v, ""
 }
 
 // emptyResult returns an empty scan result

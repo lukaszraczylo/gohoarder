@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
@@ -23,6 +24,7 @@ type GORMStoreV2 struct {
 	registryCache     map[string]int32 // Cache registry name -> ID mapping
 	aggregationWorker *AggregationWorker
 	partitionManager  *PartitionManager
+	registryCacheMu   sync.RWMutex // Protects registryCache for concurrent access
 }
 
 // NewV2 creates a new GORM-based metadata store with V2 schema
@@ -102,7 +104,7 @@ func NewV2(cfg Config) (*GORMStoreV2, error) {
 	}
 
 	// Seed default registries if empty
-	if len(store.registryCache) == 0 {
+	if store.registryCacheLen() == 0 {
 		if err := store.seedDefaultRegistries(); err != nil {
 			return nil, err
 		}
@@ -133,10 +135,19 @@ func (s *GORMStoreV2) loadRegistryCache() error {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to load registries")
 	}
 
+	s.registryCacheMu.Lock()
 	for _, r := range registries {
 		s.registryCache[r.Name] = r.ID
 	}
+	s.registryCacheMu.Unlock()
 	return nil
+}
+
+// registryCacheLen returns current cache size (used after loading default seed data)
+func (s *GORMStoreV2) registryCacheLen() int {
+	s.registryCacheMu.RLock()
+	defer s.registryCacheMu.RUnlock()
+	return len(s.registryCache)
 }
 
 // seedDefaultRegistries creates default registry entries
@@ -151,7 +162,9 @@ func (s *GORMStoreV2) seedDefaultRegistries() error {
 		if err := s.db.Create(&reg).Error; err != nil {
 			return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to seed registry: "+reg.Name)
 		}
+		s.registryCacheMu.Lock()
 		s.registryCache[reg.Name] = reg.ID
+		s.registryCacheMu.Unlock()
 	}
 
 	log.Info().Msg("Seeded default registries: npm, pypi, go")
@@ -160,9 +173,13 @@ func (s *GORMStoreV2) seedDefaultRegistries() error {
 
 // getRegistryID returns the registry ID from cache or database
 func (s *GORMStoreV2) getRegistryID(name string) (int32, error) {
+	// Fast path: read lock for cache hit
+	s.registryCacheMu.RLock()
 	if id, ok := s.registryCache[name]; ok {
+		s.registryCacheMu.RUnlock()
 		return id, nil
 	}
+	s.registryCacheMu.RUnlock()
 
 	// Not in cache, try to load from database
 	var reg RegistryModel
@@ -173,7 +190,15 @@ func (s *GORMStoreV2) getRegistryID(name string) (int32, error) {
 		return 0, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to query registry")
 	}
 
+	// Promote to write lock to populate cache
+	s.registryCacheMu.Lock()
+	// Re-check: another goroutine may have populated between RUnlock and Lock
+	if existing, ok := s.registryCache[name]; ok {
+		s.registryCacheMu.Unlock()
+		return existing, nil
+	}
 	s.registryCache[name] = reg.ID
+	s.registryCacheMu.Unlock()
 	return reg.ID, nil
 }
 
@@ -212,10 +237,29 @@ func (s *GORMStoreV2) SavePackage(ctx context.Context, pkg *metadata.Package) er
 			AuthProvider:   pkg.AuthProvider,
 		}
 
-		// Upsert package: first try to update, if no rows affected then create
+		// Upsert package: first try to update, if no rows affected then create.
+		// IMPORTANT: use map[string]interface{} so that zero values
+		// (e.g. RequiresAuth=false, Size=0) are written explicitly. With Updates(struct)
+		// GORM silently skips zero fields, which leaves stale security-relevant flags.
+		updateFields := map[string]interface{}{
+			"registry_id":     registryID,
+			"name":            pkg.Name,
+			"version":         pkg.Version,
+			"storage_key":     pkg.StorageKey,
+			"size":            pkg.Size,
+			"checksum_md5":    pkg.ChecksumMD5,
+			"checksum_sha256": pkg.ChecksumSHA256,
+			"upstream_url":    pkg.UpstreamURL,
+			"cached_at":       pkg.CachedAt,
+			"last_accessed":   pkg.LastAccessed,
+			"expires_at":      pkg.ExpiresAt,
+			"requires_auth":   pkg.RequiresAuth,
+			"auth_provider":   pkg.AuthProvider,
+		}
+
 		result := tx.Model(&PackageModel{}).
 			Where("registry_id = ? AND name = ? AND version = ?", registryID, pkg.Name, pkg.Version).
-			Updates(model)
+			Updates(updateFields)
 
 		if result.Error != nil {
 			return errors.Wrap(result.Error, errors.ErrCodeStorageFailure, "failed to update package")
@@ -225,6 +269,14 @@ func (s *GORMStoreV2) SavePackage(ctx context.Context, pkg *metadata.Package) er
 		if result.RowsAffected == 0 {
 			if err := tx.Create(model).Error; err != nil {
 				return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create package")
+			}
+		} else {
+			// On update, fetch the row's primary key for downstream metadata save
+			if err := tx.Model(&PackageModel{}).
+				Select("id").
+				Where("registry_id = ? AND name = ? AND version = ?", registryID, pkg.Name, pkg.Version).
+				First(model).Error; err != nil {
+				return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to reload package id after update")
 			}
 		}
 
@@ -415,16 +467,15 @@ func (s *GORMStoreV2) ListPackages(ctx context.Context, opts *metadata.ListOptio
 
 	// Convert to metadata.Package
 	packages := make([]*metadata.Package, len(models))
+	// Snapshot id->name mapping under read lock once to avoid repeated locking
+	s.registryCacheMu.RLock()
+	idToName := make(map[int32]string, len(s.registryCache))
+	for name, id := range s.registryCache {
+		idToName[id] = name
+	}
+	s.registryCacheMu.RUnlock()
 	for i, model := range models {
-		// Get registry name from cache
-		var regName string
-		for name, id := range s.registryCache {
-			if id == model.RegistryID {
-				regName = name
-				break
-			}
-		}
-		packages[i] = s.modelToPackage(&model, regName)
+		packages[i] = s.modelToPackage(&model, idToName[model.RegistryID])
 	}
 
 	return packages, nil

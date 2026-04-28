@@ -1,3 +1,5 @@
+// Package metrics exposes Prometheus instrumentation for cache, storage,
+// scanner, and HTTP request flows.
 package metrics
 
 import (

@@ -66,7 +66,7 @@ func (w *AggregationWorker) AggregateHourly() error {
 	log.Debug().Msg("Starting hourly aggregation")
 
 	// Get dialect name
-	dialectName := w.db.Dialector.Name()
+	dialectName := w.db.Name()
 
 	// Calculate cutoff time (aggregate events older than 5 minutes to avoid partial data)
 	cutoff := time.Now().Add(-5 * time.Minute).Truncate(time.Hour)
@@ -147,16 +147,22 @@ func (w *AggregationWorker) AggregateHourly() error {
 			return err
 		}
 
-		// Delete aggregated events (older than 24 hours to keep recent data for debugging)
-		deleteOlder := time.Now().Add(-24 * time.Hour)
-		deleteResult := tx.Exec("DELETE FROM download_events WHERE downloaded_at < ?", deleteOlder)
+		// Delete aggregated events in the SAME transaction using the SAME cutoff
+		// that drove the aggregation. This guarantees an event is counted exactly
+		// once: prior to this commit it lives in download_events; after this commit
+		// it's reflected only in download_stats_hourly. Any later run sees only
+		// fresh events (downloaded_at >= cutoff at write time) and cannot
+		// double-count rows that were already aggregated.
+		// Trade-off: raw events older than `cutoff` are not retained for debugging.
+		deleteResult := tx.Exec("DELETE FROM download_events WHERE downloaded_at < ?", cutoff)
 		if deleteResult.Error != nil {
 			return deleteResult.Error
 		}
 
 		// Also update package-level stats (NULL package_id = registry totals)
 		var registryAggSQL string
-		if dialectName == "postgres" {
+		switch dialectName {
+		case "postgres":
 			registryAggSQL = `
 				INSERT INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
 				SELECT
@@ -178,7 +184,7 @@ func (w *AggregationWorker) AggregateHourly() error {
 					auth_downloads = EXCLUDED.auth_downloads,
 					updated_at = NOW()
 			`
-		} else if dialectName == "mysql" {
+		case "mysql":
 			registryAggSQL = `
 				INSERT INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
 				SELECT
@@ -199,7 +205,7 @@ func (w *AggregationWorker) AggregateHourly() error {
 					auth_downloads = VALUES(auth_downloads),
 					updated_at = NOW()
 			`
-		} else {
+		default:
 			// SQLite
 			registryAggSQL = `
 				INSERT OR REPLACE INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
@@ -237,7 +243,7 @@ func (w *AggregationWorker) AggregateDaily() error {
 	startTime := time.Now()
 	log.Debug().Msg("Starting daily aggregation")
 
-	dialectName := w.db.Dialector.Name()
+	dialectName := w.db.Name()
 
 	// Aggregate yesterday's data
 	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)

@@ -514,6 +514,16 @@ ingress:
     enabled: false
     secretName: "gohoarder-tls"
 
+  # Traefik-specific configuration (when className: "traefik")
+  # Used by IngressRoute template for advanced routing
+  traefik:
+    # Middleware references (from traefik namespace)
+    # Example: ["default-chain", "rate-limit"]
+    middlewares: []
+    # ServersTransport configuration
+    transport:
+      serverName: ""
+
 # Autoscaling configuration
 autoscaling:
   enabled: false

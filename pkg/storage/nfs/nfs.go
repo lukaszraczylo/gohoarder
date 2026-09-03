@@ -130,7 +130,18 @@ func (s *Storage) Put(ctx context.Context, key string, data io.Reader, opts *sto
 		s.logger.Warn().Err(err).Str("key", key).Msg("nfs: post-put path lookup failed; skipping fsync")
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0) // #nosec G304 -- path resolved by sanitizing backend
+	relPath, err := relativeToBase(s.path, path)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("key", key).Msg("nfs: post-put path escaped configured base; skipping fsync")
+		return nil
+	}
+	root, err := os.OpenRoot(s.path)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("path", s.path).Msg("nfs: failed to open configured base; skipping fsync")
+		return nil
+	}
+	defer root.Close() // #nosec G307 -- Best-effort cleanup of opened NFS root
+	f, err := root.OpenFile(relPath, os.O_RDWR, 0)
 	if err != nil {
 		s.logger.Warn().Err(err).Str("key", key).Msg("nfs: post-put open failed; skipping fsync")
 		return nil
@@ -224,6 +235,22 @@ func (s *Storage) Close() error {
 // like local files to callers). Implements storage.LocalPathProvider.
 func (s *Storage) GetLocalPath(ctx context.Context, key string) (string, error) {
 	return s.fs.GetLocalPath(ctx, key)
+}
+
+func relativeToBase(basePath, path string) (string, error) {
+	baseAbs, err := filepath.Abs(basePath)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "nfs: failed to resolve base path")
+	}
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "nfs: failed to resolve path")
+	}
+	rel, err := filepath.Rel(baseAbs, pathAbs)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "nfs: failed to compare path")
+	}
+	return rel, nil
 }
 
 // detectMountType returns the filesystem type backing path. Linux-only: on

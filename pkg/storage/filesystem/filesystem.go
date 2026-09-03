@@ -91,17 +91,30 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return err
 	}
-	dir := filepath.Dir(path)
+	relPath, err := fs.relativeToBase(path)
+	if err != nil {
+		metrics.RecordStorageOperation("filesystem", "put", "error")
+		return err
+	}
+	dir := filepath.Dir(relPath)
+	root, err := os.OpenRoot(fs.basePath)
+	if err != nil {
+		metrics.RecordStorageOperation("filesystem", "put", "error")
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to open storage root")
+	}
+	defer root.Close() // #nosec G307 -- Best-effort cleanup of opened storage root
 
 	// Create directory
-	if mkErr := os.MkdirAll(dir, 0750); mkErr != nil {
-		metrics.RecordStorageOperation("filesystem", "put", "error")
-		return errors.Wrap(mkErr, errors.ErrCodeStorageFailure, "failed to create directory")
+	if dir != "." {
+		if mkErr := root.MkdirAll(dir, 0750); mkErr != nil {
+			metrics.RecordStorageOperation("filesystem", "put", "error")
+			return errors.Wrap(mkErr, errors.ErrCodeStorageFailure, "failed to create directory")
+		}
 	}
 
 	// Create temp file for atomic write
-	tempPath := path + ".tmp"
-	tempFile, err := os.Create(tempPath) // #nosec G304 -- Temp path is constructed from sanitized storage key
+	tempPath := relPath + ".tmp"
+	tempFile, err := root.Create(tempPath)
 	if err != nil {
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create temp file")
@@ -115,14 +128,14 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 
 	written, err := io.Copy(multiWriter, data)
 	if err != nil {
-		_ = tempFile.Close()    // #nosec G104 -- Cleanup, error not critical
-		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+		_ = tempFile.Close() // #nosec G104 -- Cleanup, error not critical
+		_ = root.Remove(tempPath)
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to write data")
 	}
 
 	if err := tempFile.Close(); err != nil {
-		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+		_ = root.Remove(tempPath)
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to close temp file")
 	}
@@ -133,13 +146,13 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		sha256Sum := hex.EncodeToString(sha256Hash.Sum(nil))
 
 		if opts.ChecksumMD5 != "" && opts.ChecksumMD5 != md5Sum {
-			_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+			_ = root.Remove(tempPath)
 			metrics.RecordStorageOperation("filesystem", "put", "checksum_error")
 			return errors.New(errors.ErrCodeChecksumMismatch, "MD5 checksum mismatch")
 		}
 
 		if opts.ChecksumSHA256 != "" && opts.ChecksumSHA256 != sha256Sum {
-			_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+			_ = root.Remove(tempPath)
 			metrics.RecordStorageOperation("filesystem", "put", "checksum_error")
 			return errors.New(errors.ErrCodeChecksumMismatch, "SHA256 checksum mismatch")
 		}
@@ -151,13 +164,13 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 	fs.mu.Lock()
 	if fs.quota > 0 && fs.used+written > fs.quota {
 		fs.mu.Unlock()
-		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+		_ = root.Remove(tempPath)
 		metrics.RecordStorageOperation("filesystem", "put", "quota_exceeded")
 		return errors.QuotaExceeded(fs.quota)
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := root.Rename(tempPath, relPath); err != nil {
 		fs.mu.Unlock()
-		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+		_ = root.Remove(tempPath)
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to rename temp file")
 	}
@@ -408,22 +421,42 @@ func (fs *FilesystemStorage) keyToPath(key string) (string, error) {
 	}
 
 	target := filepath.Join(fs.basePath, cleaned)
-
-	// Defense-in-depth: verify the resolved absolute path is contained
-	// within the base directory.
 	targetAbs, err := filepath.Abs(target)
 	if err != nil {
 		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to resolve path")
 	}
+	if err := fs.ensureWithinBase(targetAbs); err != nil {
+		return "", errors.New(errors.ErrCodeStorageFailure, fmt.Sprintf("path traversal rejected: %s", key))
+	}
+
+	return targetAbs, nil
+}
+
+func (fs *FilesystemStorage) ensureWithinBase(path string) error {
+	rel, err := fs.relativeToBase(path)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return errors.New(errors.ErrCodeStorageFailure, fmt.Sprintf("path traversal rejected: %s", path))
+	}
+	return nil
+}
+
+func (fs *FilesystemStorage) relativeToBase(path string) (string, error) {
 	baseAbs, err := filepath.Abs(fs.basePath)
 	if err != nil {
 		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to resolve base path")
 	}
-	if targetAbs != baseAbs && !strings.HasPrefix(targetAbs, baseAbs+string(os.PathSeparator)) {
-		return "", errors.New(errors.ErrCodeStorageFailure, fmt.Sprintf("path traversal rejected: %s", key))
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to resolve path")
 	}
-
-	return target, nil
+	rel, err := filepath.Rel(baseAbs, pathAbs)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to compare path")
+	}
+	return rel, nil
 }
 
 // calculateUsage calculates current storage usage

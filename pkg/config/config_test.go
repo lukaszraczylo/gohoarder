@@ -287,13 +287,13 @@ auth:
 		s.Run(tt.name, func() {
 			// Write config file
 			configPath := filepath.Join(s.tempDir, "config.yaml")
-			err := os.WriteFile(configPath, []byte(tt.configYAML), 0644)
+			err := os.WriteFile(configPath, []byte(tt.configYAML), 0600)
 			s.Require().NoError(err)
 
 			// Set environment variables
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
-				defer os.Unsetenv(k)
+				_ = os.Setenv(k, v)  // #nosec G104 -- test setup, error not actionable
+				defer os.Unsetenv(k) //nolint:errcheck // test cleanup
 			}
 
 			// Load config

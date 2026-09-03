@@ -1,3 +1,5 @@
+// Package health exposes liveness and readiness checks consumed by HTTP
+// probes and orchestrators.
 package health
 
 import (
@@ -132,9 +134,10 @@ func (c *Checker) HealthHandler() http.HandlerFunc {
 		}
 
 		statusCode := http.StatusOK
-		if healthData.Status == StatusUnhealthy {
+		switch healthData.Status {
+		case StatusUnhealthy:
 			statusCode = http.StatusServiceUnavailable
-		} else if healthData.Status == StatusDegraded {
+		case StatusDegraded:
 			statusCode = http.StatusOK // 200 but degraded
 		}
 

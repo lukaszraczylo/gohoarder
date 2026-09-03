@@ -1,3 +1,5 @@
+// Package cdn provides CDN-friendly HTTP middleware (ETag, Cache-Control)
+// for proxying cached package responses.
 package cdn
 
 import (

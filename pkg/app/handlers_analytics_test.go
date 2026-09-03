@@ -286,9 +286,9 @@ func (s *AnalyticsHandlersTestSuite) TestHandleAnalyticsSearch() {
 
 			if !tt.expectError {
 				var result struct {
+					Query   string                   `json:"query"`
 					Results []analytics.PackageStats `json:"results"`
 					Total   int                      `json:"total"`
-					Query   string                   `json:"query"`
 				}
 				err = json.NewDecoder(resp.Body).Decode(&result)
 				s.NoError(err)

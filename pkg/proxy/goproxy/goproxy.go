@@ -1,3 +1,5 @@
+// Package goproxy implements the HTTP handler that proxies Go module
+// requests through the GoHoarder cache.
 package goproxy
 
 import (
@@ -125,7 +127,7 @@ func (h *Handler) handleList(ctx context.Context, w http.ResponseWriter, r *http
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -136,7 +138,7 @@ func (h *Handler) handleList(ctx context.Context, w http.ResponseWriter, r *http
 		http.Error(w, "Failed to fetch version list", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = entry.Data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
 	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
@@ -165,7 +167,7 @@ func (h *Handler) handleInfo(ctx context.Context, w http.ResponseWriter, r *http
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -176,7 +178,7 @@ func (h *Handler) handleInfo(ctx context.Context, w http.ResponseWriter, r *http
 		http.Error(w, "Failed to fetch version info", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = entry.Data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
@@ -205,7 +207,7 @@ func (h *Handler) handleMod(ctx context.Context, w http.ResponseWriter, r *http.
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -216,7 +218,7 @@ func (h *Handler) handleMod(ctx context.Context, w http.ResponseWriter, r *http.
 		http.Error(w, "Failed to fetch go.mod", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = entry.Data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
 	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
@@ -259,7 +261,7 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 		// If upstream failed with 404 or 403, try git fallback (private modules)
 		if statusCode == http.StatusNotFound || statusCode == http.StatusForbidden {
 			if body != nil {
-				body.Close() // #nosec G104 -- Cleanup, error not critical
+				_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 			}
 
 			log.Debug().
@@ -273,7 +275,7 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 
 		// Other errors
 		if body != nil {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 		}
 		if err != nil {
 			return nil, "", err
@@ -294,7 +296,7 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 		http.Error(w, "Failed to fetch module zip", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = entry.Data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	// CRITICAL SECURITY CHECK: If module requires auth, validate credentials
 	if entry.Package != nil && entry.Package.RequiresAuth {
@@ -372,7 +374,7 @@ func (h *Handler) handleLatest(ctx context.Context, w http.ResponseWriter, r *ht
 			return nil, "", err
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -383,7 +385,7 @@ func (h *Handler) handleLatest(ctx context.Context, w http.ResponseWriter, r *ht
 		http.Error(w, "Failed to fetch latest version", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = entry.Data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
@@ -405,7 +407,7 @@ func (h *Handler) handleSumDB(ctx context.Context, w http.ResponseWriter, r *htt
 		http.Error(w, "Failed to fetch from sumdb", http.StatusBadGateway)
 		return
 	}
-	defer body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = body.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	if statusCode != http.StatusOK {
 		log.Error().Int("status", statusCode).Str("url", url).Msg("Sumdb returned non-OK status")
@@ -462,8 +464,8 @@ func (h *Handler) fetchModuleFromGit(ctx context.Context, modulePath, version, c
 	defer h.gitFetcher.Cleanup(srcPath)
 
 	// 2. Validate module
-	if err := h.moduleBuilder.ValidateModule(ctx, srcPath, modulePath); err != nil {
-		return nil, "", fmt.Errorf("module validation failed: %w", err)
+	if validateErr := h.moduleBuilder.ValidateModule(ctx, srcPath, modulePath); validateErr != nil {
+		return nil, "", fmt.Errorf("module validation failed: %w", validateErr)
 	}
 
 	// 3. Build module zip

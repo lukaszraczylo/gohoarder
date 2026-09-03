@@ -17,9 +17,9 @@ func TestS3StorageTestSuite(t *testing.T) {
 func (s *S3StorageTestSuite) TestNewS3Storage() {
 	tests := []struct {
 		name        string
+		errorMsg    string
 		config      Config
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "valid config with credentials",
@@ -175,8 +175,8 @@ func (s *S3StorageTestSuite) TestStripPrefix() {
 
 func (s *S3StorageTestSuite) TestIsNotFoundError() {
 	tests := []struct {
-		name     string
 		err      error
+		name     string
 		expected bool
 	}{
 		{

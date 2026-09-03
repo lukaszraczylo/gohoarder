@@ -1,3 +1,5 @@
+// Package network provides resilient HTTP client primitives with retry,
+// timeout, and circuit-breaker support for upstream registry calls.
 package network
 
 import (
@@ -235,7 +237,7 @@ func (c *Client) do(ctx context.Context, req *http.Request) (*http.Response, err
 
 		// Check if response is retryable
 		if c.isRetryable(resp.StatusCode) {
-			resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 			lastErr = fmt.Errorf("received retryable status code: %d", resp.StatusCode)
 			if c.circuitBreaker != nil {
 				c.circuitBreaker.RecordFailure()

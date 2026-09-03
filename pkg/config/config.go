@@ -1,3 +1,5 @@
+// Package config defines the typed configuration schema and loader for
+// GoHoarder, sourced from YAML files and environment variables.
 package config
 
 import (
@@ -7,25 +9,32 @@ import (
 
 // Config is the main configuration struct
 type Config struct {
-	Storage  StorageConfig  `mapstructure:"storage" json:"storage"`
-	Cache    CacheConfig    `mapstructure:"cache" json:"cache"`
-	Security SecurityConfig `mapstructure:"security" json:"security"`
-	Metadata MetadataConfig `mapstructure:"metadata" json:"metadata"`
-	Handlers HandlersConfig `mapstructure:"handlers" json:"handlers"`
-	Server   ServerConfig   `mapstructure:"server" json:"server"`
-	Logging  LoggingConfig  `mapstructure:"logging" json:"logging"`
-	Network  NetworkConfig  `mapstructure:"network" json:"network"`
-	Auth     AuthConfig     `mapstructure:"auth" json:"auth"`
+	Metadata   MetadataConfig   `mapstructure:"metadata" json:"metadata"`
+	Logging    LoggingConfig    `mapstructure:"logging" json:"logging"`
+	Storage    StorageConfig    `mapstructure:"storage" json:"storage"`
+	Handlers   HandlersConfig   `mapstructure:"handlers" json:"handlers"`
+	Cache      CacheConfig      `mapstructure:"cache" json:"cache"`
+	Server     ServerConfig     `mapstructure:"server" json:"server"`
+	Security   SecurityConfig   `mapstructure:"security" json:"security"`
+	Network    NetworkConfig    `mapstructure:"network" json:"network"`
+	Prewarming PrewarmingConfig `mapstructure:"prewarming" json:"prewarming"`
+	Auth       AuthConfig       `mapstructure:"auth" json:"auth"`
+	Metrics    MetricsConfig    `mapstructure:"metrics" json:"metrics"`
 }
 
 // ServerConfig contains HTTP server configuration
 type ServerConfig struct {
-	TLS          TLSConfig     `mapstructure:"tls" json:"tls"`
-	Host         string        `mapstructure:"host" json:"host"`
-	Port         int           `mapstructure:"port" json:"port"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout" json:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout" json:"write_timeout"`
-	IdleTimeout  time.Duration `mapstructure:"idle_timeout" json:"idle_timeout"`
+	Host string    `mapstructure:"host" json:"host"`
+	TLS  TLSConfig `mapstructure:"tls" json:"tls"`
+	// AllowedOrigins is the WebSocket Origin allowlist. Each entry is either
+	// an exact origin (e.g. "https://app.example.com") or a wildcard host
+	// pattern (e.g. "https://*.example.com"). When empty, only same-origin
+	// WebSocket upgrades are allowed.
+	AllowedOrigins []string      `mapstructure:"allowed_origins" json:"allowed_origins"`
+	Port           int           `mapstructure:"port" json:"port"`
+	ReadTimeout    time.Duration `mapstructure:"read_timeout" json:"read_timeout"`
+	WriteTimeout   time.Duration `mapstructure:"write_timeout" json:"write_timeout"`
+	IdleTimeout    time.Duration `mapstructure:"idle_timeout" json:"idle_timeout"`
 }
 
 // TLSConfig contains TLS/HTTPS configuration
@@ -39,10 +48,19 @@ type TLSConfig struct {
 type StorageConfig struct {
 	Options    map[string]interface{} `mapstructure:"options" json:"options"`
 	SMB        SMBConfig              `mapstructure:"smb" json:"smb"`
+	NFS        NFSConfig              `mapstructure:"nfs" json:"nfs"`
 	Backend    string                 `mapstructure:"backend" json:"backend"`
 	Path       string                 `mapstructure:"path" json:"path"`
 	Filesystem FilesystemConfig       `mapstructure:"filesystem" json:"filesystem"`
 	S3         S3Config               `mapstructure:"s3" json:"s3"`
+}
+
+// NFSConfig contains NFS-specific storage configuration. The path is taken
+// from StorageConfig.Path (mount point). This struct only carries flags
+// specific to NFS semantics. SyncWrites pointer-bool so absent config
+// defaults to true (durable by default).
+type NFSConfig struct {
+	SyncWrites *bool `mapstructure:"sync_writes" json:"sync_writes"`
 }
 
 // FilesystemConfig contains local filesystem storage configuration
@@ -75,15 +93,17 @@ type SMBConfig struct {
 type MetadataConfig struct {
 	Backend    string           `mapstructure:"backend" json:"backend"`
 	Connection string           `mapstructure:"connection" json:"connection"`
-	SQLite     SQLiteConfig     `mapstructure:"sqlite" json:"sqlite"`
+	LogLevel   string           `mapstructure:"log_level" json:"log_level"` // "silent", "error", "warn", "info"
 	PostgreSQL PostgreSQLConfig `mapstructure:"postgresql" json:"postgresql"`
-	MySQL      MySQLConfig      `mapstructure:"mysql" json:"mysql"`
+
+	SQLite SQLiteConfig `mapstructure:"sqlite" json:"sqlite"`
+
+	MySQL MySQLConfig `mapstructure:"mysql" json:"mysql"`
 
 	// GORM-specific settings
-	MaxOpenConns    int    `mapstructure:"max_open_conns" json:"max_open_conns"`
-	MaxIdleConns    int    `mapstructure:"max_idle_conns" json:"max_idle_conns"`
-	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"` // seconds
-	LogLevel        string `mapstructure:"log_level" json:"log_level"`                 // "silent", "error", "warn", "info"
+	MaxOpenConns    int `mapstructure:"max_open_conns" json:"max_open_conns"`
+	MaxIdleConns    int `mapstructure:"max_idle_conns" json:"max_idle_conns"`
+	ConnMaxLifetime int `mapstructure:"conn_max_lifetime" json:"conn_max_lifetime"` // seconds
 }
 
 // SQLiteConfig contains SQLite-specific configuration
@@ -95,21 +115,21 @@ type SQLiteConfig struct {
 // PostgreSQLConfig contains PostgreSQL-specific configuration
 type PostgreSQLConfig struct {
 	Host     string `mapstructure:"host" json:"host"`
-	Port     int    `mapstructure:"port" json:"port"`
 	Database string `mapstructure:"database" json:"database"`
 	User     string `mapstructure:"user" json:"user"`
 	Password string `mapstructure:"password" json:"-"`
 	SSLMode  string `mapstructure:"ssl_mode" json:"ssl_mode"`
+	Port     int    `mapstructure:"port" json:"port"`
 }
 
 // MySQLConfig contains MySQL/MariaDB-specific configuration
 type MySQLConfig struct {
 	Host      string `mapstructure:"host" json:"host"`
-	Port      int    `mapstructure:"port" json:"port"`
 	Database  string `mapstructure:"database" json:"database"`
 	User      string `mapstructure:"user" json:"user"`
 	Password  string `mapstructure:"password" json:"-"` // Don't serialize
 	Charset   string `mapstructure:"charset" json:"charset"`
+	Port      int    `mapstructure:"port" json:"port"`
 	ParseTime bool   `mapstructure:"parse_time" json:"parse_time"`
 }
 
@@ -124,10 +144,10 @@ type CacheConfig struct {
 
 // SecurityConfig contains security scanning configuration
 type SecurityConfig struct {
-	Scanners          ScannersConfig          `mapstructure:"scanners" json:"scanners"`
 	BlockOnSeverity   string                  `mapstructure:"block_on_severity" json:"block_on_severity"`
 	AllowedPackages   []string                `mapstructure:"allowed_packages" json:"allowed_packages"`
 	IgnoredCVEs       []string                `mapstructure:"ignored_cves" json:"ignored_cves"`
+	Scanners          ScannersConfig          `mapstructure:"scanners" json:"scanners"`
 	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`
 	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`
 	Enabled           bool                    `mapstructure:"enabled" json:"enabled"`
@@ -147,8 +167,8 @@ type VulnerabilityThresholds struct {
 type ScannersConfig struct {
 	Trivy       TrivyConfig       `mapstructure:"trivy" json:"trivy"`
 	GHSA        GHSAConfig        `mapstructure:"ghsa" json:"ghsa"`
-	Static      StaticConfig      `mapstructure:"static" json:"static"`
 	OSV         OSVConfig         `mapstructure:"osv" json:"osv"`
+	Static      StaticConfig      `mapstructure:"static" json:"static"`
 	Grype       GrypeConfig       `mapstructure:"grype" json:"grype"`
 	Govulncheck GovulncheckConfig `mapstructure:"govulncheck" json:"govulncheck"`
 	NpmAudit    NpmAuditConfig    `mapstructure:"npm_audit" json:"npm_audit"`
@@ -254,6 +274,21 @@ type RetryConfig struct {
 type LoggingConfig struct {
 	Level  string `mapstructure:"level" json:"level"`   // debug, info, warn, error
 	Format string `mapstructure:"format" json:"format"` // json, pretty
+}
+
+// PrewarmingConfig controls the popular-package pre-warming worker.
+type PrewarmingConfig struct {
+	Interval      time.Duration `mapstructure:"interval" json:"interval"`
+	MaxConcurrent int           `mapstructure:"max_concurrent" json:"max_concurrent"`
+	TopPackages   int           `mapstructure:"top_packages" json:"top_packages"`
+	Enabled       bool          `mapstructure:"enabled" json:"enabled"`
+}
+
+// MetricsConfig controls /metrics endpoint behaviour.
+type MetricsConfig struct {
+	// RequireAuth, when true and Auth.Enabled is also true, gates /metrics
+	// behind RequireAuth middleware. Default false (Prometheus-friendly).
+	RequireAuth bool `mapstructure:"require_auth" json:"require_auth"`
 }
 
 // HandlersConfig contains package manager handler configurations
@@ -398,6 +433,15 @@ func Default() *Config {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		Prewarming: PrewarmingConfig{
+			Enabled:       false,
+			Interval:      1 * time.Hour,
+			MaxConcurrent: 5,
+			TopPackages:   100,
+		},
+		Metrics: MetricsConfig{
+			RequireAuth: false,
 		},
 		Handlers: HandlersConfig{
 			Go: GoHandlerConfig{

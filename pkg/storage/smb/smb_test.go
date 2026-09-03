@@ -141,7 +141,8 @@ func (s *SMBStorageTestSuite) TestKeyToPath() {
 				},
 			}
 
-			result := storage.keyToPath(tt.key)
+			result, err := storage.keyToPath(tt.key)
+			s.NoError(err)
 			s.Equal(tt.expectedWin, result)
 		})
 	}

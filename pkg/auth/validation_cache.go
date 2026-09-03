@@ -14,16 +14,20 @@ type ValidationResult struct {
 
 // ValidationCache caches credential validation results to reduce upstream checks
 type ValidationCache struct {
-	cache map[string]*ValidationResult
-	mu    sync.RWMutex
-	ttl   time.Duration
+	cache    map[string]*ValidationResult
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	mu       sync.RWMutex
+	ttl      time.Duration
 }
 
-// NewValidationCache creates a new validation cache
+// NewValidationCache creates a new validation cache. Callers must call Stop()
+// during shutdown to terminate the background cleanup goroutine.
 func NewValidationCache(ttl time.Duration) *ValidationCache {
 	vc := &ValidationCache{
-		cache: make(map[string]*ValidationResult),
-		ttl:   ttl,
+		cache:  make(map[string]*ValidationResult),
+		stopCh: make(chan struct{}),
+		ttl:    ttl,
 	}
 
 	// Start cleanup goroutine
@@ -32,25 +36,42 @@ func NewValidationCache(ttl time.Duration) *ValidationCache {
 	return vc
 }
 
+// Stop terminates the background cleanup goroutine. Safe to call multiple
+// times; subsequent calls are no-ops.
+func (vc *ValidationCache) Stop() {
+	vc.stopOnce.Do(func() {
+		close(vc.stopCh)
+	})
+}
+
 // Get retrieves a validation result from cache
 // Returns (allowed bool, cached bool, reason string)
 func (vc *ValidationCache) Get(credHash, packageURL string) (bool, bool, string) {
-	vc.mu.RLock()
-	defer vc.mu.RUnlock()
-
 	key := credHash + ":" + packageURL
+
+	// Fast path: read-locked lookup.
+	vc.mu.RLock()
 	result, exists := vc.cache[key]
-
 	if !exists {
+		vc.mu.RUnlock()
 		return false, false, ""
 	}
-
-	// Check if expired
-	if time.Now().After(result.ExpiresAt) {
-		return false, false, ""
+	expired := time.Now().After(result.ExpiresAt)
+	if !expired {
+		allowed, reason := result.Allowed, result.Reason
+		vc.mu.RUnlock()
+		return allowed, true, reason
 	}
+	vc.mu.RUnlock()
 
-	return result.Allowed, true, result.Reason
+	// Expired: drop it under the write lock so callers don't all stampede
+	// the upstream while waiting for the periodic cleanup goroutine.
+	vc.mu.Lock()
+	if cur, ok := vc.cache[key]; ok && time.Now().After(cur.ExpiresAt) {
+		delete(vc.cache, key)
+	}
+	vc.mu.Unlock()
+	return false, false, ""
 }
 
 // Set stores a validation result in cache
@@ -91,19 +112,25 @@ func (vc *ValidationCache) Size() int {
 	return len(vc.cache)
 }
 
-// cleanupExpired removes expired entries periodically
+// cleanupExpired removes expired entries periodically. Exits when Stop is
+// called.
 func (vc *ValidationCache) cleanupExpired() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		vc.mu.Lock()
-		now := time.Now()
-		for key, result := range vc.cache {
-			if now.After(result.ExpiresAt) {
-				delete(vc.cache, key)
+	for {
+		select {
+		case <-vc.stopCh:
+			return
+		case <-ticker.C:
+			vc.mu.Lock()
+			now := time.Now()
+			for key, result := range vc.cache {
+				if now.After(result.ExpiresAt) {
+					delete(vc.cache, key)
+				}
 			}
+			vc.mu.Unlock()
 		}
-		vc.mu.Unlock()
 	}
 }

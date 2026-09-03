@@ -1,3 +1,5 @@
+// Package file implements a JSON-on-disk metadata store used for local
+// development and tests.
 package file
 
 import (
@@ -543,4 +545,30 @@ func (s *Store) AggregateDownloadData(ctx context.Context) error {
 func (s *Store) Close() error {
 	// Nothing to close for file-based store
 	return nil
+}
+
+// SaveAPIKey is a stub: file-backed metadata does not persist API keys.
+// The auth.Manager treats ErrNotImplemented as "in-memory only" mode.
+func (s *Store) SaveAPIKey(ctx context.Context, key *metadata.APIKey) error {
+	return metadata.ErrNotImplemented
+}
+
+// GetAPIKey is a stub. See SaveAPIKey.
+func (s *Store) GetAPIKey(ctx context.Context, id string) (*metadata.APIKey, error) {
+	return nil, metadata.ErrNotImplemented
+}
+
+// ListAPIKeys is a stub. See SaveAPIKey.
+func (s *Store) ListAPIKeys(ctx context.Context) ([]*metadata.APIKey, error) {
+	return nil, metadata.ErrNotImplemented
+}
+
+// DeleteAPIKey is a stub. See SaveAPIKey.
+func (s *Store) DeleteAPIKey(ctx context.Context, id string) error {
+	return metadata.ErrNotImplemented
+}
+
+// UpdateAPIKeyLastUsed is a stub. See SaveAPIKey.
+func (s *Store) UpdateAPIKeyLastUsed(ctx context.Context, id string, t time.Time) error {
+	return metadata.ErrNotImplemented
 }

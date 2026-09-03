@@ -1,3 +1,5 @@
+// Package npm implements the HTTP handler that proxies npm registry
+// requests through the GoHoarder cache.
 package npm
 
 import (
@@ -79,12 +81,12 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 	packageName := extractPackageName(path)
 
 	entry, err := h.cache.Get(ctx, "npm", packageName, "metadata", func(ctx context.Context) (io.ReadCloser, string, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
-		if err != nil {
-			return nil, "", err
+		body, statusCode, fetchErr := h.client.Get(ctx, url, nil)
+		if fetchErr != nil {
+			return nil, "", fetchErr
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close()
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -95,20 +97,24 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 		http.Error(w, "Failed to fetch package metadata", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() {
+		if cerr := entry.Data.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close NPM metadata body")
+		}
+	}()
 
 	// Read metadata into memory for URL rewriting
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, entry.Data); err != nil {
-		log.Error().Err(err).Msg("Failed to read metadata")
+	if _, copyErr := io.Copy(&buf, entry.Data); copyErr != nil {
+		log.Error().Err(copyErr).Msg("Failed to read metadata")
 		http.Error(w, "Failed to read metadata", http.StatusInternalServerError)
 		return
 	}
 
 	// Parse JSON metadata
 	var metadata map[string]interface{}
-	if err := json.Unmarshal(buf.Bytes(), &metadata); err != nil {
-		log.Error().Err(err).Msg("Failed to parse metadata JSON")
+	if jsonErr := json.Unmarshal(buf.Bytes(), &metadata); jsonErr != nil {
+		log.Error().Err(jsonErr).Msg("Failed to parse metadata JSON")
 		http.Error(w, "Failed to parse metadata", http.StatusInternalServerError)
 		return
 	}
@@ -138,8 +144,10 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 	credHash := h.credHasher.Hash(credentials)
 
 	// Construct proper upstream URL with /-/ format
-	// Format: https://registry.npmjs.org/package/-/package-version.tgz
-	tarballFilename := strings.ReplaceAll(packageName, "/", "-") + "-" + version + ".tgz"
+	// Format: https://registry.npmjs.org/<package>/-/<filename>
+	// For unscoped: filename is "<package>-<version>.tgz"
+	// For scoped @scope/pkg: filename is "<pkg>-<version>.tgz" (no scope, no leading @)
+	tarballFilename := tarballPrefix(packageName) + version + ".tgz"
 	url := fmt.Sprintf("%s/%s/-/%s", h.upstream, packageName, tarballFilename)
 
 	log.Debug().
@@ -159,12 +167,12 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 			headers["Authorization"] = credentials
 		}
 
-		body, statusCode, err := h.client.Get(ctx, url, headers)
-		if err != nil {
-			return nil, "", err
+		body, statusCode, fetchErr := h.client.Get(ctx, url, headers)
+		if fetchErr != nil {
+			return nil, "", fetchErr
 		}
 		if statusCode != http.StatusOK {
-			body.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = body.Close()
 			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
 		}
 		return body, url, nil
@@ -183,7 +191,11 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 		http.Error(w, "Failed to fetch package tarball", http.StatusBadGateway)
 		return
 	}
-	defer entry.Data.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() {
+		if cerr := entry.Data.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close NPM tarball body")
+		}
+	}()
 
 	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
 	if entry.Package != nil && entry.Package.RequiresAuth {
@@ -251,7 +263,11 @@ func (h *Handler) handleSpecial(ctx context.Context, w http.ResponseWriter, r *h
 		http.Error(w, "Failed to fetch from upstream", http.StatusBadGateway)
 		return
 	}
-	defer body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() {
+		if cerr := body.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close NPM special endpoint body")
+		}
+	}()
 
 	w.WriteHeader(statusCode)
 	_, _ = io.Copy(w, body) // #nosec G104 -- HTTP response write
@@ -290,6 +306,19 @@ func extractPackageName(path string) string {
 	return path
 }
 
+// tarballPrefix returns the filename prefix used by npm tarballs for a given
+// package. For scoped packages (@scope/pkg) only the bare name is used as a
+// prefix — the @scope segment is not part of the filename.
+func tarballPrefix(packageName string) string {
+	bare := packageName
+	if strings.HasPrefix(bare, "@") {
+		if idx := strings.Index(bare, "/"); idx >= 0 {
+			bare = bare[idx+1:]
+		}
+	}
+	return bare + "-"
+}
+
 // extractTarballInfo extracts package name and version from tarball path
 func extractTarballInfo(path string) (string, string) {
 	// Format: /@scope/package/-/package-version.tgz
@@ -304,9 +333,9 @@ func extractTarballInfo(path string) (string, string) {
 		tarballName = strings.TrimSuffix(tarballName, ".tgz")
 		tarballName = strings.TrimSuffix(tarballName, ".tar.gz")
 
-		// Remove package name prefix to get version
-		prefix := strings.ReplaceAll(packageName, "/", "-") + "-"
-		version := strings.TrimPrefix(tarballName, prefix)
+		// Remove package name prefix to get version. For scoped packages the
+		// tarball filename uses only the bare package name (no @scope/ prefix).
+		version := strings.TrimPrefix(tarballName, tarballPrefix(packageName))
 
 		return packageName, version
 	}
@@ -334,9 +363,8 @@ func extractTarballInfo(path string) (string, string) {
 	tarballName = strings.TrimSuffix(tarballName, ".tgz")
 	tarballName = strings.TrimSuffix(tarballName, ".tar.gz")
 
-	// Remove package name prefix to get version
-	prefix := strings.ReplaceAll(packageName, "/", "-") + "-"
-	version := strings.TrimPrefix(tarballName, prefix)
+	// Remove package name prefix to get version (scope-aware).
+	version := strings.TrimPrefix(tarballName, tarballPrefix(packageName))
 
 	return packageName, version
 }

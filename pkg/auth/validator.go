@@ -50,11 +50,11 @@ func (v *NPMValidator) ValidateAccess(ctx context.Context, packageURL string, cr
 
 	resp, err := v.client.Do(req)
 	if err != nil {
-		// Network error - allow cache fallback with warning
-		log.Warn().Err(err).Str("url", packageURL).Msg("Validation request failed, allowing cache fallback")
-		return true, fmt.Errorf("validation failed: %w (allowing cache fallback)", err)
+		// Network error - fail closed. Caller decides any fallback policy.
+		log.Warn().Err(err).Str("url", packageURL).Msg("Validation request failed, denying access")
+		return false, fmt.Errorf("validation failed: %w", err)
 	}
-	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = resp.Body.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	// Check status code
 	switch resp.StatusCode {
@@ -65,9 +65,9 @@ func (v *NPMValidator) ValidateAccess(ctx context.Context, packageURL string, cr
 		// Access denied
 		return false, fmt.Errorf("access denied: HTTP %d", resp.StatusCode)
 	default:
-		// Unexpected status - allow cache fallback with warning
-		log.Warn().Int("status", resp.StatusCode).Str("url", packageURL).Msg("Unexpected validation status, allowing cache fallback")
-		return true, fmt.Errorf("unexpected status %d (allowing cache fallback)", resp.StatusCode)
+		// Unexpected status - fail closed.
+		log.Warn().Int("status", resp.StatusCode).Str("url", packageURL).Msg("Unexpected validation status, denying access")
+		return false, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 }
 
@@ -101,11 +101,11 @@ func (v *PyPIValidator) ValidateAccess(ctx context.Context, packageURL string, c
 
 	resp, err := v.client.Do(req)
 	if err != nil {
-		// Network error - allow cache fallback with warning
-		log.Warn().Err(err).Str("url", packageURL).Msg("Validation request failed, allowing cache fallback")
-		return true, fmt.Errorf("validation failed: %w (allowing cache fallback)", err)
+		// Network error - fail closed. Caller decides any fallback policy.
+		log.Warn().Err(err).Str("url", packageURL).Msg("Validation request failed, denying access")
+		return false, fmt.Errorf("validation failed: %w", err)
 	}
-	defer resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = resp.Body.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	// Check status code
 	switch resp.StatusCode {
@@ -116,9 +116,9 @@ func (v *PyPIValidator) ValidateAccess(ctx context.Context, packageURL string, c
 		// Access denied
 		return false, fmt.Errorf("access denied: HTTP %d", resp.StatusCode)
 	default:
-		// Unexpected status - allow cache fallback with warning
-		log.Warn().Int("status", resp.StatusCode).Str("url", packageURL).Msg("Unexpected validation status, allowing cache fallback")
-		return true, fmt.Errorf("unexpected status %d (allowing cache fallback)", resp.StatusCode)
+		// Unexpected status - fail closed.
+		log.Warn().Int("status", resp.StatusCode).Str("url", packageURL).Msg("Unexpected validation status, denying access")
+		return false, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 }
 
@@ -171,13 +171,13 @@ func (v *GoValidator) validateGitHub(ctx context.Context, modulePath, credential
 	if err != nil {
 		return false, err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create .netrc file with credentials
 	netrcPath := filepath.Join(tempDir, ".netrc")
 	netrcContent := fmt.Sprintf("machine github.com\nlogin oauth2\npassword %s\n", token)
-	if err := os.WriteFile(netrcPath, []byte(netrcContent), 0600); err != nil {
-		return false, err
+	if writeErr := os.WriteFile(netrcPath, []byte(netrcContent), 0600); writeErr != nil {
+		return false, writeErr
 	}
 
 	// Run git ls-remote (lightweight, just checks access)
@@ -199,9 +199,9 @@ func (v *GoValidator) validateGitHub(ctx context.Context, modulePath, credential
 			return false, fmt.Errorf("access denied: %s", strings.TrimSpace(errMsg))
 		}
 
-		// Other error (network, etc.) - allow cache fallback
-		log.Warn().Err(err).Str("module", modulePath).Msg("Git validation failed, allowing cache fallback")
-		return true, fmt.Errorf("validation error (allowing cache): %w", err)
+		// Other error (network, etc.) - fail closed.
+		log.Warn().Err(err).Str("module", modulePath).Msg("Git validation failed, denying access")
+		return false, fmt.Errorf("validation error: %w", err)
 	}
 
 	// Success - repository accessible
@@ -227,13 +227,13 @@ func (v *GoValidator) validateGitLab(ctx context.Context, modulePath, credential
 	if err != nil {
 		return false, err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Create .netrc file with credentials
 	netrcPath := filepath.Join(tempDir, ".netrc")
 	netrcContent := fmt.Sprintf("machine gitlab.com\nlogin oauth2\npassword %s\n", token)
-	if err := os.WriteFile(netrcPath, []byte(netrcContent), 0600); err != nil {
-		return false, err
+	if writeErr := os.WriteFile(netrcPath, []byte(netrcContent), 0600); writeErr != nil {
+		return false, writeErr
 	}
 
 	// Run git ls-remote
@@ -252,8 +252,8 @@ func (v *GoValidator) validateGitLab(ctx context.Context, modulePath, credential
 			return false, fmt.Errorf("access denied: %s", strings.TrimSpace(errMsg))
 		}
 
-		log.Warn().Err(err).Str("module", modulePath).Msg("Git validation failed, allowing cache fallback")
-		return true, fmt.Errorf("validation error (allowing cache): %w", err)
+		log.Warn().Err(err).Str("module", modulePath).Msg("Git validation failed, denying access")
+		return false, fmt.Errorf("validation error: %w", err)
 	}
 
 	return true, nil
@@ -276,8 +276,8 @@ func (v *GoValidator) validateGit(ctx context.Context, modulePath, credentials s
 			return false, fmt.Errorf("access denied: %s", strings.TrimSpace(errMsg))
 		}
 
-		log.Warn().Err(err).Str("module", modulePath).Msg("Git validation failed, allowing cache fallback")
-		return true, fmt.Errorf("validation error (allowing cache): %w", err)
+		log.Warn().Err(err).Str("module", modulePath).Msg("Git validation failed, denying access")
+		return false, fmt.Errorf("validation error: %w", err)
 	}
 
 	return true, nil

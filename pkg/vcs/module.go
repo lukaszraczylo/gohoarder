@@ -57,7 +57,7 @@ func (b *ModuleBuilder) BuildModuleZip(ctx context.Context, srcPath, modulePath,
 	prefix := fmt.Sprintf("%s@%s/", modulePath, version)
 	for _, relPath := range files {
 		if err := b.addFileToZip(zipWriter, srcPath, relPath, prefix); err != nil {
-			zipWriter.Close() // #nosec G104 -- Cleanup, error not critical
+			_ = zipWriter.Close() // #nosec G104 -- best-effort cleanup on error path
 			return nil, fmt.Errorf("failed to add file %s: %w", relPath, err)
 		}
 	}
@@ -152,7 +152,7 @@ func (b *ModuleBuilder) addFileToZip(zipWriter *zip.Writer, srcPath, relPath, pr
 	if err != nil {
 		return err
 	}
-	defer file.Close() // #nosec G104 -- Cleanup, error not critical
+	defer func() { _ = file.Close() }() // #nosec G104 -- read-only file, close error not actionable
 
 	if _, err := io.Copy(writer, file); err != nil {
 		return err

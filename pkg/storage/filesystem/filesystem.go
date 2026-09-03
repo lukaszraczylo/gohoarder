@@ -1,3 +1,5 @@
+// Package filesystem implements the local-disk Storage backend used for
+// development and single-node deployments.
 package filesystem
 
 import (
@@ -55,7 +57,11 @@ func (fs *FilesystemStorage) Get(ctx context.Context, key string) (io.ReadCloser
 	default:
 	}
 
-	path := fs.keyToPath(key)
+	path, err := fs.keyToPath(key)
+	if err != nil {
+		metrics.RecordStorageOperation("filesystem", "get", "error")
+		return nil, err
+	}
 
 	file, err := os.Open(path) // #nosec G304 -- Path is sanitized storage key
 	if err != nil {
@@ -80,13 +86,17 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 	default:
 	}
 
-	path := fs.keyToPath(key)
+	path, err := fs.keyToPath(key)
+	if err != nil {
+		metrics.RecordStorageOperation("filesystem", "put", "error")
+		return err
+	}
 	dir := filepath.Dir(path)
 
 	// Create directory
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if mkErr := os.MkdirAll(dir, 0750); mkErr != nil {
 		metrics.RecordStorageOperation("filesystem", "put", "error")
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create directory")
+		return errors.Wrap(mkErr, errors.ErrCodeStorageFailure, "failed to create directory")
 	}
 
 	// Create temp file for atomic write
@@ -105,7 +115,7 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 
 	written, err := io.Copy(multiWriter, data)
 	if err != nil {
-		tempFile.Close()        // #nosec G104 -- Cleanup, error not critical
+		_ = tempFile.Close()    // #nosec G104 -- Cleanup, error not critical
 		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to write data")
@@ -116,17 +126,6 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to close temp file")
 	}
-
-	// Check quota
-	fs.mu.Lock()
-	if fs.quota > 0 && fs.used+written > fs.quota {
-		fs.mu.Unlock()
-		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
-		metrics.RecordStorageOperation("filesystem", "put", "quota_exceeded")
-		return errors.QuotaExceeded(fs.quota)
-	}
-	fs.used += written
-	fs.mu.Unlock()
 
 	// Verify checksums if provided
 	if opts != nil {
@@ -146,21 +145,25 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		}
 	}
 
-	// Atomic rename
-	if err := os.Rename(tempPath, path); err != nil {
-		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
-		fs.mu.Lock()
-		fs.used -= written
-		currentUsed := fs.used
+	// Atomic rename and quota update under lock so that fs.used reflects
+	// only successfully renamed files. Quota check happens before increment
+	// to avoid transient inflation seen by concurrent Puts.
+	fs.mu.Lock()
+	if fs.quota > 0 && fs.used+written > fs.quota {
 		fs.mu.Unlock()
+		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
+		metrics.RecordStorageOperation("filesystem", "put", "quota_exceeded")
+		return errors.QuotaExceeded(fs.quota)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		fs.mu.Unlock()
+		_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 		metrics.RecordStorageOperation("filesystem", "put", "error")
-		metrics.UpdateCacheSize("filesystem", currentUsed)
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to rename temp file")
 	}
-
-	fs.mu.RLock()
+	fs.used += written
 	currentUsed := fs.used
-	fs.mu.RUnlock()
+	fs.mu.Unlock()
 
 	metrics.RecordStorageOperation("filesystem", "put", "success")
 	metrics.UpdateCacheSize("filesystem", currentUsed)
@@ -175,7 +178,11 @@ func (fs *FilesystemStorage) Delete(ctx context.Context, key string) error {
 	default:
 	}
 
-	path := fs.keyToPath(key)
+	path, err := fs.keyToPath(key)
+	if err != nil {
+		metrics.RecordStorageOperation("filesystem", "delete", "error")
+		return err
+	}
 
 	// Get size before deletion
 	info, err := os.Stat(path)
@@ -213,8 +220,11 @@ func (fs *FilesystemStorage) Exists(ctx context.Context, key string) (bool, erro
 	default:
 	}
 
-	path := fs.keyToPath(key)
-	_, err := os.Stat(path)
+	path, err := fs.keyToPath(key)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
@@ -232,10 +242,13 @@ func (fs *FilesystemStorage) List(ctx context.Context, prefix string, opts *stor
 	default:
 	}
 
-	searchPath := fs.keyToPath(prefix)
+	searchPath, err := fs.keyToPath(prefix)
+	if err != nil {
+		return nil, err
+	}
 	var objects []storage.StorageObject
 
-	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -284,7 +297,10 @@ func (fs *FilesystemStorage) Stat(ctx context.Context, key string) (*storage.Sto
 	default:
 	}
 
-	path := fs.keyToPath(key)
+	path, err := fs.keyToPath(key)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -331,7 +347,7 @@ func (fs *FilesystemStorage) Health(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "cannot write to storage")
 	}
-	f.Close()               // #nosec G104 -- Cleanup, error not critical
+	_ = f.Close()           // #nosec G104 -- Cleanup, error not critical
 	_ = os.Remove(tempPath) // #nosec G104 -- Cleanup, error not critical
 
 	return nil
@@ -352,7 +368,10 @@ func (fs *FilesystemStorage) GetLocalPath(ctx context.Context, key string) (stri
 	default:
 	}
 
-	path := fs.keyToPath(key)
+	path, err := fs.keyToPath(key)
+	if err != nil {
+		return "", err
+	}
 
 	// Verify file exists
 	if _, err := os.Stat(path); err != nil {
@@ -365,27 +384,46 @@ func (fs *FilesystemStorage) GetLocalPath(ctx context.Context, key string) (stri
 	return path, nil
 }
 
-// keyToPath converts a storage key to filesystem path
-func (fs *FilesystemStorage) keyToPath(key string) string {
+// keyToPath converts a storage key to filesystem path.
+// It sanitizes the key to prevent path traversal and verifies that the
+// resulting absolute path stays within the configured base directory as a
+// defense-in-depth check on top of filepath.Clean/Join semantics.
+func (fs *FilesystemStorage) keyToPath(key string) (string, error) {
 	// Sanitize key to prevent path traversal
-	key = filepath.Clean(key)
+	cleaned := filepath.Clean(key)
 
 	// Remove any leading slashes or dots
-	key = strings.TrimPrefix(key, "/")
+	cleaned = strings.TrimPrefix(cleaned, "/")
 
 	// Keep removing ../ until there are no more
-	for strings.HasPrefix(key, "../") || strings.HasPrefix(key, "..\\") {
-		key = strings.TrimPrefix(key, "../")
-		key = strings.TrimPrefix(key, "..\\")
+	for strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "..\\") {
+		cleaned = strings.TrimPrefix(cleaned, "../")
+		cleaned = strings.TrimPrefix(cleaned, "..\\")
 	}
 
 	// Final clean and ensure it's within base path
-	key = filepath.Clean(key)
-	if key == ".." || strings.HasPrefix(key, "../") || strings.HasPrefix(key, "..\\") {
-		key = ""
+	cleaned = filepath.Clean(cleaned)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "..\\") {
+		cleaned = ""
 	}
 
-	return filepath.Join(fs.basePath, key)
+	target := filepath.Join(fs.basePath, cleaned)
+
+	// Defense-in-depth: verify the resolved absolute path is contained
+	// within the base directory.
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to resolve path")
+	}
+	baseAbs, err := filepath.Abs(fs.basePath)
+	if err != nil {
+		return "", errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to resolve base path")
+	}
+	if targetAbs != baseAbs && !strings.HasPrefix(targetAbs, baseAbs+string(os.PathSeparator)) {
+		return "", errors.New(errors.ErrCodeStorageFailure, fmt.Sprintf("path traversal rejected: %s", key))
+	}
+
+	return target, nil
 }
 
 // calculateUsage calculates current storage usage

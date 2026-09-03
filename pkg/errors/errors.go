@@ -1,3 +1,5 @@
+// Package errors provides typed application errors with structured codes
+// and wrapping helpers used across the GoHoarder service.
 package errors
 
 import (

@@ -25,10 +25,10 @@ import (
 type MigrationConfig struct {
 	Driver   string
 	DSN      string
-	Timeout  time.Duration
 	Action   string // migrate, rollback, rollback-to, list
 	TargetID string // For rollback-to
 	LogLevel string
+	Timeout  time.Duration
 }
 
 func main() {
@@ -97,7 +97,7 @@ func RunMigration(cfg MigrationConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	// Wait for database to be ready
 	if err := waitForDB(ctx, sqlDB, 60*time.Second); err != nil {

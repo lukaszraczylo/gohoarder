@@ -1,0 +1,129 @@
+{{- if and .Values.ingress.enabled (eq .Values.ingress.className "traefik") -}}
+---
+# Traefik IngressRoute for package registry paths
+# This handles package downloads including scoped packages with encoded slashes
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-packages
+  labels:
+    {{- include "gohoarder.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    # Package registry routes with high priority
+    # PathPrefix matching to avoid Go's encoded slash rejection in regex
+    - match: Host(`{{ .Values.ingress.host | default (printf "%s.%s" "gohoarder" .Values.global.domain) }}`) && PathPrefix(`/npm/`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: {{ include "gohoarder.fullname" . }}-frontend
+          port: {{ .Values.frontend.service.port }}
+      middlewares:
+        - name: {{ include "gohoarder.fullname" . }}-strip-encoded-slash
+          namespace: {{ .Release.Namespace }}
+        {{- if .Values.ingress.traefik }}
+        {{- if .Values.ingress.traefik.middlewares }}
+        {{- range .Values.ingress.traefik.middlewares }}
+        - name: {{ . }}
+          namespace: traefik
+        {{- end }}
+        {{- end }}
+        {{- end }}
+
+    - match: Host(`{{ .Values.ingress.host | default (printf "%s.%s" "gohoarder" .Values.global.domain) }}`) && PathPrefix(`/pypi/`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: {{ include "gohoarder.fullname" . }}-frontend
+          port: {{ .Values.frontend.service.port }}
+      middlewares:
+        - name: {{ include "gohoarder.fullname" . }}-strip-encoded-slash
+          namespace: {{ .Release.Namespace }}
+        {{- if .Values.ingress.traefik }}
+        {{- if .Values.ingress.traefik.middlewares }}
+        {{- range .Values.ingress.traefik.middlewares }}
+        - name: {{ . }}
+          namespace: traefik
+        {{- end }}
+        {{- end }}
+        {{- end }}
+
+    - match: Host(`{{ .Values.ingress.host | default (printf "%s.%s" "gohoarder" .Values.global.domain) }}`) && PathPrefix(`/go/`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: {{ include "gohoarder.fullname" . }}-frontend
+          port: {{ .Values.frontend.service.port }}
+      middlewares:
+        - name: {{ include "gohoarder.fullname" . }}-strip-encoded-slash
+          namespace: {{ .Release.Namespace }}
+        {{- if .Values.ingress.traefik }}
+        {{- if .Values.ingress.traefik.middlewares }}
+        {{- range .Values.ingress.traefik.middlewares }}
+        - name: {{ . }}
+          namespace: traefik
+        {{- end }}
+        {{- end }}
+        {{- end }}
+
+    # All other routes (frontend, API, etc.) with lower priority
+    - match: Host(`{{ .Values.ingress.host | default (printf "%s.%s" "gohoarder" .Values.global.domain) }}`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: {{ include "gohoarder.fullname" . }}-frontend
+          port: {{ .Values.frontend.service.port }}
+      {{- if .Values.ingress.traefik }}
+      {{- if .Values.ingress.traefik.middlewares }}
+      middlewares:
+        {{- range .Values.ingress.traefik.middlewares }}
+        - name: {{ . }}
+          namespace: traefik
+        {{- end }}
+      {{- end }}
+      {{- end }}
+
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+
+---
+# Middleware to handle encoded slashes in package paths
+# Note: This middleware attempts to work around Traefik's encoded slash limitation
+# but may not fully resolve the issue due to Go stdlib constraints
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-strip-encoded-slash
+  labels:
+    {{- include "gohoarder.labels" . | nindent 4 }}
+spec:
+  # Use headers to pass original path information
+  # The backend can reconstruct the original URL from these headers
+  headers:
+    customRequestHeaders:
+      X-Original-URI: "{{ .Request.URL.Path }}"
+      X-Forwarded-Path: "{{ .Request.URL.Path }}"
+
+---
+# ServersTransport configuration for backend communication
+# This ensures the backend connection doesn't have additional restrictions
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ include "gohoarder.fullname" . }}-transport
+  labels:
+    {{- include "gohoarder.labels" . | nindent 4 }}
+spec:
+  insecureSkipVerify: false
+  {{- if .Values.ingress.traefik }}
+  {{- if .Values.ingress.traefik.transport }}
+  {{- with .Values.ingress.traefik.transport }}
+  serverName: {{ .serverName | default "" }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+{{- end }}

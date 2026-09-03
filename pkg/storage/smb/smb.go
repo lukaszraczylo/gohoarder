@@ -1,3 +1,4 @@
+// Package smb implements the SMB/CIFS-backed Storage backend.
 package smb
 
 import (
@@ -188,13 +189,16 @@ func (c *smbConnection) close() {
 
 // Get retrieves data from SMB share
 func (s *SMBStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	path, err := s.keyToPath(key)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := s.getConnection()
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
-
-	path := s.keyToPath(key)
 
 	log.Debug().Str("key", path).Msg("Getting file from SMB")
 
@@ -222,20 +226,23 @@ func (s *SMBStorage) Get(ctx context.Context, key string) (io.ReadCloser, error)
 
 // Put stores data on SMB share
 func (s *SMBStorage) Put(ctx context.Context, key string, data io.Reader, opts *storage.PutOptions) error {
+	path, err := s.keyToPath(key)
+	if err != nil {
+		return err
+	}
+
 	conn, err := s.getConnection()
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
 
-	path := s.keyToPath(key)
-
 	log.Debug().Str("key", path).Msg("Putting file to SMB")
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
-	if err := s.ensureDir(conn, dir); err != nil {
-		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SMB directory")
+	if dirErr := s.ensureDir(conn, dir); dirErr != nil {
+		return errors.Wrap(dirErr, errors.ErrCodeStorageFailure, "failed to create SMB directory")
 	}
 
 	// Read data into buffer to check quota
@@ -247,9 +254,9 @@ func (s *SMBStorage) Put(ctx context.Context, key string, data io.Reader, opts *
 
 	// Check quota if set
 	if s.maxSizeBytes > 0 {
-		currentUsage, err := s.calculateUsage(conn)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to calculate current usage, skipping quota check")
+		currentUsage, usageErr := s.calculateUsage(conn)
+		if usageErr != nil {
+			log.Warn().Err(usageErr).Msg("Failed to calculate current usage, skipping quota check")
 		} else if currentUsage+size > s.maxSizeBytes {
 			return errors.QuotaExceeded(s.maxSizeBytes)
 		}
@@ -260,7 +267,11 @@ func (s *SMBStorage) Put(ctx context.Context, key string, data io.Reader, opts *
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create SMB file")
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Str("path", path).Msg("Failed to close SMB file after writing")
+		}
+	}()
 
 	// Write data
 	_, err = file.Write([]byte(buf.String()))
@@ -286,8 +297,8 @@ func (s *SMBStorage) ensureDir(conn *smbConnection, path string) error {
 	// Create parent directory first
 	parent := filepath.Dir(path)
 	if parent != path && parent != "." && parent != "/" {
-		if err := s.ensureDir(conn, parent); err != nil {
-			return err
+		if parentErr := s.ensureDir(conn, parent); parentErr != nil {
+			return parentErr
 		}
 	}
 
@@ -302,13 +313,16 @@ func (s *SMBStorage) ensureDir(conn *smbConnection, path string) error {
 
 // Delete removes data from SMB share
 func (s *SMBStorage) Delete(ctx context.Context, key string) error {
+	path, err := s.keyToPath(key)
+	if err != nil {
+		return err
+	}
+
 	conn, err := s.getConnection()
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
-
-	path := s.keyToPath(key)
 
 	log.Debug().Str("key", path).Msg("Deleting file from SMB")
 
@@ -322,13 +336,16 @@ func (s *SMBStorage) Delete(ctx context.Context, key string) error {
 
 // Exists checks if data exists on SMB share
 func (s *SMBStorage) Exists(ctx context.Context, key string) (bool, error) {
+	path, err := s.keyToPath(key)
+	if err != nil {
+		return false, err
+	}
+
 	conn, err := s.getConnection()
 	if err != nil {
 		return false, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
-
-	path := s.keyToPath(key)
 
 	_, err = conn.share.Stat(path)
 	if err != nil {
@@ -343,13 +360,16 @@ func (s *SMBStorage) Exists(ctx context.Context, key string) (bool, error) {
 
 // List returns a list of objects with the given prefix
 func (s *SMBStorage) List(ctx context.Context, prefix string, opts *storage.ListOptions) ([]storage.StorageObject, error) {
+	basePath, err := s.keyToPath(prefix)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := s.getConnection()
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
-
-	basePath := s.keyToPath(prefix)
 
 	log.Debug().Str("prefix", basePath).Msg("Listing files in SMB")
 
@@ -422,13 +442,16 @@ func (s *SMBStorage) walkPath(conn *smbConnection, root string, fn func(string, 
 
 // Stat returns metadata about stored data
 func (s *SMBStorage) Stat(ctx context.Context, key string) (*storage.StorageInfo, error) {
+	path, err := s.keyToPath(key)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := s.getConnection()
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get SMB connection")
 	}
 	defer s.returnConnection(conn)
-
-	path := s.keyToPath(key)
 
 	info, err := conn.share.Stat(path)
 	if err != nil {
@@ -494,17 +517,28 @@ func (s *SMBStorage) Close() error {
 	return nil
 }
 
-// keyToPath converts a storage key to SMB path
-func (s *SMBStorage) keyToPath(key string) string {
+// keyToPath converts a storage key to SMB path. It rejects keys that
+// contain traversal segments ("..") or empty segments to prevent escaping
+// the configured base path.
+func (s *SMBStorage) keyToPath(key string) (string, error) {
+	// Reject traversal attempts. Split by both forward and backslash so
+	// callers can use either separator on input.
+	normalized := strings.ReplaceAll(key, "\\", "/")
+	for _, seg := range strings.Split(normalized, "/") {
+		if seg == ".." || seg == "." {
+			return "", errors.New(errors.ErrCodeStorageFailure, fmt.Sprintf("invalid key segment %q in %q", seg, key))
+		}
+	}
+
 	// Normalize separators to backslash for SMB
-	key = strings.ReplaceAll(key, "/", "\\")
+	winKey := strings.ReplaceAll(key, "/", "\\")
 
 	if s.config.Path == "" {
-		return key
+		return winKey, nil
 	}
 
 	// Use backslash for SMB paths
-	return s.config.Path + "\\" + key
+	return s.config.Path + "\\" + winKey, nil
 }
 
 // pathToKey converts an SMB path to storage key

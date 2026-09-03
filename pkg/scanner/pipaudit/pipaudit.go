@@ -1,3 +1,5 @@
+// Package pipaudit wraps the `pip-audit` CLI to scan Python wheels and
+// source distributions for known vulnerabilities.
 package pipaudit
 
 import (
@@ -7,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
@@ -66,7 +69,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Copy the wheel/tar.gz file to temp directory
 	tmpFile := filepath.Join(tmpDir, filepath.Base(filePath))
@@ -74,16 +77,30 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		return nil, fmt.Errorf("failed to copy file: %w", err)
 	}
 
-	// Run pip-audit on the package file
-	cmd := exec.CommandContext(ctx, "pip-audit", "-r", tmpFile, "--format", "json") // #nosec G204 -- pip-audit command with temp file
-	output, _ := cmd.CombinedOutput()                                               // pip-audit returns non-zero when vulns found
+	// Build the appropriate pip-audit invocation based on artifact type.
+	// `-r` expects requirements.txt — passing a wheel/tarball there is wrong.
+	// Wheels can be scanned directly via positional arg. Source distributions
+	// (tarballs) need to be extracted; if they contain a pyproject.toml we
+	// can scan that, otherwise we fail closed.
+	cmd, prepErr := s.buildAuditCmd(ctx, tmpDir, tmpFile)
+	if prepErr != nil {
+		log.Warn().
+			Err(prepErr).
+			Str("package", packageName).
+			Str("version", version).
+			Msg("pip-audit could not prepare input artifact, returning scan-error")
+		return s.scanErrorResult(registry, packageName, version, prepErr.Error()), nil
+	}
+	output, _ := cmd.CombinedOutput() // pip-audit returns non-zero when vulns found
 
 	// Parse pip-audit output
 	var auditResult PipAuditResult
 	if len(output) > 0 {
 		if err := json.Unmarshal(output, &auditResult); err != nil {
 			log.Warn().Err(err).Msg("Failed to parse pip-audit output")
-			return s.emptyResult(registry, packageName, version), nil
+			// Parse failure → no signal → fail closed.
+			return s.scanErrorResult(registry, packageName, version,
+				fmt.Sprintf("failed to parse pip-audit output: %v", err)), nil
 		}
 	}
 
@@ -117,8 +134,84 @@ func (s *Scanner) copyFile(src, dst string) error {
 	return os.WriteFile(dst, input, 0600)
 }
 
-// emptyResult returns an empty scan result
-func (s *Scanner) emptyResult(registry, packageName, version string) *metadata.ScanResult {
+// buildAuditCmd constructs the right pip-audit command for the input artifact.
+//
+//   - .whl  -> pip-audit <wheel> --format json
+//   - .tar.gz / .tgz / .zip (sdist) -> extract; if pyproject.toml exists
+//     run `pip-audit --pyproject <pyproject> --format json`; otherwise error.
+//
+// extractDir is used as a workspace for sdist extraction.
+func (s *Scanner) buildAuditCmd(ctx context.Context, extractDir, artifact string) (*exec.Cmd, error) {
+	lower := strings.ToLower(artifact)
+	switch {
+	case strings.HasSuffix(lower, ".whl"):
+		// pip-audit can scan a wheel directly via positional argument.
+		return exec.CommandContext(ctx, "pip-audit", artifact, "--format", "json"), nil // #nosec G204 -- artifact path is in controlled tmp dir
+
+	case strings.HasSuffix(lower, ".tar.gz"),
+		strings.HasSuffix(lower, ".tgz"),
+		strings.HasSuffix(lower, ".zip"):
+		// Source distributions must be unpacked first.
+		sdistDir := filepath.Join(extractDir, "sdist")
+		if err := os.MkdirAll(sdistDir, 0o750); err != nil {
+			return nil, fmt.Errorf("create sdist dir: %w", err)
+		}
+		if err := s.extractSdist(artifact, sdistDir); err != nil {
+			return nil, fmt.Errorf("extract sdist: %w", err)
+		}
+		pyproject, err := findPyProject(sdistDir)
+		if err != nil {
+			return nil, fmt.Errorf("no pyproject.toml in sdist: %w", err)
+		}
+		return exec.CommandContext(ctx, "pip-audit", "--pyproject", pyproject, "--format", "json"), nil // #nosec G204 -- pyproject path under controlled tmp dir
+
+	default:
+		return nil, fmt.Errorf("unsupported pip artifact extension: %s", filepath.Base(artifact))
+	}
+}
+
+// extractSdist unpacks a Python source distribution into destDir.
+func (s *Scanner) extractSdist(archive, destDir string) error {
+	lower := strings.ToLower(archive)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
+		return exec.Command("tar", "-xzf", archive, "-C", destDir).Run()
+	case strings.HasSuffix(lower, ".zip"):
+		return exec.Command("unzip", "-q", archive, "-d", destDir).Run()
+	default:
+		return fmt.Errorf("unknown archive type: %s", archive)
+	}
+}
+
+// findPyProject returns the path to a pyproject.toml within root, walking
+// one level deep (sdists typically extract to <pkg>-<ver>/).
+func findPyProject(root string) (string, error) {
+	var found string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() == "pyproject.toml" {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if found == "" {
+		return "", fmt.Errorf("pyproject.toml not found under %s", root)
+	}
+	return found, nil
+}
+
+// scanErrorResult returns a result marked scan-error so manager merge and
+// CheckVulnerabilities can fail closed when this scanner could not run.
+func (s *Scanner) scanErrorResult(registry, packageName, version, reason string) *metadata.ScanResult {
 	return &metadata.ScanResult{
 		ID:                 uuid.New().String(),
 		Registry:           registry,
@@ -126,12 +219,16 @@ func (s *Scanner) emptyResult(registry, packageName, version string) *metadata.S
 		PackageVersion:     version,
 		Scanner:            ScannerName,
 		ScannedAt:          time.Now(),
-		Status:             metadata.ScanStatusClean,
+		Status:             metadata.ScanStatusError,
 		VulnerabilityCount: 0,
 		Vulnerabilities:    []metadata.Vulnerability{},
-		Details:            map[string]interface{}{},
+		Details: map[string]interface{}{
+			"error": reason,
+		},
 	}
 }
+
+// emptyResult returns an empty scan result
 
 // convertResult converts pip-audit output to our ScanResult format
 func (s *Scanner) convertResult(auditResult *PipAuditResult, registry, packageName, version string) *metadata.ScanResult {

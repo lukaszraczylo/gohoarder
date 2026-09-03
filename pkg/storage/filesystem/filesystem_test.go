@@ -531,8 +531,8 @@ func (s *FilesystemStorageTestSuite) TestConcurrentReadsAndWrites() {
 				key := fmt.Sprintf("shared/file-%d.txt", j%10)
 				reader, err := s.fs.Get(ctx, key)
 				if err == nil {
-					io.ReadAll(reader)
-					reader.Close() // #nosec G104 -- Cleanup, error not critical
+					_, _ = io.ReadAll(reader)
+					_ = reader.Close() // #nosec G104 -- Cleanup, error not critical
 				}
 			}
 		}(i)
@@ -546,7 +546,7 @@ func (s *FilesystemStorageTestSuite) TestConcurrentReadsAndWrites() {
 			for j := 0; j < numOps; j++ {
 				key := fmt.Sprintf("shared/writer-%d-%d.txt", id, j)
 				data := fmt.Sprintf("writer-%d-%d", id, j)
-				s.fs.Put(ctx, key, strings.NewReader(data), nil)
+				_ = s.fs.Put(ctx, key, strings.NewReader(data), nil)
 			}
 		}(i)
 	}
@@ -608,15 +608,15 @@ func (s *FilesystemStorageTestSuite) TestAtomicWrite() {
 				case <-stopReading:
 					return
 				default:
-					reader, err := s.fs.Get(ctx, key)
-					if err != nil {
-						readErrors <- err
+					reader, getErr := s.fs.Get(ctx, key)
+					if getErr != nil {
+						readErrors <- getErr
 						continue
 					}
-					data, err := io.ReadAll(reader)
+					data, readErr := io.ReadAll(reader)
 					reader.Close() // #nosec G104 -- Cleanup, error not critical
-					if err != nil {
-						readErrors <- err
+					if readErr != nil {
+						readErrors <- readErr
 						continue
 					}
 					// Data should be either "initial" or "updated", never partial
@@ -663,7 +663,8 @@ func (s *FilesystemStorageTestSuite) TestPathSanitization() {
 			s.NoError(err) // Should succeed but sanitize path
 
 			// Verify file is inside base directory
-			sanitized := s.fs.keyToPath(path)
+			sanitized, sanitizeErr := s.fs.keyToPath(path)
+			s.NoError(sanitizeErr)
 			s.True(strings.HasPrefix(sanitized, s.tempDir),
 				"Sanitized path %s should be inside %s", sanitized, s.tempDir)
 		})
@@ -728,7 +729,7 @@ func BenchmarkFilesystemPut(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := fmt.Sprintf("bench/file-%d.txt", i)
-		fs.Put(ctx, key, strings.NewReader(data), nil)
+		_ = fs.Put(ctx, key, strings.NewReader(data), nil)
 	}
 }
 
@@ -744,14 +745,14 @@ func BenchmarkFilesystemGet(b *testing.B) {
 	data := strings.Repeat("x", 1024)
 
 	// Setup: Create test file
-	fs.Put(ctx, "bench/test.txt", strings.NewReader(data), nil)
+	_ = fs.Put(ctx, "bench/test.txt", strings.NewReader(data), nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader, _ := fs.Get(ctx, "bench/test.txt")
 		if reader != nil {
-			io.ReadAll(reader)
-			reader.Close() // #nosec G104 -- Cleanup, error not critical
+			_, _ = io.ReadAll(reader)
+			_ = reader.Close() // #nosec G104 -- Cleanup, error not critical
 		}
 	}
 }

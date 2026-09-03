@@ -1,0 +1,129 @@
+# Example GoHoarder values for Traefik IngressRoute
+#
+# This configuration uses Traefik IngressRoute instead of standard Kubernetes Ingress
+# to better handle scoped npm packages with encoded slashes.
+#
+# IMPORTANT: You must also configure your Traefik deployment to allow encoded slashes.
+# See docs/TRAEFIK_ENCODED_SLASHES.md for Traefik configuration steps.
+
+nameOverride: "gohoarder"
+fullnameOverride: ""
+
+global:
+  domain: "i.raczylo.com"
+  imagePullSecrets: []
+
+replicaCount:
+  server: 1
+  frontend: 1
+  scanner: 1
+
+image:
+  server:
+    repository: ghcr.io/lukaszraczylo/gohoarder-server
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  frontend:
+    repository: ghcr.io/lukaszraczylo/gohoarder-frontend
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  scanner:
+    repository: ghcr.io/lukaszraczylo/gohoarder-scanner
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+# Ingress configuration for Traefik
+ingress:
+  enabled: true
+  className: "traefik"  # This triggers IngressRoute creation instead of Ingress
+
+  # Your GoHoarder hostname
+  host: "hoarder.i.raczylo.com"
+
+  # TLS configuration
+  tls:
+    enabled: true
+    secretName: "cert-i.raczylo.com"
+
+  # Traefik-specific settings
+  # These are used by the IngressRoute template
+  traefik:
+    # Reference middlewares from the traefik namespace
+    # These will be applied to all routes
+    middlewares:
+      - default-chain  # Your existing middleware chain from traefik namespace
+
+    # ServersTransport configuration (optional)
+    transport:
+      serverName: ""
+
+# Storage configuration
+storage:
+  backend: "filesystem"
+  filesystem:
+    storageClass: "longhorn"
+    size: "100Gi"
+    accessMode: "ReadWriteOnce"
+
+# Metadata storage
+metadata:
+  backend: "sqlite"
+  sqlite:
+    persistence:
+      enabled: false  # Using emptyDir for metadata
+    walMode: false
+
+# Cache configuration
+cache:
+  defaultTTL: "168h"  # 7 days
+  maxSizeBytes: 536870912000  # 500GB
+
+# Package handlers
+handlers:
+  npm:
+    enabled: true
+    upstreamRegistry: "https://registry.npmjs.org"
+  pypi:
+    enabled: true
+    upstreamUrl: "https://pypi.org"
+  go:
+    enabled: true
+    upstreamProxy: "https://proxy.golang.org"
+
+# Authentication
+auth:
+  enabled: true
+  adminApiKey: ""  # Will be auto-generated if empty
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
+
+# Resource limits
+server:
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+frontend:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+scanner:
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi

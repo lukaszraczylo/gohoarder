@@ -1,6 +1,8 @@
 package gormstore
 
 import (
+	"time"
+
 	"github.com/go-gormigrate/gormigrate/v2"
 	"gorm.io/gorm"
 )
@@ -30,13 +32,51 @@ func GetMigrations() []*gormigrate.Migration {
 		//         return tx.Exec("ALTER TABLE packages DROP COLUMN new_field").Error
 		//     },
 		// },
+		{
+			// Behavior change: aggregation worker now deletes raw download_events
+			// in the same transaction as the hourly aggregation, using the same
+			// cutoff. This prevents double-counting in multi-replica deployments
+			// where the previous logic kept events for 24h and re-aggregated
+			// them every run. No schema change required; we purge any stale
+			// events older than the current aggregation cutoff so the new
+			// invariant (events ⇔ unaggregated) holds from now on.
+			ID: "202604280001",
+			Migrate: func(tx *gorm.DB) error {
+				// Best-effort cleanup. Safe to run repeatedly.
+				cutoff := time.Now().Add(-5 * time.Minute)
+				if err := tx.Exec(
+					"DELETE FROM download_events WHERE downloaded_at < ?",
+					cutoff,
+				).Error; err != nil {
+					// Table may not exist yet on a fresh install; tolerate.
+					return nil
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				// Behavior change only — nothing to roll back schema-wise.
+				return nil
+			},
+		},
+		{
+			// Add api_keys table for persistent authentication keys. Idempotent:
+			// AutoMigrate is a no-op if the table already exists with the
+			// expected columns.
+			ID: "202604280002",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.AutoMigrate(&APIKeyModel{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable("api_keys")
+			},
+		},
 	}
 }
 
 // migrateToV2 creates the complete V2 schema
 func migrateToV2(tx *gorm.DB) error {
 	// Get dialect name for database-specific features
-	dialectName := tx.Dialector.Name()
+	dialectName := tx.Name()
 
 	// Step 1: Create all tables using GORM AutoMigrate
 	// This handles cross-database compatibility automatically
@@ -59,11 +99,12 @@ func migrateToV2(tx *gorm.DB) error {
 	}
 
 	// Step 3: Create database-specific optimizations
-	if dialectName == "postgres" {
+	switch dialectName {
+	case "postgres":
 		if err := createPostgreSQLOptimizations(tx); err != nil {
 			return err
 		}
-	} else if dialectName == "mysql" {
+	case "mysql":
 		if err := createMySQLOptimizations(tx); err != nil {
 			return err
 		}
@@ -192,6 +233,7 @@ func createMySQLOptimizations(tx *gorm.DB) error {
 func rollbackFromV2(tx *gorm.DB) error {
 	// Drop in reverse order to respect foreign keys
 	tables := []string{
+		"api_keys",
 		"audit_log",
 		"download_stats_daily",
 		"download_stats_hourly",
@@ -206,13 +248,13 @@ func rollbackFromV2(tx *gorm.DB) error {
 	}
 
 	// Drop PostgreSQL-specific objects
-	if tx.Dialector.Name() == "postgres" {
+	if tx.Name() == "postgres" {
 		tx.Exec("DROP VIEW IF EXISTS v_vulnerable_packages")
 		tx.Exec("DROP FUNCTION IF EXISTS create_next_month_partitions()")
 	}
 
 	// Drop MySQL-specific objects
-	if tx.Dialector.Name() == "mysql" {
+	if tx.Name() == "mysql" {
 		tx.Exec("DROP VIEW IF EXISTS v_vulnerable_packages")
 	}
 

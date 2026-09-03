@@ -1,3 +1,5 @@
+// Package govulncheck wraps the `govulncheck` CLI to scan Go modules for
+// known vulnerabilities.
 package govulncheck
 
 import (
@@ -6,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,15 +69,30 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Extract the .zip file
-	if err := s.extractZip(filePath, tmpDir); err != nil {
-		return nil, fmt.Errorf("failed to extract zip: %w", err)
+	if extractErr := s.extractZip(filePath, tmpDir); extractErr != nil {
+		return nil, fmt.Errorf("failed to extract zip: %w", extractErr)
 	}
 
-	// Run govulncheck
-	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "-mode=binary", tmpDir) // #nosec G204 -- govulncheck command with temp directory
+	// Locate the Go module root (directory containing go.mod). Go modules
+	// in the proxy zip layout are nested under <module>@<version>/.
+	moduleDir, err := findGoModDir(tmpDir)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("package", packageName).
+			Str("version", version).
+			Msg("Could not locate go.mod in extracted module, skipping govulncheck")
+		return s.skippedResult(registry, packageName, version, "no go.mod in extracted module"), nil
+	}
+
+	// Run govulncheck in source mode against the module's package set.
+	// -mode=binary requires a compiled binary which we do not have; the
+	// default (source) mode wants a Go source tree with a go.mod.
+	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "./...") // #nosec G204 -- fixed args, cwd is controlled temp dir
+	cmd.Dir = moduleDir
 	output, _ := cmd.CombinedOutput()
 
 	// govulncheck returns non-zero when vulnerabilities are found
@@ -126,6 +144,59 @@ func (s *Scanner) Health(ctx context.Context) error {
 func (s *Scanner) extractZip(zipPath, destDir string) error {
 	cmd := exec.Command("unzip", "-q", zipPath, "-d", destDir)
 	return cmd.Run()
+}
+
+// findGoModDir walks the directory tree under root looking for a directory
+// that contains a go.mod file. The Go module proxy ships zips with layout
+// "<module>@<version>/...", so the module root is typically one or two
+// levels below the extraction directory. Returns an error if none is found.
+func findGoModDir(root string) (string, error) {
+	// Quick check: does the root itself contain go.mod?
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+		return root, nil
+	}
+
+	var found string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // keep searching
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() == "go.mod" {
+			found = filepath.Dir(path)
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if found == "" {
+		return "", fmt.Errorf("go.mod not found under %s", root)
+	}
+	return found, nil
+}
+
+// skippedResult returns a clean ScanResult marked as skipped with an
+// explanation. Using clean (not error) here because the package is simply
+// not a Go module we can analyse — not a scanner failure.
+func (s *Scanner) skippedResult(registry, packageName, version, reason string) *metadata.ScanResult {
+	return &metadata.ScanResult{
+		ID:                 uuid.New().String(),
+		Registry:           registry,
+		PackageName:        packageName,
+		PackageVersion:     version,
+		Scanner:            ScannerName,
+		ScannedAt:          time.Now(),
+		Status:             metadata.ScanStatusClean,
+		VulnerabilityCount: 0,
+		Vulnerabilities:    []metadata.Vulnerability{},
+		Details: map[string]interface{}{
+			"skipped": reason,
+		},
+	}
 }
 
 // convertResult converts govulncheck findings to our ScanResult format

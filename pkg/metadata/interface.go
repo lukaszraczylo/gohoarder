@@ -1,10 +1,18 @@
+// Package metadata defines the Store interface and shared model types for
+// package metadata persistence backends.
 package metadata
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
+
+// ErrNotImplemented signals that an optional MetadataStore method is not
+// supported by the current backend (e.g. a backend may not persist API keys).
+// Callers should treat it as a non-fatal capability check.
+var ErrNotImplemented = errors.New("metadata: operation not implemented by this backend")
 
 // Store is an alias for MetadataStore for convenience
 type Store = MetadataStore
@@ -62,8 +70,46 @@ type MetadataStore interface {
 	// AggregateDownloadData aggregates raw download events and cleans up old data
 	AggregateDownloadData(ctx context.Context) error
 
+	// SaveAPIKey persists (insert or update) an API key record. Backends that
+	// do not implement persistent API keys MUST return ErrNotImplemented.
+	SaveAPIKey(ctx context.Context, key *APIKey) error
+
+	// GetAPIKey retrieves a single API key by ID. Returns ErrNotImplemented if
+	// the backend does not persist API keys. Returns a not-found error wrapped
+	// from the backend if the key does not exist.
+	GetAPIKey(ctx context.Context, id string) (*APIKey, error)
+
+	// ListAPIKeys returns all API keys (including revoked) so callers can
+	// decide whether to filter. Returns ErrNotImplemented for backends that
+	// do not persist API keys.
+	ListAPIKeys(ctx context.Context) ([]*APIKey, error)
+
+	// DeleteAPIKey removes an API key by ID. Returns ErrNotImplemented for
+	// backends that do not persist API keys.
+	DeleteAPIKey(ctx context.Context, id string) error
+
+	// UpdateAPIKeyLastUsed updates the last-used timestamp without rewriting
+	// the rest of the row. Implementations should make this cheap; auth.Manager
+	// may invoke it asynchronously on every successful validation.
+	UpdateAPIKeyLastUsed(ctx context.Context, id string, t time.Time) error
+
 	// Close closes the metadata store
 	Close() error
+}
+
+// APIKey is the storage-layer representation of an authentication API key.
+// It is intentionally separate from auth.APIKey to avoid an import cycle:
+// the auth package depends on metadata, never the other way around.
+type APIKey struct {
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	ID          string     `json:"id"`
+	KeyHash     string     `json:"key_hash"`
+	Project     string     `json:"project"`
+	Role        string     `json:"role"`
+	Permissions string     `json:"permissions,omitempty"` // JSON-encoded list (optional)
+	Revoked     bool       `json:"revoked"`
 }
 
 // Package represents package metadata

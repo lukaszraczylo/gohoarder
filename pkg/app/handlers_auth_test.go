@@ -44,8 +44,8 @@ func (s *AuthHandlersTestSuite) TestHandleGenerateAPIKey() {
 	tests := []struct {
 		requestBody    map[string]string
 		name           string
-		expectedStatus int
 		expectedRole   string
+		expectedStatus int
 		expectKey      bool
 	}{
 		{
@@ -139,9 +139,9 @@ func (s *AuthHandlersTestSuite) TestHandleGenerateAPIKey() {
 
 func (s *AuthHandlersTestSuite) TestHandleListAPIKeys() {
 	// Generate some test keys first
-	s.authManager.GenerateAPIKey("test-key-1", auth.RoleReadOnly, nil)
-	s.authManager.GenerateAPIKey("test-key-2", auth.RoleReadWrite, nil)
-	s.authManager.GenerateAPIKey("test-key-3", auth.RoleAdmin, nil)
+	_, _, _ = s.authManager.GenerateAPIKey("test-key-1", auth.RoleReadOnly, nil)
+	_, _, _ = s.authManager.GenerateAPIKey("test-key-2", auth.RoleReadWrite, nil)
+	_, _, _ = s.authManager.GenerateAPIKey("test-key-3", auth.RoleAdmin, nil)
 
 	req := httptest.NewRequest("GET", "/api/admin/keys", nil)
 	resp, err := s.app.Test(req, 5000) // 5 second timeout for CI environments

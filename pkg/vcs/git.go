@@ -6,11 +6,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
+
+// versionPattern restricts version strings to characters that cannot be
+// confused with git command-line options. We additionally reject any leading
+// '-' to defend against argv option-injection (e.g. "--upload-pack=...").
+var versionPattern = regexp.MustCompile(`^v?[0-9A-Za-z.\-+]+$`)
+
+// validateVersion ensures a user-supplied version is safe to pass as an argv
+// argument to git. Empty input and option-like prefixes are rejected.
+func validateVersion(version string) error {
+	if version == "" {
+		return fmt.Errorf("version is required")
+	}
+	if strings.HasPrefix(version, "-") {
+		return fmt.Errorf("invalid version %q: must not start with '-'", version)
+	}
+	if !versionPattern.MatchString(version) {
+		return fmt.Errorf("invalid version %q: must match %s", version, versionPattern.String())
+	}
+	return nil
+}
 
 // GitFetcher handles git repository operations
 type GitFetcher struct {
@@ -39,6 +60,12 @@ func NewGitFetcher(workDir string, credStore *CredentialStore) *GitFetcher {
 // FetchModule clones a git repository and checks out a specific version
 // Returns the path to the checked-out source directory
 func (g *GitFetcher) FetchModule(ctx context.Context, modulePath, version, credentials string) (string, error) {
+	// Validate version before it reaches any git argv to prevent
+	// option-injection (e.g. "--upload-pack=..." passed as a "version").
+	if err := validateVersion(version); err != nil {
+		return "", err
+	}
+
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, g.timeout)
 	defer cancel()
@@ -115,8 +142,10 @@ func (g *GitFetcher) modulePathToRepoURL(modulePath string) (string, error) {
 	owner := parts[1]
 	repo := parts[2]
 
-	// Remove version suffix if present (e.g., /v2, /v3)
-	repo = strings.TrimPrefix(repo, "v")
+	// NOTE: Go module major-version suffixes appear as separate path
+	// segments (e.g. "github.com/owner/repo/v2"), never as a "v" prefix on
+	// the repo name. Stripping a leading "v" from the repo segment would
+	// corrupt legitimate names like "vault", "vitess", "vim-go".
 
 	repoURL := fmt.Sprintf("https://%s/%s/%s.git", host, owner, repo)
 	return repoURL, nil
@@ -223,7 +252,12 @@ func (g *GitFetcher) extractHost(repoURL string) string {
 
 // shallowClone performs a shallow clone of a specific version
 func (g *GitFetcher) shallowClone(ctx context.Context, repoURL, version, cloneDir string, credentialHelper map[string]string) error {
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", version, repoURL, cloneDir)
+	if err := validateVersion(version); err != nil {
+		return err
+	}
+	// "--" separates options from positional args; combined with version
+	// validation it prevents option-injection.
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", version, "--", repoURL, cloneDir)
 	cmd.Env = append(os.Environ(), g.envMapToSlice(credentialHelper)...)
 
 	output, err := cmd.CombinedOutput()
@@ -236,7 +270,7 @@ func (g *GitFetcher) shallowClone(ctx context.Context, repoURL, version, cloneDi
 
 // fullClone performs a full clone of the repository
 func (g *GitFetcher) fullClone(ctx context.Context, repoURL, cloneDir string, credentialHelper map[string]string) error {
-	cmd := exec.CommandContext(ctx, "git", "clone", repoURL, cloneDir)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--", repoURL, cloneDir)
 	cmd.Env = append(os.Environ(), g.envMapToSlice(credentialHelper)...)
 
 	output, err := cmd.CombinedOutput()
@@ -247,9 +281,15 @@ func (g *GitFetcher) fullClone(ctx context.Context, repoURL, cloneDir string, cr
 	return nil
 }
 
-// checkout checks out a specific version (tag, branch, or commit)
+// checkout checks out a specific version (tag, branch, or commit) in
+// detached-HEAD mode. Detached mode avoids ambiguity between local branch
+// refs and remote tags/commits and prevents creating unintended local
+// branches when the version happens to share a name with one.
 func (g *GitFetcher) checkout(ctx context.Context, repoDir, version string) error {
-	cmd := exec.CommandContext(ctx, "git", "checkout", version)
+	if err := validateVersion(version); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "checkout", "--detach", "--", version)
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 

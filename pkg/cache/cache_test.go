@@ -6,15 +6,51 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
+	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeBroadcaster records BroadcastEvent calls for assertions.
+type fakeBroadcaster struct {
+	events []fakeBroadcastEvent
+	mu     sync.Mutex
+}
+
+type fakeBroadcastEvent struct {
+	Payload any
+	Type    string
+}
+
+func (f *fakeBroadcaster) BroadcastEvent(eventType string, payload any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, fakeBroadcastEvent{Type: eventType, Payload: payload})
+}
+
+func (f *fakeBroadcaster) snapshot() []fakeBroadcastEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fakeBroadcastEvent, len(f.events))
+	copy(out, f.events)
+	return out
+}
+
+func (f *fakeBroadcaster) typesOnly() []string {
+	snap := f.snapshot()
+	out := make([]string, len(snap))
+	for i, e := range snap {
+		out[i] = e.Type
+	}
+	return out
+}
 
 // MockStorageBackend is a mock for storage.StorageBackend
 type MockStorageBackend struct {
@@ -192,6 +228,29 @@ func (m *MockMetadataStore) GetTimeSeriesStats(ctx context.Context, period strin
 func (m *MockMetadataStore) AggregateDownloadData(ctx context.Context) error {
 	args := m.Called(ctx)
 	return args.Error(0)
+}
+
+// API key methods are not used by the cache package; stub them out so the
+// mock continues to satisfy metadata.MetadataStore after the interface gained
+// API key persistence methods.
+func (m *MockMetadataStore) SaveAPIKey(ctx context.Context, key *metadata.APIKey) error {
+	return metadata.ErrNotImplemented
+}
+
+func (m *MockMetadataStore) GetAPIKey(ctx context.Context, id string) (*metadata.APIKey, error) {
+	return nil, metadata.ErrNotImplemented
+}
+
+func (m *MockMetadataStore) ListAPIKeys(ctx context.Context) ([]*metadata.APIKey, error) {
+	return nil, metadata.ErrNotImplemented
+}
+
+func (m *MockMetadataStore) DeleteAPIKey(ctx context.Context, id string) error {
+	return metadata.ErrNotImplemented
+}
+
+func (m *MockMetadataStore) UpdateAPIKeyLastUsed(ctx context.Context, id string, t time.Time) error {
+	return metadata.ErrNotImplemented
 }
 
 // TestNew tests cache manager creation
@@ -980,4 +1039,178 @@ func TestConcurrentGet(t *testing.T) {
 
 	// Verify at least one call was made (singleflight may deduplicate others)
 	mockMetadata.AssertCalled(t, "GetPackage", mock.Anything, "npm", "concurrent", "1.0.0")
+}
+
+// TestBroadcaster_CacheHit verifies EventPackageDownloaded fires on a
+// cache-hit serve and no other events are emitted.
+func TestBroadcaster_CacheHit(t *testing.T) {
+	mockStorage := &MockStorageBackend{}
+	mockMetadata := &MockMetadataStore{}
+
+	now := time.Now()
+	expiresAt := now.Add(24 * time.Hour)
+	pkg := &metadata.Package{
+		ID:           "test-id",
+		Registry:     "npm",
+		Name:         "react",
+		Version:      "18.2.0",
+		StorageKey:   "npm/react/18.2.0",
+		CachedAt:     now,
+		LastAccessed: now,
+		ExpiresAt:    &expiresAt,
+	}
+	mockMetadata.On("GetPackage", mock.Anything, "npm", "react", "18.2.0").Return(pkg, nil)
+	mockStorage.On("Get", mock.Anything, "npm/react/18.2.0").Return(io.NopCloser(strings.NewReader("cached data")), nil)
+	mockMetadata.On("UpdateDownloadCount", mock.Anything, "npm", "react", "18.2.0").Return(nil)
+
+	manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
+	require.NoError(t, err)
+
+	bc := &fakeBroadcaster{}
+	manager.SetBroadcaster(bc)
+
+	entry, err := manager.Get(context.Background(), "npm", "react", "18.2.0", nil)
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+
+	events := bc.snapshot()
+	require.Len(t, events, 1, "expected exactly one event on cache hit")
+	assert.Equal(t, string(websocket.EventPackageDownloaded), events[0].Type)
+
+	payload, ok := events[0].Payload.(map[string]interface{})
+	require.True(t, ok, "payload should be map[string]interface{}")
+	assert.Equal(t, "npm", payload["registry"])
+	assert.Equal(t, "react", payload["name"])
+	assert.Equal(t, "18.2.0", payload["version"])
+	assert.Equal(t, true, payload["cache_hit"])
+}
+
+// TestBroadcaster_CacheMissStore verifies EventPackageCached fires on a
+// cache-miss-then-store path and EventPackageDownloaded does NOT fire
+// on that path (avoid double counting).
+func TestBroadcaster_CacheMissStore(t *testing.T) {
+	mockStorage := &MockStorageBackend{}
+	mockMetadata := &MockMetadataStore{}
+
+	mockMetadata.On("GetPackage", mock.Anything, "npm", "lodash", "4.17.21").Return(nil, errors.New("not found"))
+	mockStorage.On("GetQuota", mock.Anything).Return(&storage.QuotaInfo{Used: 100, Available: 900, Limit: 1000}, nil)
+	mockStorage.On("Put", mock.Anything, "npm/lodash/4.17.21", mock.Anything, mock.Anything).Return(nil)
+	mockMetadata.On("SavePackage", mock.Anything, mock.Anything).Return(nil)
+	mockStorage.On("Get", mock.Anything, "npm/lodash/4.17.21").Return(io.NopCloser(strings.NewReader("upstream data")), nil)
+	mockMetadata.On("UpdateDownloadCount", mock.Anything, "npm", "lodash", "4.17.21").Return(nil)
+
+	manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
+	require.NoError(t, err)
+
+	bc := &fakeBroadcaster{}
+	manager.SetBroadcaster(bc)
+
+	fetch := func(ctx context.Context) (io.ReadCloser, string, error) {
+		return io.NopCloser(strings.NewReader("upstream data")), "https://registry.npmjs.org/lodash", nil
+	}
+	entry, err := manager.Get(context.Background(), "npm", "lodash", "4.17.21", fetch)
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+
+	types := bc.typesOnly()
+	require.Contains(t, types, string(websocket.EventPackageCached))
+	require.NotContains(t, types, string(websocket.EventPackageDownloaded),
+		"miss-then-fetch path should not emit EventPackageDownloaded")
+
+	// Inspect EventPackageCached payload.
+	var cachedEv *fakeBroadcastEvent
+	for i := range bc.events {
+		if bc.events[i].Type == string(websocket.EventPackageCached) {
+			cachedEv = &bc.events[i]
+			break
+		}
+	}
+	require.NotNil(t, cachedEv)
+	payload, ok := cachedEv.Payload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "npm", payload["registry"])
+	assert.Equal(t, "lodash", payload["name"])
+	assert.Equal(t, "4.17.21", payload["version"])
+	assert.Equal(t, int64(len("upstream data")), payload["size"])
+	// Scanner is nil in this test → scan_status should be "disabled".
+	assert.Equal(t, "disabled", payload["scan_status"])
+}
+
+// TestBroadcaster_NoEmitOnError ensures error paths (storage Put fail,
+// metadata Save fail) do NOT emit EventPackageCached.
+func TestBroadcaster_NoEmitOnError(t *testing.T) {
+	t.Run("storage put fails", func(t *testing.T) {
+		mockStorage := &MockStorageBackend{}
+		mockMetadata := &MockMetadataStore{}
+
+		mockMetadata.On("GetPackage", mock.Anything, "npm", "fail", "1.0.0").Return(nil, errors.New("not found"))
+		mockStorage.On("GetQuota", mock.Anything).Return(&storage.QuotaInfo{Used: 100, Available: 900, Limit: 1000}, nil)
+		mockStorage.On("Put", mock.Anything, "npm/fail/1.0.0", mock.Anything, mock.Anything).Return(errors.New("storage error"))
+
+		manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
+		require.NoError(t, err)
+
+		bc := &fakeBroadcaster{}
+		manager.SetBroadcaster(bc)
+
+		fetch := func(ctx context.Context) (io.ReadCloser, string, error) {
+			return io.NopCloser(strings.NewReader("data")), "https://registry.npmjs.org/fail", nil
+		}
+		_, err = manager.Get(context.Background(), "npm", "fail", "1.0.0", fetch)
+		require.Error(t, err)
+
+		assert.Empty(t, bc.snapshot(), "no events should be emitted when storage Put fails")
+	})
+
+	t.Run("metadata save fails", func(t *testing.T) {
+		mockStorage := &MockStorageBackend{}
+		mockMetadata := &MockMetadataStore{}
+
+		mockMetadata.On("GetPackage", mock.Anything, "npm", "meta-fail", "1.0.0").Return(nil, errors.New("not found"))
+		mockStorage.On("GetQuota", mock.Anything).Return(&storage.QuotaInfo{Used: 100, Available: 900, Limit: 1000}, nil)
+		mockStorage.On("Put", mock.Anything, "npm/meta-fail/1.0.0", mock.Anything, mock.Anything).Return(nil)
+		mockMetadata.On("SavePackage", mock.Anything, mock.Anything).Return(errors.New("metadata error"))
+		mockStorage.On("Delete", mock.Anything, "npm/meta-fail/1.0.0").Return(nil)
+
+		manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
+		require.NoError(t, err)
+
+		bc := &fakeBroadcaster{}
+		manager.SetBroadcaster(bc)
+
+		fetch := func(ctx context.Context) (io.ReadCloser, string, error) {
+			return io.NopCloser(strings.NewReader("data")), "https://registry.npmjs.org/meta-fail", nil
+		}
+		_, err = manager.Get(context.Background(), "npm", "meta-fail", "1.0.0", fetch)
+		require.Error(t, err)
+
+		assert.Empty(t, bc.snapshot(), "no events should be emitted when metadata SavePackage fails")
+	})
+
+	t.Run("nil broadcaster is safe", func(t *testing.T) {
+		mockStorage := &MockStorageBackend{}
+		mockMetadata := &MockMetadataStore{}
+
+		now := time.Now()
+		expiresAt := now.Add(24 * time.Hour)
+		pkg := &metadata.Package{
+			ID:           "id",
+			Registry:     "npm",
+			Name:         "x",
+			Version:      "1",
+			StorageKey:   "npm/x/1",
+			CachedAt:     now,
+			LastAccessed: now,
+			ExpiresAt:    &expiresAt,
+		}
+		mockMetadata.On("GetPackage", mock.Anything, "npm", "x", "1").Return(pkg, nil)
+		mockStorage.On("Get", mock.Anything, "npm/x/1").Return(io.NopCloser(strings.NewReader("d")), nil)
+		mockMetadata.On("UpdateDownloadCount", mock.Anything, "npm", "x", "1").Return(nil)
+
+		manager, err := New(mockStorage, mockMetadata, nil, nil, Config{})
+		require.NoError(t, err)
+		// No SetBroadcaster — manager.broadcaster is nil.
+		_, err = manager.Get(context.Background(), "npm", "x", "1", nil)
+		require.NoError(t, err)
+	})
 }

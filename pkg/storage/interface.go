@@ -1,3 +1,5 @@
+// Package storage defines the pluggable Storage backend interface used to
+// persist cached package payloads (filesystem, S3, NFS, etc.).
 package storage
 
 import (

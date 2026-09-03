@@ -14,16 +14,18 @@ func NewCredentialHasher() *CredentialHasher {
 	return &CredentialHasher{}
 }
 
-// Hash generates a short hash of credentials for use in cache keys
-// Returns "public" if no credentials provided
+// Hash generates a hash of credentials for use in cache keys.
+// Returns "public" if no credentials provided.
+// Returns the full 64-char SHA256 hex digest otherwise: truncating to 8 bytes
+// gives a ~2^32 birthday bound which is unsafe for a security-sensitive
+// cache key (cross-credential cache poisoning).
 func (h *CredentialHasher) Hash(credentials string) string {
 	if credentials == "" {
 		return "public"
 	}
 
-	// Use SHA256 and take first 16 characters (8 bytes)
 	hash := sha256.Sum256([]byte(credentials))
-	return hex.EncodeToString(hash[:8])
+	return hex.EncodeToString(hash[:])
 }
 
 // GenerateCacheKey generates a cache key that includes credential hash

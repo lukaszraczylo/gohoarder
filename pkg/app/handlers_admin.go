@@ -1,35 +1,27 @@
 package app
 
 import (
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
+	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
 
-// requireAdmin middleware checks for admin authentication
+// requireAdmin middleware checks for admin authentication. It accepts the API
+// key via either the Authorization Bearer header or the X-API-Key header
+// (shared extractAPIKey), so admin clients are not limited to the bearer form.
 func (a *App) requireAdmin(c *fiber.Ctx) error {
-	// Get API key from Authorization header
-	authHeader := c.Get("Authorization")
-	if authHeader == "" {
+	// Get API key from Authorization or X-API-Key header
+	apiKey, ok := extractAPIKey(c)
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "missing authorization header",
+			"error": "missing API key; provide Authorization: Bearer <key> or X-API-Key header",
 		})
 	}
-
-	// Extract bearer token
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "invalid authorization header format, expected: Bearer <token>",
-		})
-	}
-
-	apiKey := parts[1]
 
 	// Validate API key
 	key, err := a.authManager.ValidateAPIKey(c.Context(), apiKey)
@@ -304,7 +296,7 @@ func (a *App) handleDeleteBypass(c *fiber.Ctx) error {
 
 	// Delete bypass
 	if err := a.metadata.DeleteCVEBypass(ctx, bypassID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if appErr, ok := err.(*errors.Error); ok && appErr.Code == errors.ErrCodeNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "bypass not found"})
 		}
 		log.Error().Err(err).Msg("Failed to delete bypass")

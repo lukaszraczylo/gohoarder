@@ -362,6 +362,16 @@ func Default() *Config {
 		Security: SecurityConfig{
 			Enabled:         false,
 			BlockOnSeverity: "high",
+			// Default all severity caps to unlimited (-1) so the operator's
+			// BlockOnSeverity decision governs by default. A zero cap means
+			// "block any", which would make a single LOW vulnerability block
+			// every package even though the configured default is "high".
+			BlockThresholds: VulnerabilityThresholds{
+				Critical: -1,
+				High:     -1,
+				Medium:   -1,
+				Low:      -1,
+			},
 			Scanners: ScannersConfig{
 				Trivy: TrivyConfig{
 					Enabled: false,

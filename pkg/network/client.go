@@ -229,19 +229,12 @@ func (c *Client) do(ctx context.Context, req *http.Request) (*http.Response, err
 		resp, err := c.client.Do(req)
 		if err != nil {
 			lastErr = err
-			if c.circuitBreaker != nil {
-				c.circuitBreaker.RecordFailure()
-			}
 			continue
 		}
-
 		// Check if response is retryable
 		if c.isRetryable(resp.StatusCode) {
 			_ = resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
 			lastErr = fmt.Errorf("received retryable status code: %d", resp.StatusCode)
-			if c.circuitBreaker != nil {
-				c.circuitBreaker.RecordFailure()
-			}
 			continue
 		}
 

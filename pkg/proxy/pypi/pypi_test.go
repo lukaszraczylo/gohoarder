@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
@@ -136,4 +137,73 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+func TestExtractPackageFileInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		wantName string
+		wantVer  string
+	}{
+		{"numpy wheel", "/numpy/numpy-1.26.0rc1-cp312-cp312-manylinux.whl", "numpy", "1.26.0rc1"},
+		{"underscore wheel name", "/typing_extensions/typing_extensions-4.8.0-py3-none-any.whl", "typing_extensions", "4.8.0"},
+		{"hyphenated sdist", "/my-pkg/my-pkg-2.0.1.tar.gz", "my-pkg", "2.0.1"},
+		{"hyphen name underscore file", "/typed-ast/typed_ast-1.5.4.tar.gz", "typed-ast", "1.5.4"},
+		{"digit-embedded name", "/2captcha/2captcha-1.0.0.tar.gz", "2captcha", "1.0.0"},
+		{"digit intermediate segment", "/foo/foo-2019bar-1.0.zip", "foo", "1.0"},
+		{"egg file", "/foo/foo-1.0.egg", "foo", "1.0"},
+		{"metadata file", "/foo/foo-1.0.metadata", "foo", "1.0"},
+		{"no version", "/foo", "foo", "foo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotName, gotVer := extractPackageFileInfo(tt.path)
+			if gotName != tt.wantName {
+				t.Errorf("extractPackageFileInfo(%q) name = %q, want %q", tt.path, gotName, tt.wantName)
+			}
+			if gotVer != tt.wantVer {
+				t.Errorf("extractPackageFileInfo(%q) version = %q, want %q", tt.path, gotVer, tt.wantVer)
+			}
+		})
+	}
+}
+
+// TestCacheVersionUniquePerArtifact asserts that distinct PyPI artifacts of
+// the same logical version produce distinct cache keys, and that the bare
+// version returned for logging stays stable.
+func TestCacheVersionUniquePerArtifact(t *testing.T) {
+	// Three wheels of the same version differing only in build/tag, plus a
+	// .zip and a .metadata file for the same version. The cache key uses the
+	// full unique basename, so keys must all differ; the extracted version
+	// must remain the bare stable version for logging/bypass logic.
+	paths := []string{
+		"/foo/foo-1.0.0-cp312-cp312-manylinux.whl",
+		"/foo/foo-1.0.0-cp311-cp311-manylinux.whl",
+		"/foo/foo-1.0.0-py3-none-any.whl",
+		"/foo/foo-1.0.0.zip",
+		"/foo/foo-1.0.0.metadata",
+	}
+
+	seenKeys := make(map[string]bool)
+	for _, path := range paths {
+		_, ver := extractPackageFileInfo(path)
+		if ver != "1.0.0" {
+			t.Errorf("extractPackageFileInfo(%q) version = %q, want stable %q", path, ver, "1.0.0")
+		}
+
+		filename := path
+		if i := strings.LastIndex(filename, "/"); i >= 0 {
+			filename = filename[i+1:]
+		}
+		if seenKeys[filename] {
+			t.Errorf("cache key %q duplicated across artifacts", filename)
+		}
+		seenKeys[filename] = true
+	}
+
+	if len(seenKeys) != len(paths) {
+		t.Errorf("expected %d distinct cache keys, got %d", len(paths), len(seenKeys))
+	}
 }

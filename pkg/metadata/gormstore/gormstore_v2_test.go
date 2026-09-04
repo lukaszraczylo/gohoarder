@@ -209,6 +209,57 @@ func (s *GORMStoreV2TestSuite) Test_V2_DeletePackage_Success() {
 	s.Equal(int64(1), count) // Still in DB, just soft deleted
 }
 
+// Test_V2_SavePackage_AfterSoftDelete tests that saving the same
+// registry/name/version key after a soft delete (e.g. TTL expiry or
+// cache eviction) succeeds instead of colliding on the retained
+// storage_key UNIQUE index. Regression for the permanent 502 on
+// re-fetch of a once-evicted package.
+func (s *GORMStoreV2TestSuite) Test_V2_SavePackage_AfterSoftDelete() {
+	pkg := &metadata.Package{
+		Registry:     "npm",
+		Name:         "re-add-test",
+		Version:      "1.0.0",
+		StorageKey:   "npm/re-add-test/1.0.0.tgz",
+		Size:         1000,
+		CachedAt:     time.Now(),
+		LastAccessed: time.Now(),
+	}
+	err := s.store.SavePackage(s.ctx, pkg)
+	s.NoError(err)
+
+	// Soft-delete (simulates TTL expiry / eviction)
+	err = s.store.DeletePackage(s.ctx, "npm", "re-add-test", "1.0.0")
+	s.NoError(err)
+
+	// Re-save the same key (simulates re-fetch after cache miss).
+	// Before the fix this failed with:
+	//   UNIQUE constraint failed: packages.storage_key
+	pkg2 := &metadata.Package{
+		Registry:     "npm",
+		Name:         "re-add-test",
+		Version:      "1.0.0",
+		StorageKey:   "npm/re-add-test/1.0.0.tgz",
+		Size:         2000,
+		CachedAt:     time.Now(),
+		LastAccessed: time.Now(),
+	}
+	err = s.store.SavePackage(s.ctx, pkg2)
+	s.NoError(err)
+
+	// The re-saved package must be retrievable
+	retrieved, err := s.store.GetPackage(s.ctx, "npm", "re-add-test", "1.0.0")
+	s.NoError(err)
+	s.NotNil(retrieved)
+	s.Equal(int64(2000), retrieved.Size)
+
+	// No duplicate rows retained after the hard purge
+	var count int64
+	s.store.db.Unscoped().Model(&PackageModel{}).
+		Where("name = ?", "re-add-test").
+		Count(&count)
+	s.Equal(int64(1), count)
+}
+
 // Test_V2_ListPackages_All tests listing all packages
 func (s *GORMStoreV2TestSuite) Test_V2_ListPackages_All() {
 	// Create multiple packages

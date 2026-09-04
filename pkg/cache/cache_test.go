@@ -355,7 +355,7 @@ func TestNew(t *testing.T) {
 func TestGet(t *testing.T) {
 	tests := []struct {
 		setupMock     func(*MockStorageBackend, *MockMetadataStore)
-		fetchFunc     func(context.Context) (io.ReadCloser, string, error)
+		fetchFunc     FetchFunc
 		name          string
 		registry      string
 		packageName   string
@@ -404,8 +404,8 @@ func TestGet(t *testing.T) {
 				s.On("Get", mock.Anything, "npm/lodash/4.17.21").Return(io.NopCloser(strings.NewReader("upstream data")), nil)
 				m.On("UpdateDownloadCount", mock.Anything, "npm", "lodash", "4.17.21").Return(nil)
 			},
-			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
-				return io.NopCloser(strings.NewReader("upstream data")), "https://registry.npmjs.org/lodash", nil
+			fetchFunc: func(ctx context.Context) (*FetchResult, error) {
+				return &FetchResult{Data: io.NopCloser(strings.NewReader("upstream data")), UpstreamURL: "https://registry.npmjs.org/lodash"}, nil
 			},
 			wantFromCache: false,
 			wantErr:       false,
@@ -436,8 +436,8 @@ func TestGet(t *testing.T) {
 				s.On("Get", mock.Anything, "npm/expired-pkg/1.0.0").Return(io.NopCloser(strings.NewReader("refreshed data")), nil)
 				m.On("UpdateDownloadCount", mock.Anything, "npm", "expired-pkg", "1.0.0").Return(nil)
 			},
-			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
-				return io.NopCloser(strings.NewReader("refreshed data")), "https://registry.npmjs.org/expired-pkg", nil
+			fetchFunc: func(ctx context.Context) (*FetchResult, error) {
+				return &FetchResult{Data: io.NopCloser(strings.NewReader("refreshed data")), UpstreamURL: "https://registry.npmjs.org/expired-pkg"}, nil
 			},
 			wantFromCache: false,
 			wantErr:       false,
@@ -464,8 +464,8 @@ func TestGet(t *testing.T) {
 			setupMock: func(s *MockStorageBackend, m *MockMetadataStore) {
 				m.On("GetPackage", mock.Anything, "npm", "fail-pkg", "1.0.0").Return(nil, errors.New("not found"))
 			},
-			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
-				return nil, "", errors.New("upstream error")
+			fetchFunc: func(ctx context.Context) (*FetchResult, error) {
+				return nil, errors.New("upstream error")
 			},
 			wantErr:     true,
 			errContains: "failed to fetch from upstream",
@@ -498,8 +498,8 @@ func TestGet(t *testing.T) {
 				s.On("Get", mock.Anything, "npm/inconsistent/1.0.0").Return(io.NopCloser(strings.NewReader("recovered data")), nil).Once()
 				m.On("UpdateDownloadCount", mock.Anything, "npm", "inconsistent", "1.0.0").Return(nil)
 			},
-			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
-				return io.NopCloser(strings.NewReader("recovered data")), "https://registry.npmjs.org/inconsistent", nil
+			fetchFunc: func(ctx context.Context) (*FetchResult, error) {
+				return &FetchResult{Data: io.NopCloser(strings.NewReader("recovered data")), UpstreamURL: "https://registry.npmjs.org/inconsistent"}, nil
 			},
 			wantFromCache: false,
 			wantErr:       false,
@@ -515,8 +515,8 @@ func TestGet(t *testing.T) {
 				s.On("GetQuota", mock.Anything).Return(&storage.QuotaInfo{Used: 100, Available: 900, Limit: 1000}, nil)
 				s.On("Put", mock.Anything, "npm/save-fail/1.0.0", mock.Anything, mock.Anything).Return(errors.New("storage error"))
 			},
-			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
-				return io.NopCloser(strings.NewReader("data")), "https://registry.npmjs.org/save-fail", nil
+			fetchFunc: func(ctx context.Context) (*FetchResult, error) {
+				return &FetchResult{Data: io.NopCloser(strings.NewReader("data")), UpstreamURL: "https://registry.npmjs.org/save-fail"}, nil
 			},
 			wantErr:     true,
 			errContains: "storage error",
@@ -534,8 +534,8 @@ func TestGet(t *testing.T) {
 				m.On("SavePackage", mock.Anything, mock.Anything).Return(errors.New("metadata error"))
 				s.On("Delete", mock.Anything, "npm/meta-fail/1.0.0").Return(nil)
 			},
-			fetchFunc: func(ctx context.Context) (io.ReadCloser, string, error) {
-				return io.NopCloser(strings.NewReader("data")), "https://registry.npmjs.org/meta-fail", nil
+			fetchFunc: func(ctx context.Context) (*FetchResult, error) {
+				return &FetchResult{Data: io.NopCloser(strings.NewReader("data")), UpstreamURL: "https://registry.npmjs.org/meta-fail"}, nil
 			},
 			wantErr:     true,
 			errContains: "metadata error",
@@ -1105,8 +1105,8 @@ func TestBroadcaster_CacheMissStore(t *testing.T) {
 	bc := &fakeBroadcaster{}
 	manager.SetBroadcaster(bc)
 
-	fetch := func(ctx context.Context) (io.ReadCloser, string, error) {
-		return io.NopCloser(strings.NewReader("upstream data")), "https://registry.npmjs.org/lodash", nil
+	fetch := func(ctx context.Context) (*FetchResult, error) {
+		return &FetchResult{Data: io.NopCloser(strings.NewReader("upstream data")), UpstreamURL: "https://registry.npmjs.org/lodash"}, nil
 	}
 	entry, err := manager.Get(context.Background(), "npm", "lodash", "4.17.21", fetch)
 	require.NoError(t, err)
@@ -1153,8 +1153,8 @@ func TestBroadcaster_NoEmitOnError(t *testing.T) {
 		bc := &fakeBroadcaster{}
 		manager.SetBroadcaster(bc)
 
-		fetch := func(ctx context.Context) (io.ReadCloser, string, error) {
-			return io.NopCloser(strings.NewReader("data")), "https://registry.npmjs.org/fail", nil
+		fetch := func(ctx context.Context) (*FetchResult, error) {
+			return &FetchResult{Data: io.NopCloser(strings.NewReader("data")), UpstreamURL: "https://registry.npmjs.org/fail"}, nil
 		}
 		_, err = manager.Get(context.Background(), "npm", "fail", "1.0.0", fetch)
 		require.Error(t, err)
@@ -1178,8 +1178,8 @@ func TestBroadcaster_NoEmitOnError(t *testing.T) {
 		bc := &fakeBroadcaster{}
 		manager.SetBroadcaster(bc)
 
-		fetch := func(ctx context.Context) (io.ReadCloser, string, error) {
-			return io.NopCloser(strings.NewReader("data")), "https://registry.npmjs.org/meta-fail", nil
+		fetch := func(ctx context.Context) (*FetchResult, error) {
+			return &FetchResult{Data: io.NopCloser(strings.NewReader("data")), UpstreamURL: "https://registry.npmjs.org/meta-fail"}, nil
 		}
 		_, err = manager.Get(context.Background(), "npm", "meta-fail", "1.0.0", fetch)
 		require.Error(t, err)

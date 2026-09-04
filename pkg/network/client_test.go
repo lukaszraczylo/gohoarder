@@ -405,3 +405,38 @@ func TestConcurrentRequests(t *testing.T) {
 		assert.NoError(t, err)
 	}
 }
+
+// TestCircuitBreakerOpens verifies that a configured number of consecutive
+// failed requests opens the circuit breaker and that subsequent requests are
+// rejected with the circuit-open error until the breaker half-open window
+// elapses and a request succeeds again.
+func TestCircuitBreakerOpens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close() // #nosec G104 -- Cleanup, error not critical
+
+	client := network.NewClient(network.Config{
+		Timeout:    5 * time.Second,
+		MaxRetries: 0,
+		CircuitBreaker: network.CircuitBreakerConfig{
+			Enabled:          true,
+			FailureThreshold: 3,
+			SuccessThreshold: 1,
+			Timeout:          time.Hour,
+		},
+	})
+
+	ctx := context.Background()
+
+	// Three consecutive failed requests open the breaker.
+	for i := 0; i < 3; i++ {
+		_, _, err := client.Get(ctx, server.URL, nil)
+		assert.Error(t, err)
+	}
+
+	// The next request is rejected because the breaker is open.
+	_, _, err := client.Get(ctx, server.URL, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "circuit breaker is open")
+}

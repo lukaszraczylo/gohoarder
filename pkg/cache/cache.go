@@ -3,7 +3,6 @@
 package cache
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -96,6 +95,27 @@ type CacheEntry struct {
 	FromCache    bool
 }
 
+// FetchResult carries the outcome of an upstream fetch closure. In addition
+// to the response body, it communicates auth state so the cache manager can
+// persist RequiresAuth/AuthProvider on the stored package. The downstream
+// security gate reads entry.Package.RequiresAuth, so this state must be stored
+// in the database (not just set on the ephemeral cache entry).
+type FetchResult struct {
+	// Data is the response body. Caller closes it (or Get closes it after store).
+	Data io.ReadCloser
+	// UpstreamURL is the upstream URL the body came from.
+	UpstreamURL string
+	// AuthProvider identifies the auth system (e.g. github, gitlab, custom).
+	AuthProvider string
+	// RequiresAuth is true when the upstream indicated the package is behind
+	// authentication (e.g. HTTP 401/403, or a private registry that demanded
+	// credentials).
+	RequiresAuth bool
+}
+
+// FetchFunc fetches a package from upstream and reports auth state.
+type FetchFunc func(context.Context) (*FetchResult, error)
+
 // New creates a new cache manager
 func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanner ScannerInterface, analytics AnalyticsInterface, config Config) (*Manager, error) {
 	if storage == nil {
@@ -150,10 +170,10 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 	go manager.cleanupWorker()
 
 	return manager, nil
+
 }
 
-// Get retrieves a package from cache or upstream
-func (m *Manager) Get(ctx context.Context, registry, name, version string, fetchFunc func(context.Context) (io.ReadCloser, string, error)) (*CacheEntry, error) {
+func (m *Manager) Get(ctx context.Context, registry, name, version string, fetchFunc FetchFunc) (*CacheEntry, error) {
 	// Use singleflight to deduplicate concurrent requests
 	key := fmt.Sprintf("%s/%s/%s", registry, name, version)
 
@@ -190,7 +210,7 @@ func (m *Manager) Get(ctx context.Context, registry, name, version string, fetch
 }
 
 // getOrFetch implements the actual get-or-fetch logic
-func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string, fetchFunc func(context.Context) (io.ReadCloser, string, error)) (*CacheEntry, error) {
+func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string, fetchFunc FetchFunc) (*CacheEntry, error) {
 	// Check metadata first
 	pkg, err := m.metadata.GetPackage(ctx, registry, name, version)
 	if err == nil {
@@ -247,8 +267,13 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 					m.trackDownload(registry, name, version, pkg.Size)
 				}
 
-				// Check for vulnerabilities if scanner is enabled
-				if m.scanner != nil {
+				// Check for vulnerabilities if scanner is enabled. Metadata
+				// entries (index pages, lists, .mod/.info) are not scannable
+				// packages, so skip them to avoid a bogus "clean" verdict and
+				// the extra database round-trip.
+				isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
+					strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
+				if m.scanner != nil && !isMetadataEntry {
 					blocked, reason, vulnErr := m.scanner.CheckVulnerabilities(ctx, registry, name, version)
 					if vulnErr != nil {
 						log.Warn().Err(vulnErr).Str("package", name).Msg("Failed to check vulnerabilities")
@@ -293,17 +318,22 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 	log.Debug().Str("package", name).Str("version", version).Msg("Fetching from upstream")
 
 	// Fetch from upstream
-	data, upstreamURL, err := fetchFunc(ctx)
+	fr, err := fetchFunc(ctx)
 	if err != nil {
 		metrics.RecordUpstreamRequest(registry, "error")
 		return nil, errors.Wrap(err, errors.ErrCodeUpstreamFailure, "failed to fetch from upstream")
 	}
+	if fr == nil || fr.Data == nil {
+		return nil, errors.New(errors.ErrCodeUpstreamFailure, "upstream fetch returned no data")
+	}
+	data := fr.Data
 	defer func() { _ = data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	metrics.RecordUpstreamRequest(registry, "success")
 
-	// Store in cache (this will also trigger background scan)
-	storedPkg, err := m.store(ctx, registry, name, version, data, upstreamURL)
+	// Store in cache (this will also trigger background scan). Auth state is
+	// plumbed through so the persisted package carries RequiresAuth.
+	storedPkg, err := m.store(ctx, registry, name, version, data, fr.UpstreamURL, fr.RequiresAuth, fr.AuthProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -412,45 +442,56 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 	// Data is intentionally nil; Get() opens a fresh reader per caller.
 	return &CacheEntry{
 		Package:     storedPkg,
-		Data:        nil,
+		UpstreamURL: fr.UpstreamURL,
 		FromCache:   false,
-		UpstreamURL: upstreamURL,
 	}, nil
 }
 
 // store stores a package in cache
-func (m *Manager) store(ctx context.Context, registry, name, version string, data io.ReadCloser, upstreamURL string) (*metadata.Package, error) {
+func (m *Manager) store(ctx context.Context, registry, name, version string, data io.ReadCloser, upstreamURL string, requiresAuth bool, authProvider string) (*metadata.Package, error) {
 	// Generate storage key
 	storageKey := m.generateStorageKey(registry, name, version)
 
-	// Calculate checksums while storing
-	// We need to read the data, calculate checksums, and store it
-	// This requires buffering the data
-	var buf []byte
-	var err error
-
-	// Cap upstream read to MaxPackageSize to prevent OOM on hostile/oversized
-	// upstream responses. Read one extra byte so we can detect overflow.
+	// Stream upstream to a temp file while computing checksums, instead of
+	// buffering the full payload in memory (avoids OOM on large packages,
+	// e.g. the default 2 GB MaxPackageSize). The temp file also becomes the
+	// scan source for backends that can't expose a local path, so the payload
+	// is never held twice in RAM.
 	maxSize := m.config.MaxPackageSize
 	if maxSize <= 0 {
 		maxSize = 2 * 1024 * 1024 * 1024 // 2GB safety floor
 	}
-	limited := io.LimitReader(data, maxSize+1)
-	buf, err = io.ReadAll(limited)
+
+	tempFile, err := os.CreateTemp(os.TempDir(), "gohoarder-store-*")
 	if err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeUpstreamFailure, "failed to create temp file for upstream data")
+	}
+	tempPath := tempFile.Name()
+	// Temp file is removed when store() returns, unless ownership is handed
+	// to a scan goroutine (remote backends reuse it for scanning).
+	scanOwnsTemp := false
+	defer func() {
+		if !scanOwnsTemp {
+			_ = os.Remove(tempPath) // #nosec G104 -- cleanup
+		}
+	}()
+
+	// Compute SHA256 as the payload is streamed to the temp file. Cap at
+	// maxSize+1 so we can detect overflow without reading unbounded data.
+	hash := sha256.New()
+	limited := io.LimitReader(data, maxSize+1)
+	written, err := io.Copy(io.MultiWriter(tempFile, hash), limited)
+	if err != nil {
+		_ = tempFile.Close() // #nosec G104 -- cleanup
 		return nil, errors.Wrap(err, errors.ErrCodeUpstreamFailure, "failed to read upstream data")
 	}
-	if int64(len(buf)) > maxSize {
+	if written > maxSize {
+		_ = tempFile.Close() // #nosec G104 -- cleanup
 		return nil, errors.New(errors.ErrCodePayloadTooLarge,
 			fmt.Sprintf("upstream package exceeds max size (%d bytes)", maxSize))
 	}
-
-	// Calculate checksums
-	h := sha256.New()
-	h.Write(buf)
-	checksumSHA256 := fmt.Sprintf("%x", h.Sum(nil))
-
-	size := int64(len(buf))
+	checksumSHA256 := fmt.Sprintf("%x", hash.Sum(nil))
+	size := written
 
 	// Check quota before storing
 	quota, err := m.storage.GetQuota(ctx)
@@ -458,9 +499,16 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		if quota.Used+size > quota.Limit {
 			// Trigger eviction
 			if evictErr := m.evict(ctx, size); evictErr != nil {
+				_ = tempFile.Close() // #nosec G104 -- cleanup
 				return nil, errors.QuotaExceeded(quota.Limit)
 			}
 		}
+	}
+
+	// Seek temp file back to start and stream it to the storage backend.
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		_ = tempFile.Close() // #nosec G104 -- cleanup
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to seek temp file")
 	}
 
 	// Store in storage backend
@@ -468,10 +516,11 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		ChecksumSHA256: checksumSHA256,
 	}
 
-	err = m.storage.Put(ctx, storageKey, io.NopCloser(bytes.NewReader(buf)), opts)
-	if err != nil {
+	if err := m.storage.Put(ctx, storageKey, tempFile, opts); err != nil {
+		_ = tempFile.Close() // #nosec G104 -- cleanup
 		return nil, err
 	}
+	_ = tempFile.Close() // #nosec G104 -- cleanup; scan may still read the file
 
 	// Create metadata entry
 	now := time.Now()
@@ -486,6 +535,8 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		Size:           size,
 		ChecksumSHA256: checksumSHA256,
 		UpstreamURL:    upstreamURL,
+		RequiresAuth:   requiresAuth,
+		AuthProvider:   authProvider,
 		CachedAt:       now,
 		LastAccessed:   now,
 		ExpiresAt:      &expiresAt,
@@ -531,6 +582,16 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 	// Scan package if scanner is enabled (run in background to not block cache operations)
 	// Skip scanning metadata entries (index pages, lists, etc.)
 	if m.scanner != nil && !isMetadataEntry {
+		// Decide synchronously whether the streaming temp file must outlive
+		// store(). Remote backends (no GetLocalPath) reuse it as the scan
+		// source; local backends scan from GetLocalPath and don't need it.
+		_, hasLocalPath := m.storage.(interface {
+			GetLocalPath(ctx context.Context, key string) (string, error)
+		})
+		if !hasLocalPath {
+			scanOwnsTemp = true
+		}
+
 		go func() {
 			scanCtx := context.Background()
 			var filePath string
@@ -550,27 +611,11 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 				cleanupFunc = func() {} // No cleanup needed for direct path
 				log.Debug().Str("package", name).Str("path", filePath).Msg("Scanning package from storage path")
 			} else {
-				// Fallback: Create temp file for remote storage (S3, SMB, etc.).
-				// Use os.CreateTemp so the OS picks a safe, unique filename — this
-				// prevents path traversal via storageKey containing "..".
-				tempFile, err := os.CreateTemp(os.TempDir(), "gohoarder-scan-*")
-				if err != nil {
-					log.Error().Err(err).Str("package", name).Msg("Failed to create temp file for scanning")
-					return
-				}
-				tempFilePath := tempFile.Name()
-
-				// Write package data to temp file
-				if _, err := tempFile.Write(buf); err != nil {
-					_ = tempFile.Close()        // #nosec G104 -- Cleanup, error not critical
-					_ = os.Remove(tempFilePath) // #nosec G104 -- Cleanup, error not critical
-					log.Error().Err(err).Str("package", name).Msg("Failed to write temp file for scanning")
-					return
-				}
-				_ = tempFile.Close() // #nosec G104 -- Cleanup, error not critical
-
-				filePath = tempFilePath
-				cleanupFunc = func() { _ = os.Remove(tempFilePath) } // #nosec G104 -- Cleanup
+				// Remote storage (S3, SMB, etc.) — reuse the temp file store()
+				// already wrote during streaming. This avoids re-uploading the
+				// payload into another temp file and avoids holding it in RAM.
+				filePath = tempPath
+				cleanupFunc = func() { _ = os.Remove(tempPath) } // #nosec G104 -- Cleanup
 				log.Debug().Str("package", name).Str("path", filePath).Msg("Scanning package from temp file")
 			}
 

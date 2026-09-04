@@ -77,11 +77,19 @@ func (a *App) handleVulnerabilities(c *fiber.Ctx) error {
 		bypasses = []*metadata.CVEBypass{}
 	}
 
-	// Build bypass map for fast lookup
+	// Build bypass map for fast lookup.
+	// Normalize Go cache-key names (modulePath/@v/version.zip) to the
+	// natural module path so admin bypass targets like
+	// "go/github.com/foo/bar@v1.2.3" match the package.
+	bypassName := name
+	if registry == "go" {
+		if idx := strings.Index(bypassName, "/@v/"); idx >= 0 {
+			bypassName = bypassName[:idx]
+		}
+	}
+	packageKey := registry + "/" + bypassName + "@" + version
+	packageKeyNoVersion := registry + "/" + bypassName
 	bypassedCVEs := make(map[string]*metadata.CVEBypass)
-	packageKey := registry + "/" + name + "@" + version
-	packageKeyNoVersion := registry + "/" + name
-
 	for _, bypass := range bypasses {
 		if bypass.Type == metadata.BypassTypeCVE && bypass.Active {
 			// Check if bypass applies to this package
@@ -110,7 +118,7 @@ func (a *App) handleVulnerabilities(c *fiber.Ctx) error {
 			}
 		} else {
 			// Count non-bypassed vulnerabilities by severity
-			severityCounts[strings.ToUpper(vuln.Severity)]++
+			severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
 		}
 
 		enrichedVuln := map[string]interface{}{

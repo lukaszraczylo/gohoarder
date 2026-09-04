@@ -377,7 +377,7 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 	// Convert map to slice and count severities
 	for _, vuln := range vulnMap {
 		merged.Vulnerabilities = append(merged.Vulnerabilities, *vuln)
-		severityCounts[strings.ToUpper(vuln.Severity)]++
+		severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
 	}
 
 	// Update counts
@@ -409,6 +409,21 @@ func (m *Manager) compareSeverity(s1, s2 string) int {
 	return v1 - v2
 }
 
+// normalizeBypassPackageName reduces a stored package cache key to the
+// natural registry/package identifier used in admin bypass targets.
+// Go module packages are stored with a cache key of
+// "modulePath/@v/version.zip" (and .info/.mod variants); the admin-facing
+// target uses the bare module path, e.g. "go/github.com/foo/bar@v1.2.3".
+// npm/pypi names are stored unchanged, so this is a no-op for them.
+func normalizeBypassPackageName(registry, name string) string {
+	if registry == "go" {
+		if idx := strings.Index(name, "/@v/"); idx >= 0 {
+			return name[:idx]
+		}
+	}
+	return name
+}
+
 // CheckVulnerabilities checks if a package exceeds vulnerability thresholds
 func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageName, version string) (bool, string, error) {
 	if !m.enabled {
@@ -423,8 +438,9 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	}
 
 	// Check if entire package is bypassed
-	packageKey := fmt.Sprintf("%s/%s@%s", registry, packageName, version)
-	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, packageName)
+	bypassName := normalizeBypassPackageName(registry, packageName)
+	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
+	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
 
 	for _, bypass := range bypasses {
 		if bypass.Type == metadata.BypassTypePackage && bypass.Active {
@@ -499,7 +515,7 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 				Msg("CVE bypassed by admin")
 			continue
 		}
-		severityCounts[strings.ToUpper(vuln.Severity)]++
+		severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
 	}
 
 	// Check against thresholds

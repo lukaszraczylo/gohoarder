@@ -115,7 +115,7 @@ func (h *Handler) handleList(ctx context.Context, w http.ResponseWriter, r *http
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
 
-	entry, err := h.cache.Get(ctx, "go", modulePath, "list", func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "go", modulePath, "list", func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -124,13 +124,16 @@ func (h *Handler) handleList(ctx context.Context, w http.ResponseWriter, r *http
 
 		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.ProviderFor(modulePath)}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -155,7 +158,7 @@ func (h *Handler) handleInfo(ctx context.Context, w http.ResponseWriter, r *http
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
 
-	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -164,13 +167,16 @@ func (h *Handler) handleInfo(ctx context.Context, w http.ResponseWriter, r *http
 
 		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.ProviderFor(modulePath)}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -188,14 +194,14 @@ func (h *Handler) handleInfo(ctx context.Context, w http.ResponseWriter, r *http
 func (h *Handler) handleMod(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	url := h.upstream + path
 	modulePath := h.extractModulePath(path)
+
+	// Extract credentials from request
+	credentials := h.credExtractor.Extract(r)
 	version := h.extractVersion(path, ".mod")
 	// Use .mod suffix to distinguish from .info and .zip in cache
 	cacheKey := modulePath + "/@v/" + version + ".mod"
 
-	// Extract credentials from request
-	credentials := h.credExtractor.Extract(r)
-
-	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -204,13 +210,16 @@ func (h *Handler) handleMod(ctx context.Context, w http.ResponseWriter, r *http.
 
 		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.ProviderFor(modulePath)}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -245,7 +254,7 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 		Bool("has_credentials", credentials != "").
 		Msg("Handling Go module zip request")
 
-	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "go", cacheKey, version, func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -255,7 +264,7 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 		// Try upstream proxy first (fast path for public modules)
 		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err == nil && statusCode == http.StatusOK {
-			return body, url, nil
+			return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 		}
 
 		// If upstream failed with 404 or 403, try git fallback (private modules)
@@ -278,9 +287,9 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
 		}
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
-		return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+		return nil, fmt.Errorf("upstream returned status %d", statusCode)
 	})
 
 	if err != nil {
@@ -299,6 +308,10 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 	defer func() { _ = entry.Data.Close() }() // #nosec G104 -- Cleanup, error not critical
 
 	// CRITICAL SECURITY CHECK: If module requires auth, validate credentials
+	// The auth validation cache is owned by this handler instance only, so its
+	// key may use the module path (modulePath) rather than a URL. The module path
+	// uniquely identifies the private module within this registry's cache; there
+	// is no cross-registry collision because npm/pypi use their own instances.
 	if entry.Package != nil && entry.Package.RequiresAuth {
 		// Check validation cache first
 		allowed, cached, reason := h.validationCache.Get(credHash, modulePath)
@@ -352,6 +365,7 @@ func (h *Handler) handleZip(ctx context.Context, w http.ResponseWriter, r *http.
 
 	w.Header().Set("Content-Type", "application/zip")
 	_, _ = io.Copy(w, entry.Data) // #nosec G104 -- HTTP response write
+
 }
 
 // handleLatest handles /@latest requests
@@ -362,7 +376,7 @@ func (h *Handler) handleLatest(ctx context.Context, w http.ResponseWriter, r *ht
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
 
-	entry, err := h.cache.Get(ctx, "go", modulePath, "latest", func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "go", modulePath, "latest", func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -371,13 +385,16 @@ func (h *Handler) handleLatest(ctx context.Context, w http.ResponseWriter, r *ht
 
 		body, statusCode, err := h.client.Get(ctx, url, headers)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.ProviderFor(modulePath)}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close() // #nosec G104 -- Cleanup, error not critical
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -450,7 +467,7 @@ func (h *Handler) extractModulePath(path string) string {
 }
 
 // fetchModuleFromGit fetches a Go module directly from git repository
-func (h *Handler) fetchModuleFromGit(ctx context.Context, modulePath, version, credentials string) (io.ReadCloser, string, error) {
+func (h *Handler) fetchModuleFromGit(ctx context.Context, modulePath, version, credentials string) (*cache.FetchResult, error) {
 	log.Info().
 		Str("module", modulePath).
 		Str("version", version).
@@ -459,23 +476,25 @@ func (h *Handler) fetchModuleFromGit(ctx context.Context, modulePath, version, c
 	// 1. Fetch module source from git
 	srcPath, err := h.gitFetcher.FetchModule(ctx, modulePath, version, credentials)
 	if err != nil {
-		return nil, "", fmt.Errorf("git fetch failed: %w", err)
+		return nil, fmt.Errorf("git fetch failed: %w", err)
 	}
 	defer h.gitFetcher.Cleanup(srcPath)
 
 	// 2. Validate module
 	if validateErr := h.moduleBuilder.ValidateModule(ctx, srcPath, modulePath); validateErr != nil {
-		return nil, "", fmt.Errorf("module validation failed: %w", validateErr)
+		return nil, fmt.Errorf("module validation failed: %w", validateErr)
 	}
 
 	// 3. Build module zip
 	zipReader, err := h.moduleBuilder.BuildModuleZip(ctx, srcPath, modulePath, version)
 	if err != nil {
-		return nil, "", fmt.Errorf("module zip build failed: %w", err)
+		return nil, fmt.Errorf("module zip build failed: %w", err)
 	}
 
-	// Create source URL for logging
-	sourceURL := fmt.Sprintf("git+https://%s@%s", modulePath, version)
+	// Create source URL for logging. Private modules fetched from git require
+	// auth, so mark the result accordingly. FIX-L3: strip the git+ scheme so the
+	// stored UpstreamURL is a fetchable HTTPS URL.
+	sourceURL := fmt.Sprintf("https://%s@%s", modulePath, version)
 
 	log.Info().
 		Str("module", modulePath).
@@ -483,5 +502,10 @@ func (h *Handler) fetchModuleFromGit(ctx context.Context, modulePath, version, c
 		Str("source", sourceURL).
 		Msg("Successfully built module from git")
 
-	return zipReader, sourceURL, nil
+	return &cache.FetchResult{
+		Data:         zipReader,
+		UpstreamURL:  sourceURL,
+		RequiresAuth: true,
+		AuthProvider: h.credValidator.ProviderFor(modulePath),
+	}, nil
 }

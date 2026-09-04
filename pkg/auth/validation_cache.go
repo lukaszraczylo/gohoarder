@@ -12,7 +12,17 @@ type ValidationResult struct {
 	Allowed   bool
 }
 
-// ValidationCache caches credential validation results to reduce upstream checks
+// ValidationCache caches credential validation results to reduce upstream checks.
+//
+// Scope: each instance is owned by exactly one proxy handler (goproxy, npm,
+// or pypi) and caches only that registry's credential checks. Because the
+// instances are never shared across handlers, the second key component may be
+// whatever uniquely identifies the resource for that registry: goproxy passes
+// a module path, npm and pypi pass a URL. There is no cross-registry key
+// collision even though the resource shapes differ, because each handler has
+// its own map. Callers must pass the same resource value to every Get/Set for
+// a given resource so the cache miss wrapper (Get then Set) is internally
+// consistent.
 type ValidationCache struct {
 	cache    map[string]*ValidationResult
 	stopCh   chan struct{}
@@ -32,22 +42,15 @@ func NewValidationCache(ttl time.Duration) *ValidationCache {
 
 	// Start cleanup goroutine
 	go vc.cleanupExpired()
-
 	return vc
 }
 
-// Stop terminates the background cleanup goroutine. Safe to call multiple
-// times; subsequent calls are no-ops.
-func (vc *ValidationCache) Stop() {
-	vc.stopOnce.Do(func() {
-		close(vc.stopCh)
-	})
-}
-
-// Get retrieves a validation result from cache
-// Returns (allowed bool, cached bool, reason string)
-func (vc *ValidationCache) Get(credHash, packageURL string) (bool, bool, string) {
-	key := credHash + ":" + packageURL
+// Get retrieves a validation result from cache.
+// resource names the registry resource the check was for (a module path for
+// goproxy, or a URL for npm/pypi). It is only meaningful within this cache
+// instance. Returns (allowed bool, cached bool, reason string).
+func (vc *ValidationCache) Get(credHash, resource string) (bool, bool, string) {
+	key := credHash + ":" + resource
 
 	// Fast path: read-locked lookup.
 	vc.mu.RLock()
@@ -74,12 +77,14 @@ func (vc *ValidationCache) Get(credHash, packageURL string) (bool, bool, string)
 	return false, false, ""
 }
 
-// Set stores a validation result in cache
-func (vc *ValidationCache) Set(credHash, packageURL string, allowed bool, reason string) {
+// Set stores a validation result in cache.
+// resource is the registry resource the result belongs to; it must match the
+// resource value passed to the corresponding Get.
+func (vc *ValidationCache) Set(credHash, resource string, allowed bool, reason string) {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
 
-	key := credHash + ":" + packageURL
+	key := credHash + ":" + resource
 	vc.cache[key] = &ValidationResult{
 		Allowed:   allowed,
 		ExpiresAt: time.Now().Add(vc.ttl),
@@ -87,12 +92,12 @@ func (vc *ValidationCache) Set(credHash, packageURL string, allowed bool, reason
 	}
 }
 
-// Invalidate removes a specific entry from cache
-func (vc *ValidationCache) Invalidate(credHash, packageURL string) {
+// Invalidate removes a specific entry from cache.
+func (vc *ValidationCache) Invalidate(credHash, resource string) {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
 
-	key := credHash + ":" + packageURL
+	key := credHash + ":" + resource
 	delete(vc.cache, key)
 }
 

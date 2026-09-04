@@ -18,6 +18,9 @@ type CredentialValidator interface {
 	// ValidateAccess checks if credentials grant access to a package
 	// Returns (allowed bool, error)
 	ValidateAccess(ctx context.Context, packageURL string, credentials string) (bool, error)
+	// Provider returns the upstream auth provider identifier stored on
+	// packages that require auth (e.g. github, gitlab, npm, pypi).
+	Provider() string
 }
 
 // NPMValidator validates npm registry credentials
@@ -34,6 +37,11 @@ func NewNPMValidator() *NPMValidator {
 		},
 		timeout: 5 * time.Second,
 	}
+}
+
+// Provider identifies this validator's upstream provider.
+func (v *NPMValidator) Provider() string {
+	return "npm"
 }
 
 // ValidateAccess validates npm package access using HEAD request
@@ -87,6 +95,11 @@ func NewPyPIValidator() *PyPIValidator {
 	}
 }
 
+// Provider identifies this validator's upstream provider.
+func (v *PyPIValidator) Provider() string {
+	return "pypi"
+}
+
 // ValidateAccess validates PyPI package access using HEAD request
 func (v *PyPIValidator) ValidateAccess(ctx context.Context, packageURL string, credentials string) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, "HEAD", packageURL, nil)
@@ -131,6 +144,26 @@ type GoValidator struct {
 func NewGoValidator() *GoValidator {
 	return &GoValidator{
 		timeout: 10 * time.Second,
+	}
+}
+
+// Provider returns the base upstream provider identifier used when the
+// registry does not distinguish hosts (e.g. a generic git host).
+func (v *GoValidator) Provider() string {
+	return "git"
+}
+
+// ProviderFor derives the specific provider identifier from a module path.
+// Mirrors the host branching in ValidateAccess so the stored AuthProvider
+// reflects the actual upstream host (github, gitlab, or a generic git host).
+func (v *GoValidator) ProviderFor(modulePath string) string {
+	switch {
+	case strings.HasPrefix(modulePath, "github.com/"):
+		return "github"
+	case strings.HasPrefix(modulePath, "gitlab.com/"):
+		return "gitlab"
+	default:
+		return "git"
 	}
 }
 

@@ -5,10 +5,12 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -44,6 +46,7 @@ import (
 // App represents the main application
 type App struct {
 	config          *config.Config
+	cancel          context.CancelFunc
 	app             *fiber.App
 	healthChecker   *health.Checker
 	cache           *cache.Manager
@@ -580,20 +583,13 @@ func (a *App) setupServer() error {
 	return nil
 }
 
-// Run starts the application
 func (a *App) Run() error {
-	ctx := context.Background()
-
-	// Start WebSocket server
-	a.wsServer.Start(ctx)
-
-	// Start pre-warming worker
-	a.prewarmWorker.Start(ctx)
-
-	// Start rescan worker if enabled
-	if a.rescanWorker != nil {
-		go a.rescanWorker.Start(ctx)
-	}
+	// Cancellable worker context: aggregation + stats broadcaster goroutines
+	// watch ctx.Done() and exit, so Shutdown can stop them before closing
+	// the storage/metadata backends they touch.
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancel = cancel
+	defer cancel()
 
 	// Start download data aggregation worker (runs every hour)
 	go a.startAggregationWorker(ctx)
@@ -605,7 +601,7 @@ func (a *App) Run() error {
 	// Start Fiber server in goroutine. Branch on TLS to pick Listen vs ListenTLS.
 	errChan := make(chan error, 1)
 	go func() {
-		addr := fmt.Sprintf("%s:%d", a.config.Server.Host, a.config.Server.Port)
+		addr := net.JoinHostPort(a.config.Server.Host, strconv.Itoa(a.config.Server.Port))
 		if a.config.Server.TLS.Enabled {
 			log.Info().
 				Str("addr", addr).
@@ -630,6 +626,13 @@ func (a *App) Run() error {
 
 	select {
 	case err := <-errChan:
+		// Server failed to start or stopped unexpectedly. Cancel the worker
+		// contexts and run the same teardown Shutdown performs so background
+		// goroutines don't keep running against closed storage/metadata.
+		shutdownErr := a.Shutdown()
+		if shutdownErr != nil {
+			log.Error().Err(shutdownErr).Msg("Error during shutdown after server error")
+		}
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-sigChan:
 		log.Info().
@@ -640,7 +643,6 @@ func (a *App) Run() error {
 	// Graceful shutdown
 	return a.Shutdown()
 }
-
 // Shutdown gracefully shuts down the application
 func (a *App) Shutdown() error {
 	log.Info().Msg("Starting graceful shutdown")
@@ -648,6 +650,12 @@ func (a *App) Shutdown() error {
 	// Stop Fiber server
 	if err := a.app.Shutdown(); err != nil {
 		log.Error().Err(err).Msg("Error shutting down Fiber server")
+	}
+
+	// Cancel worker contexts first so the aggregation and stats broadcaster
+	// goroutines stop before the storage/metadata backends they touch close.
+	if a.cancel != nil {
+		a.cancel()
 	}
 
 	// Drain async auth writes (LastUsedAt updates) before closing metadata.
@@ -666,14 +674,15 @@ func (a *App) Shutdown() error {
 	// Close analytics engine
 	a.analyticsEngine.Close() // #nosec G104 -- Cleanup, error not critical
 
-	// Close storage
-	if err := a.storage.Close(); err != nil {
-		log.Error().Err(err).Msg("Error closing storage")
-	}
-
-	// Close metadata store
-	if err := a.metadata.Close(); err != nil {
-		log.Error().Err(err).Msg("Error closing metadata store")
+	// Close cache manager. This stops the cache cleanup worker and closes the
+	// storage + metadata backends (a.cache is the sole owner of both, sharing
+	// the same pointers with the App). Calling Close on storage/metadata here
+	// instead of via a.cache.Close() would double-close and leave the cleanup
+	// worker running against closed backends.
+	if a.cache != nil {
+		if err := a.cache.Close(); err != nil {
+			log.Error().Err(err).Msg("Error closing cache")
+		}
 	}
 
 	log.Info().Msg("Shutdown complete")
@@ -762,6 +771,41 @@ func getOrDefaultStr(value, defaultValue string) string {
 	return value
 }
 
+// normalizeOriginHost lowercases a host and strips the scheme's default port
+// (443 for https, 80 for http) so "https://app.example.com:443" and
+// "https://app.example.com" are treated as the same origin. Non-default ports
+// are preserved. Returns ("", false) for an empty/invalid host.
+func normalizeOriginHost(scheme, host string) (string, bool) {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return "", false
+	}
+	// Split off a port, if present. url.Parse stores the full host; use
+	// net.SplitHostPort so IPv6 literals like [::1]:8080 are handled.
+	h := host
+	var port string
+	if hh, p, err := net.SplitHostPort(host); err == nil {
+		h = hh
+		port = p
+	}
+	defaultPort := ""
+	switch scheme {
+	case "https":
+		defaultPort = "443"
+	case "http":
+		defaultPort = "80"
+	}
+	if port != "" && port == defaultPort {
+		return h, true
+	}
+	// Rebuild the host with the port (when present) for exact comparisons.
+	if port != "" {
+		// Reuse the original port form; net.JoinHostPort preserves IPv6 brackets.
+		return net.JoinHostPort(h, port), true
+	}
+	return h, true
+}
+
 // buildCheckOrigin returns a websocket Origin validator.
 //
 // Behaviour:
@@ -771,13 +815,18 @@ func getOrDefaultStr(value, defaultValue string) string {
 //     Origin host must match the Host header of the incoming request.
 //   - requests with no Origin header are accepted (non-browser clients).
 //
+// Scheme-default ports (443/80) are normalized out of both the allowlist and
+// the incoming Origin, so "https://app.example.com" and
+// "https://app.example.com:443" are treated identically. Wildcard matching is
+// performed on the hostname only.
+//
 // We deliberately do NOT default to allow-all to avoid Cross-Site WebSocket
 // Hijacking (CSWSH).
 func buildCheckOrigin(allowed []string) func(*http.Request) bool {
 	// Pre-parse allowlist once.
 	type originRule struct {
 		scheme   string
-		host     string // exact host, or "" if hostSuffix is set
+		host     string // exact normalized host:port (default port stripped), or "" if hostGlob is set
 		hostGlob string // suffix match including leading "."
 	}
 	rules := make([]originRule, 0, len(allowed))
@@ -791,13 +840,18 @@ func buildCheckOrigin(allowed []string) func(*http.Request) bool {
 			log.Warn().Str("entry", raw).Msg("Ignoring invalid AllowedOrigins entry")
 			continue
 		}
-		r := originRule{scheme: strings.ToLower(u.Scheme)}
-		host := strings.ToLower(u.Host)
-		if strings.HasPrefix(host, "*.") {
+		scheme := strings.ToLower(u.Scheme)
+		normHost, ok := normalizeOriginHost(scheme, u.Host)
+		if !ok {
+			log.Warn().Str("entry", raw).Msg("Ignoring invalid AllowedOrigins entry")
+			continue
+		}
+		r := originRule{scheme: scheme}
+		if strings.HasPrefix(normHost, "*.") {
 			// "*.example.com" → match any subdomain plus the apex.
-			r.hostGlob = host[1:] // ".example.com"
+			r.hostGlob = normHost[1:] // ".example.com"
 		} else {
-			r.host = host
+			r.host = normHost
 		}
 		rules = append(rules, r)
 	}
@@ -814,11 +868,19 @@ func buildCheckOrigin(allowed []string) func(*http.Request) bool {
 			return false
 		}
 		originScheme := strings.ToLower(ou.Scheme)
-		originHost := strings.ToLower(ou.Host)
+		originHost, ok := normalizeOriginHost(originScheme, ou.Host)
+		if !ok {
+			log.Warn().Str("origin", origin).Msg("Rejecting WebSocket upgrade: malformed Origin header")
+			return false
+		}
 
 		// Empty allowlist → same-origin only.
 		if len(rules) == 0 {
-			return strings.EqualFold(originHost, r.Host)
+			reqHost, ok := normalizeOriginHost(originScheme, r.Host)
+			if !ok {
+				return false
+			}
+			return originHost == reqHost
 		}
 
 		for _, rule := range rules {

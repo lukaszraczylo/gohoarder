@@ -124,16 +124,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	url := h.upstream + "/"
 
-	entry, err := h.cache.Get(ctx, "pypi", "index", "latest", func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "pypi", "index", "latest", func(ctx context.Context) (*cache.FetchResult, error) {
 		body, statusCode, err := h.client.Get(ctx, url, nil)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.Provider()}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close()
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -155,17 +158,19 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	url := h.upstream + path
 	packageName := extractPackageName(path)
-
-	entry, err := h.cache.Get(ctx, "pypi", packageName, "page", func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "pypi", packageName, "page", func(ctx context.Context) (*cache.FetchResult, error) {
 		body, statusCode, err := h.client.Get(ctx, url, nil)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.Provider()}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close()
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -199,16 +204,17 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	packageName, version := extractPackageFileInfo(path)
 
-	// Make version unique by appending file type to avoid cache collisions
-	// between .whl and .metadata files with same version
-	cacheVersion := version
-	if strings.HasSuffix(path, ".metadata") {
-		cacheVersion = version + ".metadata"
-	} else if strings.HasSuffix(path, ".whl") {
-		cacheVersion = version + ".whl"
-	} else if strings.HasSuffix(path, ".tar.gz") {
-		cacheVersion = version + ".tar.gz"
+	// cacheVersion is the cache key's version portion. It must be unique per
+	// distinct artifact. PyPI publishes many files per release (multiple
+	// wheels with different build tags, sdists, zips, .egg files, and
+	// .metadata files for PEP 658), so the bare version is too coarse:
+	// distinct files of the same version would collide on the same cache
+	// key. The full unique basename guarantees one cache entry per artifact.
+	filename := path
+	if i := strings.LastIndex(filename, "/"); i >= 0 {
+		filename = filename[i+1:]
 	}
+	cacheVersion := filename
 
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
@@ -255,7 +261,7 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		Bool("has_credentials", credentials != "").
 		Msg("Handling PyPI package file request")
 
-	entry, err := h.cache.Get(ctx, "pypi", packageName, cacheVersion, func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "pypi", packageName, cacheVersion, func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -264,13 +270,16 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 
 		body, statusCode, err := h.client.Get(ctx, originalURL, headers)
 		if err != nil {
-			return nil, "", err
+			return nil, err
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: originalURL, RequiresAuth: true, AuthProvider: h.credValidator.Provider()}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close()
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, originalURL, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: originalURL}, nil
 	})
 
 	if err != nil {
@@ -293,6 +302,10 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 	}()
 
 	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
+	// The validation cache is owned by this handler instance only, so the key
+	// uses the upstream artifact URL (originalURL). Uniquely identifies the
+	// artifact within this registry; no cross-registry collision (goproxy/npm
+	// keep their own independent instances).
 	if entry.Package != nil && entry.Package.RequiresAuth {
 		// Check validation cache first
 		allowed, cached, reason := h.validationCache.Get(credHash, originalURL)
@@ -395,37 +408,60 @@ func extractPackageName(path string) string {
 func extractPackageFileInfo(path string) (string, string) {
 	// Format: /package-name/package-name-version.whl
 	// or: /package-name/package-name-version.tar.gz
-
 	packageName := extractPackageName(path)
 
-	// Extract filename
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		return packageName, ""
 	}
 
-	filename := parts[len(parts)-1]
+	base := parts[len(parts)-1]
+	isWheel := strings.HasSuffix(base, ".whl")
+	base = strings.TrimSuffix(base, ".whl")
+	base = strings.TrimSuffix(base, ".tar.gz")
+	base = strings.TrimSuffix(base, ".zip")
+	base = strings.TrimSuffix(base, ".egg")
+	base = strings.TrimSuffix(base, ".metadata")
 
-	// Remove extension
-	filename = strings.TrimSuffix(filename, ".whl")
-	filename = strings.TrimSuffix(filename, ".tar.gz")
-	filename = strings.TrimSuffix(filename, ".zip")
-	filename = strings.TrimSuffix(filename, ".egg")
+	return packageName, extractVersionFromFilename(base, isWheel)
+}
 
-	// Extract version
-	// Filename format: package-name-version or package_name-version
-	// Version typically starts after last dash before build tags
-	versionParts := strings.Split(filename, "-")
-	if len(versionParts) >= 2 {
-		// Simple heuristic: version is the part that starts with a digit
-		for i := 1; i < len(versionParts); i++ {
-			if len(versionParts[i]) > 0 && versionParts[i][0] >= '0' && versionParts[i][0] <= '9' {
-				return packageName, versionParts[i]
-			}
+// extractVersionFromFilename extracts the version from a PyPI distribution
+// filename with the extension already stripped.
+//
+// Wheels (PEP 427) are formatted as
+//
+//	{distribution}-{version}(-{build})?-{python}-{abi}-{platform}
+//
+// and the distribution is normalized (lowercase, runs of '-', '.', '_'
+// collapsed to '_'), so it never contains '-' and the version is always the
+// second dash-separated segment. For sdists/zips/eggs the filename is
+// {name}-{version}; PyPI normalizes name separators to '_', so the version
+// is always the last dash-separated segment (PEP 440 versions never contain
+// '-').
+//
+// The historical first-digit-segment heuristic is avoided because it mangles
+// digit-embedded distribution names (e.g. "2captcha-1.0.0" → "2captcha") and
+// intermediate digit segments (e.g. "foo-2019bar-1.0" → "2019bar"). The last
+// digit-starting segment is correct for those cases.
+func extractVersionFromFilename(base string, isWheel bool) string {
+	if isWheel {
+		// The distribution never contains '-', so the version immediately
+		// follows the first '-'.
+		if parts := strings.SplitN(base, "-", 3); len(parts) >= 2 && parts[1] != "" && parts[1][0] >= '0' && parts[1][0] <= '9' {
+			return parts[1]
 		}
 	}
 
-	return packageName, filename
+	// Non-wheel fallback (and defensive wheel edge case): the last
+	// dash-separated segment that starts with a digit.
+	parts := strings.Split(base, "-")
+	for i := len(parts) - 1; i >= 1; i-- {
+		if len(parts[i]) > 0 && parts[i][0] >= '0' && parts[i][0] <= '9' {
+			return parts[i]
+		}
+	}
+	return base
 }
 
 // getProxyBaseURL constructs the proxy base URL from the request

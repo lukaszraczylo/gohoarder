@@ -139,7 +139,7 @@ func (a *App) handleListPackages(c *fiber.Ctx) error {
 					// Count vulnerabilities by severity
 					severityCounts := make(map[string]int)
 					for _, vuln := range scanResult.Vulnerabilities {
-						severityCounts[strings.ToUpper(vuln.Severity)]++
+						severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
 					}
 
 					// Check if package should be blocked based on thresholds

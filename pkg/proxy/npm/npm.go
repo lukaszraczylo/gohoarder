@@ -80,16 +80,19 @@ func (h *Handler) handleMetadata(ctx context.Context, w http.ResponseWriter, r *
 	url := h.upstream + path
 	packageName := extractPackageName(path)
 
-	entry, err := h.cache.Get(ctx, "npm", packageName, "metadata", func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "npm", packageName, "metadata", func(ctx context.Context) (*cache.FetchResult, error) {
 		body, statusCode, fetchErr := h.client.Get(ctx, url, nil)
 		if fetchErr != nil {
-			return nil, "", fetchErr
+			return nil, fetchErr
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.Provider()}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close()
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -158,9 +161,7 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 		Str("cred_hash", credHash).
 		Bool("has_credentials", credentials != "").
 		Msg("Handling tarball request")
-
-	// Try to get from cache first (with credential-aware key)
-	entry, err := h.cache.Get(ctx, "npm", packageName, version, func(ctx context.Context) (io.ReadCloser, string, error) {
+	entry, err := h.cache.Get(ctx, "npm", packageName, version, func(ctx context.Context) (*cache.FetchResult, error) {
 		// Prepare headers for upstream request
 		headers := make(map[string]string)
 		if credentials != "" {
@@ -169,13 +170,16 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 
 		body, statusCode, fetchErr := h.client.Get(ctx, url, headers)
 		if fetchErr != nil {
-			return nil, "", fetchErr
+			return nil, fetchErr
+		}
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return &cache.FetchResult{Data: body, UpstreamURL: url, RequiresAuth: true, AuthProvider: h.credValidator.Provider()}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close()
-			return nil, "", fmt.Errorf("upstream returned status %d", statusCode)
+			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return body, url, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: url}, nil
 	})
 
 	if err != nil {
@@ -198,6 +202,10 @@ func (h *Handler) handleTarball(ctx context.Context, w http.ResponseWriter, r *h
 	}()
 
 	// CRITICAL SECURITY CHECK: If package requires auth, validate credentials
+	// The validation cache is owned by this handler instance only, so the key
+	// uses the upstream tarball URL. Uniquely identifies the artifact within
+	// this registry; no cross-registry collision (goproxy/pypi keep their own
+	// independent instances).
 	if entry.Package != nil && entry.Package.RequiresAuth {
 		// Check validation cache first
 		allowed, cached, reason := h.validationCache.Get(credHash, url)

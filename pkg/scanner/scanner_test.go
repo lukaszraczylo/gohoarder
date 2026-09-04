@@ -254,3 +254,79 @@ func TestBroadcaster_NilBroadcasterSafe(t *testing.T) {
 	err := mgr.ScanPackage(context.Background(), "npm", "x", "1", "/tmp/dummy")
 	require.NoError(t, err)
 }
+
+// stubBypassStore returns a package bypass and a clean scan result for a
+// Go cache-key package, to exercise FIX-H4 bypass-name normalization.
+type stubBypassStore struct {
+	*stubMetadataStore
+	scan     *metadata.ScanResult
+	bypasses []*metadata.CVEBypass
+}
+
+func (m *stubBypassStore) GetActiveCVEBypasses(context.Context) ([]*metadata.CVEBypass, error) {
+	return m.bypasses, nil
+}
+
+func (m *stubBypassStore) GetScanResult(context.Context, string, string, string) (*metadata.ScanResult, error) {
+	return m.scan, nil
+}
+
+// TestCheckVulnerabilities_GoPackageBypassNaturalTarget verifies a package
+// bypass targeting the natural Go module path matches a package stored under
+// its cache-key name (modulePath/@v/version.zip).
+func TestCheckVulnerabilities_GoPackageBypassNaturalTarget(t *testing.T) {
+	store := &stubBypassStore{
+		stubMetadataStore: &stubMetadataStore{},
+		bypasses: []*metadata.CVEBypass{
+			{
+				ID:     "b1",
+				Type:   metadata.BypassTypePackage,
+				Target: "go/github.com/foo/bar@v1.2.3",
+				Active: true,
+			},
+		},
+		scan: &metadata.ScanResult{
+			ID: "r", Scanner: "stub", ScannedAt: time.Now(), Status: metadata.ScanStatusClean,
+		},
+	}
+	mgr := newTestManager(t, store)
+
+	// The package is stored under the cache-key name; the version is passed
+	// separately. The bypass target uses the natural module path.
+	blocked, reason, err := mgr.CheckVulnerabilities(
+		context.Background(), "go", "github.com/foo/bar/@v/v1.2.3.zip", "v1.2.3")
+	require.NoError(t, err)
+	assert.False(t, blocked, "package bypass should unblock the Go package")
+	assert.Equal(t, "", reason)
+}
+
+// TestCheckVulnerabilities_GoPackageBypassNotFound verifies a package bypass
+// targeting a different module does NOT unblock the Go package. Its stored
+// scan result is clean, so CheckVulnerabilities returns not-blocked anyway;
+// to make the package-block path observable we use a scan result with a
+// high-severity vulnerability and zero thresholds (block any non-zero).
+func TestCheckVulnerabilities_GoPackageBypassNotFound(t *testing.T) {
+	store := &stubBypassStore{
+		stubMetadataStore: &stubMetadataStore{},
+		bypasses: []*metadata.CVEBypass{
+			{
+				ID:     "b1",
+				Type:   metadata.BypassTypePackage,
+				Target: "go/github.com/other/mod@v1.0.0",
+				Active: true,
+			},
+		},
+		scan: &metadata.ScanResult{
+			ID: "r", Scanner: "stub", ScannedAt: time.Now(), Status: metadata.ScanStatusVulnerable,
+			Vulnerabilities: []metadata.Vulnerability{
+				{ID: "CVE-1", Severity: "HIGH"},
+			},
+		},
+	}
+	mgr := newTestManager(t, store)
+
+	blocked, _, err := mgr.CheckVulnerabilities(
+		context.Background(), "go", "github.com/foo/bar/@v/v1.2.3.zip", "v1.2.3")
+	require.NoError(t, err)
+	assert.True(t, blocked, "a non-matching bypass should not unblock the package")
+}

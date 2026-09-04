@@ -265,8 +265,22 @@ func (s *GORMStoreV2) SavePackage(ctx context.Context, pkg *metadata.Package) er
 			return errors.Wrap(result.Error, errors.ErrCodeStorageFailure, "failed to update package")
 		}
 
-		// If no rows were updated, create new record
+		// If no rows were updated, create new record.
+		// RowsAffected == 0 here means no LIVE row matches the key, because
+		// GORM's default scope appends `deleted_at IS NULL` to the UPDATE.
+		// The only possible match is a soft-deleted row (e.g. after TTL/evict
+		// called DeletePackage). That retained row still holds the same
+		// `storage_key`, which has a UNIQUE index, so a plain Create would
+		// collide (UNIQUE constraint failed: packages.storage_key) and the
+		// re-fetch would permanently 502. Hard-delete any such stale row
+		// before creating.
 		if result.RowsAffected == 0 {
+			if err := tx.Unscoped().
+				Where("registry_id = ? AND name = ? AND version = ?", registryID, pkg.Name, pkg.Version).
+				Delete(&PackageModel{}).Error; err != nil {
+				return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to purge stale soft-deleted package before create")
+			}
+
 			if err := tx.Create(model).Error; err != nil {
 				return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create package")
 			}

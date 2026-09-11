@@ -85,7 +85,7 @@ require (
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/mattn/go-runewidth v0.0.29 // indirect
+	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/mattn/go-sqlite3 v1.14.52 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
@@ -94,7 +94,7 @@ require (
 	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/molecule-man/go-brrr v1.0.1 // indirect
+	github.com/molecule-man/go-brrr v1.1.0 // indirect
 	github.com/morikuni/aec v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect

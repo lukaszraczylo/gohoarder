@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.1
-	github.com/go-gormigrate/gormigrate/v2 v2.1.6
+	github.com/go-gormigrate/gormigrate/v2 v2.1.7
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v2 v2.52.15

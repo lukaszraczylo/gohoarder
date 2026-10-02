@@ -117,6 +117,14 @@ func (vc *ValidationCache) Size() int {
 	return len(vc.cache)
 }
 
+// Stop terminates the background cleanup goroutine. Safe to call multiple
+// times; subsequent calls are no-ops.
+func (vc *ValidationCache) Stop() {
+	vc.stopOnce.Do(func() {
+		close(vc.stopCh)
+	})
+}
+
 // cleanupExpired removes expired entries periodically. Exits when Stop is
 // called.
 func (vc *ValidationCache) cleanupExpired() {

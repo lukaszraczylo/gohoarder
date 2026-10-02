@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hirochachacha/go-smb2"
+	"github.com/cloudsoda/go-smb2"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/rs/zerolog/log"
@@ -114,7 +114,7 @@ func (s *SMBStorage) createConnection() (*smbConnection, error) {
 	}
 
 	// Establish SMB session
-	session, err := d.Dial(conn)
+	session, err := d.DialConn(context.Background(), conn, addr)
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to establish SMB session: %w", err)

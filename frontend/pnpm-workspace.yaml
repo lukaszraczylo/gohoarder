@@ -1,7 +1,8 @@
 allowBuilds:
   esbuild: true
   vue-demi: true
+# Patched versions of transitive dependencies that Dependabot cannot raise on its own.
 overrides:
-  "esbuild@<0.28.1": "^0.28.1"
-  "minimatch@<9.0.7": "^9.0.7"
-  "postcss-selector-parser@<6.0.11": "^6.0.11"
+  "minimatch@<9.0.9": ^9.0.9
+  "esbuild@<0.28.2": ^0.28.2
+  "postcss-selector-parser@<6.1.4": ^6.1.4

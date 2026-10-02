@@ -22,7 +22,7 @@ jobs:
   release:
     uses: lukaszraczylo/shared-actions/.github/workflows/go-release-cgo.yaml@main
     with:
-      go-version: "1.25"
+      go-version: ">=1.27"
       # Enable frontend build
       node-enabled: true
       node-version: "20"
@@ -45,7 +45,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ">=1.27"
 
       - name: Run benchmarks
         run: go test -bench=. -benchmem ./... -run=^# | tee output.txt

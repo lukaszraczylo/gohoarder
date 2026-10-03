@@ -3,13 +3,13 @@ package app
 import (
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/rs/zerolog/log"
 )
 
 // handleVulnerabilities handles /api/packages/{registry}/{name}/{version}/vulnerabilities endpoint
-func (a *App) handleVulnerabilities(c *fiber.Ctx) error {
+func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")

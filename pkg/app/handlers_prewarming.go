@@ -1,12 +1,12 @@
 package app
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog/log"
 )
 
 // handlePrewarmingStatus returns the status of the pre-warming worker
-func (a *App) handlePrewarmingStatus(c *fiber.Ctx) error {
+func (a *App) handlePrewarmingStatus(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	status := a.prewarmWorker.GetStatus()
@@ -15,7 +15,7 @@ func (a *App) handlePrewarmingStatus(c *fiber.Ctx) error {
 }
 
 // handlePrewarmingTrigger manually triggers a pre-warming cycle
-func (a *App) handlePrewarmingTrigger(c *fiber.Ctx) error {
+func (a *App) handlePrewarmingTrigger(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	ctx := c.Context()
@@ -36,11 +36,11 @@ type PrewarmPackageRequest struct {
 }
 
 // handlePrewarmingPackage pre-warms a specific package
-func (a *App) handlePrewarmingPackage(c *fiber.Ctx) error {
+func (a *App) handlePrewarmingPackage(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	var req PrewarmPackageRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid JSON in request body",
 		})

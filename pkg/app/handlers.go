@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/internal/version"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
@@ -12,7 +12,7 @@ import (
 )
 
 // handlePackages handles /api/packages endpoint
-func (a *App) handlePackages(c *fiber.Ctx) error {
+func (a *App) handlePackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
@@ -38,7 +38,7 @@ func (a *App) handlePackages(c *fiber.Ctx) error {
 }
 
 // handleListPackages returns list of cached packages
-func (a *App) handleListPackages(c *fiber.Ctx) error {
+func (a *App) handleListPackages(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Get packages from metadata store
@@ -201,7 +201,7 @@ func (a *App) handleListPackages(c *fiber.Ctx) error {
 }
 
 // handleDeletePackage deletes a cached package
-func (a *App) handleDeletePackage(c *fiber.Ctx) error {
+func (a *App) handleDeletePackage(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Parse path: /api/packages/{registry}/{name}/{version}
@@ -331,7 +331,7 @@ func (a *App) handleDeletePackage(c *fiber.Ctx) error {
 }
 
 // handleStats handles /api/stats endpoint
-func (a *App) handleStats(c *fiber.Ctx) error {
+func (a *App) handleStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -421,7 +421,7 @@ func (a *App) handleStats(c *fiber.Ctx) error {
 
 // handleTimeSeriesStats handles /api/stats/timeseries endpoint
 // Returns time-series download statistics for charts
-func (a *App) handleTimeSeriesStats(c *fiber.Ctx) error {
+func (a *App) handleTimeSeriesStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -463,7 +463,7 @@ func (a *App) handleTimeSeriesStats(c *fiber.Ctx) error {
 
 // handleConfig handles /api/config endpoint
 // Returns runtime configuration for the frontend
-func (a *App) handleConfig(c *fiber.Ctx) error {
+func (a *App) handleConfig(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -497,7 +497,7 @@ func (a *App) handleConfig(c *fiber.Ctx) error {
 }
 
 // handleInfo handles /api/info endpoint
-func (a *App) handleInfo(c *fiber.Ctx) error {
+func (a *App) handleInfo(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")

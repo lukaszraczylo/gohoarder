@@ -3,12 +3,12 @@ package app
 import (
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog/log"
 )
 
 // handleAnalyticsTopPackages returns the most downloaded packages
-func (a *App) handleAnalyticsTopPackages(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsTopPackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 
@@ -29,7 +29,7 @@ func (a *App) handleAnalyticsTopPackages(c *fiber.Ctx) error {
 }
 
 // handleAnalyticsTrendingPackages returns trending packages
-func (a *App) handleAnalyticsTrendingPackages(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsTrendingPackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 
@@ -50,7 +50,7 @@ func (a *App) handleAnalyticsTrendingPackages(c *fiber.Ctx) error {
 }
 
 // handleAnalyticsTrends returns download trends over time
-func (a *App) handleAnalyticsTrends(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsTrends(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 
@@ -62,7 +62,7 @@ func (a *App) handleAnalyticsTrends(c *fiber.Ctx) error {
 }
 
 // handleAnalyticsTotalStats returns overall statistics
-func (a *App) handleAnalyticsTotalStats(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsTotalStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 
@@ -72,7 +72,7 @@ func (a *App) handleAnalyticsTotalStats(c *fiber.Ctx) error {
 }
 
 // handleAnalyticsRegistryStats returns per-registry statistics
-func (a *App) handleAnalyticsRegistryStats(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsRegistryStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 
@@ -89,7 +89,7 @@ func (a *App) handleAnalyticsRegistryStats(c *fiber.Ctx) error {
 }
 
 // handleAnalyticsPackageStats returns statistics for a specific package
-func (a *App) handleAnalyticsPackageStats(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsPackageStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 
@@ -115,7 +115,7 @@ func (a *App) handleAnalyticsPackageStats(c *fiber.Ctx) error {
 }
 
 // handleAnalyticsSearch searches for packages matching a query
-func (a *App) handleAnalyticsSearch(c *fiber.Ctx) error {
+func (a *App) handleAnalyticsSearch(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 

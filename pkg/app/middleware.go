@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -20,7 +20,7 @@ const (
 // extractAPIKey pulls the raw API key from either the Authorization bearer
 // header or the X-API-Key header. Returns ("", false) when neither is set or
 // the Authorization header has the wrong shape.
-func extractAPIKey(c *fiber.Ctx) (string, bool) {
+func extractAPIKey(c fiber.Ctx) (string, bool) {
 	if h := strings.TrimSpace(c.Get("Authorization")); h != "" {
 		// Expect: "Bearer <token>". Be tolerant of casing on the scheme.
 		parts := strings.SplitN(h, " ", 2)
@@ -40,7 +40,7 @@ func extractAPIKey(c *fiber.Ctx) (string, bool) {
 // writeAuthError sends a structured error response matching the project's
 // errors envelope (errors.Error JSON shape). Uses the HTTPStatusCode map so
 // callers don't need to remember which status maps to which code.
-func writeAuthError(c *fiber.Ctx, code, message string) error {
+func writeAuthError(c fiber.Ctx, code, message string) error {
 	status, ok := errors.HTTPStatusCode[code]
 	if !ok {
 		status = fiber.StatusInternalServerError
@@ -51,7 +51,7 @@ func writeAuthError(c *fiber.Ctx, code, message string) error {
 // requestIDFromCtx returns the request ID set by an upstream middleware or
 // the X-Request-ID header. Empty string when neither is available — callers
 // should treat empty as "no correlation id".
-func requestIDFromCtx(c *fiber.Ctx) string {
+func requestIDFromCtx(c fiber.Ctx) string {
 	if v := c.Locals("request_id"); v != nil {
 		if s, ok := v.(string); ok && s != "" {
 			return s
@@ -65,7 +65,7 @@ func requestIDFromCtx(c *fiber.Ctx) string {
 // resolved key plus a boolean indicating whether a key was present at all
 // (false when no header). The error is non-nil only when validation failed
 // (i.e. a key was present but invalid/expired).
-func validateAndAttach(c *fiber.Ctx, authMgr *auth.Manager) (key *auth.APIKey, present bool, err error) {
+func validateAndAttach(c fiber.Ctx, authMgr *auth.Manager) (key *auth.APIKey, present bool, err error) {
 	rawKey, ok := extractAPIKey(c)
 	if !ok {
 		return nil, false, nil
@@ -83,7 +83,7 @@ func validateAndAttach(c *fiber.Ctx, authMgr *auth.Manager) (key *auth.APIKey, p
 // API key. On success the resolved *auth.APIKey is stored in c.Locals under
 // LocalAuthKey.
 func RequireAuth(authMgr *auth.Manager) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		key, present, err := validateAndAttach(c, authMgr)
 		if !present {
 			log.Debug().
@@ -115,7 +115,7 @@ func RequireAuth(authMgr *auth.Manager) fiber.Handler {
 // requires the resolved key's role to be present in the supplied list (any-of
 // semantics). An empty roles list behaves like RequireAuth.
 func RequireRole(authMgr *auth.Manager, roles ...string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		key, present, err := validateAndAttach(c, authMgr)
 		if !present {
 			return writeAuthError(c, errors.ErrCodeUnauthorized, "missing API key; provide Authorization: Bearer <key> or X-API-Key header")
@@ -146,7 +146,7 @@ func RequireRole(authMgr *auth.Manager, roles ...string) fiber.Handler {
 // then requires the resolved key to hold at least one of the supplied
 // permissions. An empty perms list behaves like RequireAuth.
 func RequirePermission(authMgr *auth.Manager, perms ...string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		key, present, err := validateAndAttach(c, authMgr)
 		if !present {
 			return writeAuthError(c, errors.ErrCodeUnauthorized, "missing API key; provide Authorization: Bearer <key> or X-API-Key header")
@@ -177,7 +177,7 @@ func RequirePermission(authMgr *auth.Manager, perms ...string) fiber.Handler {
 // changes when the caller is authenticated (e.g. per-key rate limits) but
 // which still serve anonymous traffic. Locals are populated on success.
 func OptionalAuth(authMgr *auth.Manager) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		_, present, err := validateAndAttach(c, authMgr)
 		if present && err != nil {
 			// Key was provided but invalid — log for observability, continue

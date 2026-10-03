@@ -3,7 +3,7 @@ package app
 import (
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
@@ -14,7 +14,7 @@ import (
 // requireAdmin middleware checks for admin authentication. It accepts the API
 // key via either the Authorization Bearer header or the X-API-Key header
 // (shared extractAPIKey), so admin clients are not limited to the bearer form.
-func (a *App) requireAdmin(c *fiber.Ctx) error {
+func (a *App) requireAdmin(c fiber.Ctx) error {
 	// Get API key from Authorization or X-API-Key header
 	apiKey, ok := extractAPIKey(c)
 	if !ok {
@@ -43,7 +43,7 @@ func (a *App) requireAdmin(c *fiber.Ctx) error {
 }
 
 // handleAdminBypasses handles /api/admin/bypasses endpoint
-func (a *App) handleAdminBypasses(c *fiber.Ctx) error {
+func (a *App) handleAdminBypasses(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
@@ -74,7 +74,7 @@ func (a *App) handleAdminBypasses(c *fiber.Ctx) error {
 }
 
 // handleListBypasses lists all CVE bypasses
-func (a *App) handleListBypasses(c *fiber.Ctx) error {
+func (a *App) handleListBypasses(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Parse query parameters
@@ -112,11 +112,11 @@ type CreateBypassRequest struct {
 }
 
 // handleCreateBypass creates a new CVE bypass
-func (a *App) handleCreateBypass(c *fiber.Ctx) error {
+func (a *App) handleCreateBypass(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	var req CreateBypassRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON in request body"})
 	}
 
@@ -179,7 +179,7 @@ func (a *App) handleCreateBypass(c *fiber.Ctx) error {
 }
 
 // handleGetBypass gets a specific bypass by ID
-func (a *App) handleGetBypass(c *fiber.Ctx) error {
+func (a *App) handleGetBypass(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Extract ID from parameter
@@ -217,7 +217,7 @@ type UpdateBypassRequest struct {
 }
 
 // handleUpdateBypass updates a bypass (activate/deactivate or extend expiration)
-func (a *App) handleUpdateBypass(c *fiber.Ctx) error {
+func (a *App) handleUpdateBypass(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Extract ID from parameter
@@ -228,7 +228,7 @@ func (a *App) handleUpdateBypass(c *fiber.Ctx) error {
 	}
 
 	var req UpdateBypassRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid JSON in request body"})
 	}
 
@@ -284,7 +284,7 @@ func (a *App) handleUpdateBypass(c *fiber.Ctx) error {
 }
 
 // handleDeleteBypass deletes a bypass
-func (a *App) handleDeleteBypass(c *fiber.Ctx) error {
+func (a *App) handleDeleteBypass(c fiber.Ctx) error {
 	ctx := c.Context()
 
 	// Extract ID from parameter

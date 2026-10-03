@@ -3,7 +3,7 @@ package app
 import (
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/rs/zerolog/log"
 )
@@ -16,11 +16,11 @@ type GenerateAPIKeyRequest struct {
 }
 
 // handleGenerateAPIKey generates a new API key
-func (a *App) handleGenerateAPIKey(c *fiber.Ctx) error {
+func (a *App) handleGenerateAPIKey(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	var req GenerateAPIKeyRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid JSON in request body",
 		})
@@ -82,7 +82,7 @@ func (a *App) handleGenerateAPIKey(c *fiber.Ctx) error {
 }
 
 // handleListAPIKeys lists all API keys
-func (a *App) handleListAPIKeys(c *fiber.Ctx) error {
+func (a *App) handleListAPIKeys(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	keys := a.authManager.ListAPIKeys()
@@ -108,7 +108,7 @@ func (a *App) handleListAPIKeys(c *fiber.Ctx) error {
 }
 
 // handleRevokeAPIKey revokes an API key
-func (a *App) handleRevokeAPIKey(c *fiber.Ctx) error {
+func (a *App) handleRevokeAPIKey(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	keyID := c.Params("key_id")

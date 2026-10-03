@@ -15,8 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	"github.com/gofiber/fiber/v3/middleware/static"
 	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
@@ -554,10 +555,10 @@ func (a *App) setupServer() error {
 	frontendDir := "frontend/dist"
 	if _, err := os.Stat(frontendDir); err == nil {
 		log.Info().Str("dir", frontendDir).Msg("Serving frontend static files")
-		a.app.Static("/", frontendDir)
+		a.app.Use("/", static.New(frontendDir))
 	} else {
 		log.Warn().Msg("Frontend dist directory not found, frontend won't be served")
-		a.app.Get("/", func(c *fiber.Ctx) error {
+		a.app.Get("/", func(c fiber.Ctx) error {
 			return c.Type("html").SendString(`
 				<html>
 				<head><title>GoHoarder</title></head>
@@ -607,7 +608,7 @@ func (a *App) Run() error {
 				Str("addr", addr).
 				Str("cert_file", a.config.Server.TLS.CertFile).
 				Msg("Starting Fiber server with TLS")
-			if err := a.app.ListenTLS(addr, a.config.Server.TLS.CertFile, a.config.Server.TLS.KeyFile); err != nil {
+			if err := a.app.Listen(addr, fiber.ListenConfig{CertFile: a.config.Server.TLS.CertFile, CertKeyFile: a.config.Server.TLS.KeyFile}); err != nil {
 				errChan <- err
 			}
 			return
@@ -643,6 +644,7 @@ func (a *App) Run() error {
 	// Graceful shutdown
 	return a.Shutdown()
 }
+
 // Shutdown gracefully shuts down the application
 func (a *App) Shutdown() error {
 	log.Info().Msg("Starting graceful shutdown")

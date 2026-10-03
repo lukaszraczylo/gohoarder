@@ -5,4 +5,4 @@ allowBuilds:
 overrides:
   "minimatch@<9.0.9": ^10.0.0
   "esbuild@<0.28.2": ^0.28.2
-  "postcss-selector-parser@<6.1.4": ^6.1.4
+  "postcss-selector-parser@<6.1.4": ^7.0.0

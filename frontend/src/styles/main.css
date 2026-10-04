@@ -1,8 +1,8 @@
 @import '@fortawesome/fontawesome-free/css/all.min.css';
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@config '../../tailwind.config.js';
+@custom-variant dark (&:is(.dark *));
 
 @layer base {
   :root {

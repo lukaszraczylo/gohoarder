@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794108728488,
+  "lastUpdate": 1794111168362,
   "repoUrl": "https://github.com/lukaszraczylo/gohoarder",
   "entries": {
     "Benchmark": [
@@ -8784,6 +8784,222 @@ window.BENCHMARK_DATA = {
             "value": 7,
             "unit": "allocs/op",
             "extra": "3546558 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lukasz@raczylo.com",
+            "name": "Lukasz Raczylo",
+            "username": "lukaszraczylo"
+          },
+          "committer": {
+            "email": "lukasz@raczylo.com",
+            "name": "Lukasz Raczylo",
+            "username": "lukaszraczylo"
+          },
+          "distinct": true,
+          "id": "2e0f095ea99e2cda263acf82621e148b9e4b9134",
+          "message": "ci(runners): run shared workflows on self-hosted runners\n\nThe pr, autoupdate and release workflows now pass runner: self-hosted. The macOS and Windows release legs stay on GitHub-hosted runners.",
+          "timestamp": "2026-11-08T03:55:12Z",
+          "tree_id": "2b989e430b16c5c5a1d60b1db4672144c484ac58",
+          "url": "https://github.com/lukaszraczylo/gohoarder/commit/2e0f095ea99e2cda263acf82621e148b9e4b9134"
+        },
+        "date": 1794111167774,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkDefault (github.com/lukaszraczylo/gohoarder/pkg/config)",
+            "value": 388.1,
+            "unit": "ns/op\t    1664 B/op\t       3 allocs/op",
+            "extra": "3160044 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDefault (github.com/lukaszraczylo/gohoarder/pkg/config) - ns/op",
+            "value": 388.1,
+            "unit": "ns/op",
+            "extra": "3160044 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDefault (github.com/lukaszraczylo/gohoarder/pkg/config) - B/op",
+            "value": 1664,
+            "unit": "B/op",
+            "extra": "3160044 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDefault (github.com/lukaszraczylo/gohoarder/pkg/config) - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "3160044 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkValidate (github.com/lukaszraczylo/gohoarder/pkg/config)",
+            "value": 385.1,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "3108771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkValidate (github.com/lukaszraczylo/gohoarder/pkg/config) - ns/op",
+            "value": 385.1,
+            "unit": "ns/op",
+            "extra": "3108771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkValidate (github.com/lukaszraczylo/gohoarder/pkg/config) - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "3108771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkValidate (github.com/lukaszraczylo/gohoarder/pkg/config) - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "3108771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewError (github.com/lukaszraczylo/gohoarder/pkg/errors)",
+            "value": 0.3117,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewError (github.com/lukaszraczylo/gohoarder/pkg/errors) - ns/op",
+            "value": 0.3117,
+            "unit": "ns/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewError (github.com/lukaszraczylo/gohoarder/pkg/errors) - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewError (github.com/lukaszraczylo/gohoarder/pkg/errors) - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewErrorWithDetails (github.com/lukaszraczylo/gohoarder/pkg/errors)",
+            "value": 0.3117,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewErrorWithDetails (github.com/lukaszraczylo/gohoarder/pkg/errors) - ns/op",
+            "value": 0.3117,
+            "unit": "ns/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewErrorWithDetails (github.com/lukaszraczylo/gohoarder/pkg/errors) - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNewErrorWithDetails (github.com/lukaszraczylo/gohoarder/pkg/errors) - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemPut (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem)",
+            "value": 119710,
+            "unit": "ns/op\t    2514 B/op\t      35 allocs/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemPut (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem) - ns/op",
+            "value": 119710,
+            "unit": "ns/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemPut (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem) - B/op",
+            "value": 2514,
+            "unit": "B/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemPut (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem) - allocs/op",
+            "value": 35,
+            "unit": "allocs/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemGet (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem)",
+            "value": 9814,
+            "unit": "ns/op\t    2376 B/op\t       8 allocs/op",
+            "extra": "119768 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemGet (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem) - ns/op",
+            "value": 9814,
+            "unit": "ns/op",
+            "extra": "119768 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemGet (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem) - B/op",
+            "value": 2376,
+            "unit": "B/op",
+            "extra": "119768 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFilesystemGet (github.com/lukaszraczylo/gohoarder/pkg/storage/filesystem) - allocs/op",
+            "value": 8,
+            "unit": "allocs/op",
+            "extra": "119768 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNew (github.com/lukaszraczylo/gohoarder/pkg/uuid)",
+            "value": 68.74,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "17581586 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNew (github.com/lukaszraczylo/gohoarder/pkg/uuid) - ns/op",
+            "value": 68.74,
+            "unit": "ns/op",
+            "extra": "17581586 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNew (github.com/lukaszraczylo/gohoarder/pkg/uuid) - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "17581586 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkNew (github.com/lukaszraczylo/gohoarder/pkg/uuid) - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "17581586 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkString (github.com/lukaszraczylo/gohoarder/pkg/uuid)",
+            "value": 328.7,
+            "unit": "ns/op\t     184 B/op\t       7 allocs/op",
+            "extra": "3457575 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkString (github.com/lukaszraczylo/gohoarder/pkg/uuid) - ns/op",
+            "value": 328.7,
+            "unit": "ns/op",
+            "extra": "3457575 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkString (github.com/lukaszraczylo/gohoarder/pkg/uuid) - B/op",
+            "value": 184,
+            "unit": "B/op",
+            "extra": "3457575 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkString (github.com/lukaszraczylo/gohoarder/pkg/uuid) - allocs/op",
+            "value": 7,
+            "unit": "allocs/op",
+            "extra": "3457575 times\n4 procs"
           }
         ]
       }

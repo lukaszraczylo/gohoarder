@@ -29,6 +29,7 @@ jobs:
       node-build-script: "cd frontend && npm install -g pnpm && pnpm install --frozen-lockfile && pnpm run build"
       node-output-path: "frontend/dist"
       node-cache-dependency-path: "frontend/pnpm-lock.yaml"
+      runner: self-hosted
     secrets: inherit
 
   benchmark:

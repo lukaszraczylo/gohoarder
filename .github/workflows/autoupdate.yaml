@@ -18,3 +18,4 @@ jobs:
       go-version: ">=1.27"
       node-working-directory: frontend
       release-workflow: release.yaml
+      runner: self-hosted

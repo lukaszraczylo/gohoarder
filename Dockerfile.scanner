@@ -23,17 +23,17 @@ RUN apk add --no-cache \
     && update-ca-certificates
 
 # Install Trivy for container scanning
-RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.76.2/contrib/install.sh | sh -s -- -b /usr/local/bin v0.76.2
 
 # Install Grype for vulnerability scanning
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/v0.121.2/install.sh | sh -s -- -b /usr/local/bin v0.121.2
 
 # Install govulncheck for Go vulnerability scanning
-RUN go install golang.org/x/vuln/cmd/govulncheck@latest && \
+RUN go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 && \
     mv /root/go/bin/govulncheck /usr/local/bin/
 
 # Install pip-audit for Python package vulnerability scanning
-RUN pip3 install --no-cache-dir pip-audit --break-system-packages
+RUN pip3 install --no-cache-dir pip-audit==2.10.1 --break-system-packages
 
 # Create non-root user
 RUN addgroup -g 1000 scanner && \

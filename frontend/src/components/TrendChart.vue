@@ -51,7 +51,7 @@
               type="multiple"
               variant="outline"
               size="sm"
-              aria-label="Add a line per highest severity"
+              aria-label="Add a line per severity"
             >
               <ToggleGroupItem v-for="level in SEVERITY_LEVELS" :key="level" :value="level">
                 {{ formatSeverityName(level) }}
@@ -172,7 +172,7 @@ const vulnerableLabel = computed(() => {
 const vulnerableSeries = computed(() => [
   { name: 'Vulnerable packages', data: values('vulnerable_packages'), tone: 'primary' as const },
   ...SEVERITY_LEVELS.filter((level) => severities.value.includes(level)).map((level) => ({
-    name: `${formatSeverityName(level)} (highest severity)`,
+    name: `Packages with ${level} vulnerabilities`,
     data: values(level),
     tone: SEVERITY_LINE_TONES[level],
   })),

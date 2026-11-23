@@ -79,7 +79,7 @@ describe('TrendChart', () => {
 
     expect(critical.attributes('aria-pressed')).toBe('true')
     expect(vulnerable()).toContain('with lines for critical')
-    expect(wrapper.text()).toContain('Critical (highest severity)')
+    expect(wrapper.text()).toContain('Packages with critical vulnerabilities')
 
     await critical.trigger('click')
     await flushPromises()

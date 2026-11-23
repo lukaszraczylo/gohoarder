@@ -6,8 +6,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
@@ -19,6 +22,7 @@ import (
 // Client is an HTTP client with resilience features
 type Client struct {
 	client         *http.Client
+	hopClient      *http.Client
 	rateLimiter    *rate.Limiter
 	circuitBreaker *CircuitBreaker
 	retryConfig    RetryConfig
@@ -34,6 +38,9 @@ type Config struct {
 	RateLimit       float64
 	RateBurst       int
 	MaxConnsPerHost int
+	// AllowPrivateRedirects lets a redirect to another host reach private, loopback or
+	// link-local addresses. Off by default; it exists for tests and private mirrors.
+	AllowPrivateRedirects bool
 }
 
 // RetryConfig holds retry configuration
@@ -105,8 +112,19 @@ func NewClient(config Config) *Client {
 	}
 
 	httpClient := &http.Client{
-		Timeout:   config.Timeout,
-		Transport: transport,
+		Timeout:       config.Timeout,
+		Transport:     transport,
+		CheckRedirect: noAutoRedirect,
+	}
+
+	hopTransport := transport.Clone()
+	if !config.AllowPrivateRedirects {
+		hopTransport.DialContext = (&net.Dialer{Timeout: 30 * time.Second, Control: refusePrivateAddress}).DialContext
+	}
+	hopClient := &http.Client{
+		Timeout:       config.Timeout,
+		Transport:     hopTransport,
+		CheckRedirect: noAutoRedirect,
 	}
 
 	var rateLimiter *rate.Limiter
@@ -140,6 +158,7 @@ func NewClient(config Config) *Client {
 
 	return &Client{
 		client:         httpClient,
+		hopClient:      hopClient,
 		rateLimiter:    rateLimiter,
 		circuitBreaker: cb,
 		retryConfig: RetryConfig{
@@ -154,8 +173,15 @@ func NewClient(config Config) *Client {
 }
 
 // Get performs a GET request with resilience features
-func (c *Client) Get(ctx context.Context, url string, headers map[string]string) (io.ReadCloser, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *Client) Get(ctx context.Context, rawURL string, headers map[string]string) (io.ReadCloser, int, error) {
+	return c.GetWithRedirectCheck(ctx, rawURL, headers, nil)
+}
+
+// GetWithRedirectCheck is Get with a policy that every redirect target must pass.
+// Redirects are always capped, limited to http(s), and refused when they reach a
+// private address on another host; check adds an allowlist on top.
+func (c *Client) GetWithRedirectCheck(ctx context.Context, rawURL string, headers map[string]string, check RedirectCheck) (io.ReadCloser, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, errors.ErrCodeUpstreamError, "failed to create request")
 	}
@@ -164,7 +190,7 @@ func (c *Client) Get(ctx context.Context, url string, headers map[string]string)
 		req.Header.Set(key, value)
 	}
 
-	resp, err := c.do(ctx, req)
+	resp, err := c.do(ctx, req, check)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -173,7 +199,7 @@ func (c *Client) Get(ctx context.Context, url string, headers map[string]string)
 }
 
 // do executes an HTTP request with retries and circuit breaker
-func (c *Client) do(ctx context.Context, req *http.Request) (*http.Response, error) {
+func (c *Client) do(ctx context.Context, req *http.Request, check RedirectCheck) (*http.Response, error) {
 	// Check circuit breaker
 	if c.circuitBreaker != nil {
 		if !c.circuitBreaker.AllowRequest() {
@@ -226,7 +252,7 @@ func (c *Client) do(ctx context.Context, req *http.Request) (*http.Response, err
 				Msg("Retrying request")
 		}
 
-		resp, err := c.client.Do(req)
+		resp, err := c.send(req, check)
 		if err != nil {
 			lastErr = err
 			continue
@@ -352,4 +378,85 @@ func (cb *CircuitBreaker) GetState() CircuitBreakerState {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
 	return cb.state
+}
+
+// MaxRedirects caps the hops one request may follow.
+const MaxRedirects = 10
+
+// RedirectCheck vets a redirect target before it is fetched.
+type RedirectCheck func(*url.URL) error
+
+var errRedirectNotAllowed = errors.New(errors.ErrCodeUpstreamError, "redirect refused")
+
+func noAutoRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// send performs req and follows redirects itself, so each hop is vetted and, once the
+// host changes, dialed through the guard that refuses private addresses.
+func (c *Client) send(req *http.Request, check RedirectCheck) (*http.Response, error) {
+	origin := req.URL.Host
+	cur := req
+	httpClient := c.client
+	for hop := 0; ; hop++ {
+		resp, err := httpClient.Do(cur)
+		if err != nil {
+			return nil, err
+		}
+		loc := resp.Header.Get("Location")
+		if !isRedirectStatus(resp.StatusCode) || loc == "" {
+			return resp, nil
+		}
+		_ = resp.Body.Close() // #nosec G104 -- Cleanup, error not critical
+		if hop >= MaxRedirects {
+			return nil, errors.Wrap(errRedirectNotAllowed, errors.ErrCodeUpstreamError, "too many redirects")
+		}
+		next, err := cur.URL.Parse(loc)
+		if err != nil {
+			return nil, errors.Wrap(err, errors.ErrCodeUpstreamError, "invalid redirect location")
+		}
+		if next.Scheme != "http" && next.Scheme != "https" {
+			return nil, errors.Wrap(errRedirectNotAllowed, errors.ErrCodeUpstreamError, "redirect to non-http scheme")
+		}
+		if check != nil {
+			if err := check(next); err != nil {
+				return nil, errors.Wrap(err, errors.ErrCodeUpstreamError, "redirect target not allowed")
+			}
+		}
+		clone := cur.Clone(cur.Context())
+		clone.URL = next
+		clone.Host = ""
+		if next.Host != cur.URL.Host {
+			clone.Header.Del("Authorization")
+			clone.Header.Del("Cookie")
+		}
+		cur = clone
+		if next.Host != origin {
+			httpClient = c.hopClient
+		}
+	}
+}
+
+func isRedirectStatus(code int) bool {
+	switch code {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
+}
+
+// carrierGradeNAT is 100.64.0.0/10, which net.IP.IsPrivate does not cover.
+var carrierGradeNAT = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// refusePrivateAddress runs after DNS resolution, so a name cannot rebind to an internal address.
+func refusePrivateAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || carrierGradeNAT.Contains(ip) {
+		return fmt.Errorf("refusing to connect to non-public address %s", host)
+	}
+	return nil
 }

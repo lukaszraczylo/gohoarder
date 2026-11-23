@@ -51,6 +51,16 @@ func isAllowedPyPIHost(host string, allowed []string) bool {
 	return false
 }
 
+// get fetches from upstream; every redirect hop must be on the allowlist, as for original_url.
+func (h *Handler) get(ctx context.Context, rawURL string, headers map[string]string) (io.ReadCloser, int, error) {
+	return h.client.GetWithRedirectCheck(ctx, rawURL, headers, func(u *url.URL) error {
+		if !isAllowedPyPIHost(u.Host, h.allowedHosts) {
+			return fmt.Errorf("redirect host %q not on allowlist", u.Hostname())
+		}
+		return nil
+	})
+}
+
 // Handler implements the PyPI Simple API (PEP 503)
 type Handler struct {
 	cache           *cache.Manager
@@ -130,7 +140,7 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 	url := h.upstream + "/"
 
 	entry, err := h.cache.Get(ctx, "pypi", "index", "latest", func(ctx context.Context) (*cache.FetchResult, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+		body, statusCode, err := h.get(ctx, url, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +188,7 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	entry, err := h.cache.Get(ctx, "pypi", packageName, cacheVersion, func(ctx context.Context) (*cache.FetchResult, error) {
-		body, statusCode, err := h.client.Get(ctx, url, upstreamHeaders)
+		body, statusCode, err := h.get(ctx, url, upstreamHeaders)
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +333,7 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			headers["Authorization"] = credentials
 		}
 
-		body, statusCode, err := h.client.Get(ctx, originalURL, headers)
+		body, statusCode, err := h.get(ctx, originalURL, headers)
 		if err != nil {
 			return nil, err
 		}
@@ -454,7 +464,7 @@ func (h *Handler) serveMetadataSidecar(ctx context.Context, w http.ResponseWrite
 	if credentials != "" {
 		headers["Authorization"] = credentials
 	}
-	body, status, err := h.client.Get(ctx, upstreamURL, headers)
+	body, status, err := h.get(ctx, upstreamURL, headers)
 	if err != nil {
 		log.Error().Err(err).Str("url", upstreamURL).Msg("Failed to fetch PEP 658 metadata")
 		http.Error(w, "Failed to fetch package metadata", http.StatusBadGateway)

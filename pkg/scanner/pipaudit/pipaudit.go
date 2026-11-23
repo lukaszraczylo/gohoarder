@@ -73,7 +73,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 
 	// Copy the wheel/tar.gz file to temp directory
 	tmpFile := filepath.Join(tmpDir, filepath.Base(filePath))
-	if err := s.copyFile(filePath, tmpFile); err != nil {
+	if err := s.copyInto(filePath, tmpDir, filepath.Base(tmpFile)); err != nil {
 		return nil, fmt.Errorf("failed to copy file: %w", err)
 	}
 
@@ -125,13 +125,18 @@ func (s *Scanner) Health(ctx context.Context) error {
 	return nil
 }
 
-// copyFile copies a file from src to dst
-func (s *Scanner) copyFile(src, dst string) error {
+// copyInto copies src to name inside dir; name cannot escape dir.
+func (s *Scanner) copyInto(src, dir, name string) error {
 	input, err := os.ReadFile(src) // #nosec G304 -- Source path is from scanner, controlled
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, input, 0600)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.WriteFile(name, input, 0600)
 }
 
 // buildAuditCmd constructs the right pip-audit command for the input artifact.

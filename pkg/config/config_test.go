@@ -246,8 +246,8 @@ storage:
     endpoint: s3.amazonaws.com
     region: us-east-1
     bucket: my-cache
-    access_key_id: AKIAIOSFODNN7EXAMPLE
-    secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    access_key_id: test-access-key-id
+    secret_access_key: test-secret-access-key
 metadata:
   backend: postgresql
   postgresql:

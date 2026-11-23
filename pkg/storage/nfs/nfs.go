@@ -140,7 +140,7 @@ func (s *Storage) Put(ctx context.Context, key string, data io.Reader, opts *sto
 		s.logger.Warn().Err(err).Str("path", s.path).Msg("nfs: failed to open configured base; skipping fsync")
 		return nil
 	}
-	defer root.Close() // #nosec G307 -- Best-effort cleanup of opened NFS root
+	defer func() { _ = root.Close() }()
 	f, err := root.OpenFile(relPath, os.O_RDWR, 0)
 	if err != nil {
 		s.logger.Warn().Err(err).Str("key", key).Msg("nfs: post-put open failed; skipping fsync")

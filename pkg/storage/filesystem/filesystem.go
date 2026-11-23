@@ -102,7 +102,7 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to open storage root")
 	}
-	defer root.Close() // #nosec G307 -- Best-effort cleanup of opened storage root
+	defer func() { _ = root.Close() }()
 
 	// Create directory
 	if dir != "." {

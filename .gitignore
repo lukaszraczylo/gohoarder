@@ -72,6 +72,7 @@ tests/fixtures/temp/
 # Markdown files (except README.md)
 *.md
 !README.md
+!lean4/FINDINGS.md
 
 /gohoarder
 *.log
@@ -83,3 +84,4 @@ data/storage
 
 # Local worktrees
 .worktrees/
+lean4/.lake

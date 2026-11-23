@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	gopath "path"
 	"regexp"
 	"strings"
 	"time"
@@ -283,6 +284,17 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 				Str("host", parsed.Host).
 				Msg("Rejected original_url host not on allowlist")
 			http.Error(w, "original_url host not allowed", http.StatusBadRequest)
+			return
+		}
+		// The cache key is built from the request path, so the fetched file must
+		// be the one the path names; otherwise any file on an allowed host could
+		// be stored under another package's key.
+		if gopath.Base(parsed.Path) != filename {
+			log.Warn().
+				Str("original_url", originalURL).
+				Str("filename", filename).
+				Msg("Rejected original_url naming a different file")
+			http.Error(w, "original_url does not match requested file", http.StatusBadRequest)
 			return
 		}
 	}

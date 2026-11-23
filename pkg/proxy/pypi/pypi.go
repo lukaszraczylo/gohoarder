@@ -236,17 +236,12 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
 	packageName, version := extractPackageFileInfo(path)
 
-	// cacheVersion is the cache key's version portion. It must be unique per
-	// distinct artifact. PyPI publishes many files per release (multiple
-	// wheels with different build tags, sdists, zips, .egg files, and
-	// .metadata files for PEP 658), so the bare version is too coarse:
-	// distinct files of the same version would collide on the same cache
-	// key. The full unique basename guarantees one cache entry per artifact.
 	filename := path
 	if i := strings.LastIndex(filename, "/"); i >= 0 {
 		filename = filename[i+1:]
 	}
-	cacheVersion := filename
+	isSidecar := strings.HasSuffix(filename, metadataSuffix)
+	cacheVersion := artifactCacheVersion(filename, version)
 
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
@@ -288,6 +283,13 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			http.Error(w, "original_url host not allowed", http.StatusBadRequest)
 			return
 		}
+	}
+
+	// A PEP 658 sidecar is a view of its wheel, not a package: stream it
+	// without writing a package row.
+	if isSidecar {
+		h.serveMetadataSidecar(ctx, w, originalURL, credentials)
+		return
 	}
 
 	log.Debug().
@@ -423,6 +425,48 @@ func isPackageFile(path string) bool {
 		strings.HasSuffix(path, ".zip") ||
 		strings.HasSuffix(path, ".egg") ||
 		strings.HasSuffix(path, ".metadata")
+}
+
+// artifactCacheVersion returns the cache key's version portion. PyPI publishes
+// several files per release, so the bare version would make distinct wheels
+// share one cache entry. A wheel's build and tags, or a non-tarball sdist's
+// extension, are appended as a local-version suffix (PEP 440, "+") to keep
+// each artifact's key unique while the package version stays readable.
+func artifactCacheVersion(filename, version string) string {
+	base := strings.TrimSuffix(filename, metadataSuffix)
+	switch {
+	case strings.HasSuffix(base, ".whl"):
+		rest := strings.TrimSuffix(base, ".whl")
+		if parts := strings.SplitN(rest, "-", 3); len(parts) == 3 && parts[2] != "" {
+			return version + "+" + parts[2]
+		}
+	case strings.HasSuffix(base, ".zip"):
+		return version + "+zip"
+	case strings.HasSuffix(base, ".egg"):
+		return version + "+egg"
+	}
+	return version
+}
+
+// serveMetadataSidecar streams a PEP 658 .metadata file straight from upstream.
+func (h *Handler) serveMetadataSidecar(ctx context.Context, w http.ResponseWriter, upstreamURL, credentials string) {
+	headers := make(map[string]string)
+	if credentials != "" {
+		headers["Authorization"] = credentials
+	}
+	body, status, err := h.client.Get(ctx, upstreamURL, headers)
+	if err != nil {
+		log.Error().Err(err).Str("url", upstreamURL).Msg("Failed to fetch PEP 658 metadata")
+		http.Error(w, "Failed to fetch package metadata", http.StatusBadGateway)
+		return
+	}
+	defer func() { _ = body.Close() }()
+	if status != http.StatusOK {
+		http.Error(w, "package metadata unavailable", status)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+	_, _ = io.Copy(w, body) // #nosec G104 -- HTTP response write
 }
 
 // extractPackageName extracts package name from path

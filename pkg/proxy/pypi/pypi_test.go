@@ -207,3 +207,19 @@ func TestCacheVersionUniquePerArtifact(t *testing.T) {
 		t.Errorf("expected %d distinct cache keys, got %d", len(paths), len(seenKeys))
 	}
 }
+
+func TestArtifactCacheVersion(t *testing.T) {
+	tests := []struct{ filename, want string }{
+		{"six-1.17.0.tar.gz", "1.17.0"},
+		{"six-1.17.0-py2.py3-none-any.whl", "1.17.0+py2.py3-none-any"},
+		{"numpy-1.26.0-1-cp312-cp312-manylinux.whl", "1.26.0+1-cp312-cp312-manylinux"},
+		{"foo-1.0.zip", "1.0+zip"},
+		{"foo-1.0.egg", "1.0+egg"},
+	}
+	for _, tt := range tests {
+		_, ver := extractPackageFileInfo("/x/" + tt.filename)
+		if got := artifactCacheVersion(tt.filename, ver); got != tt.want {
+			t.Errorf("artifactCacheVersion(%q) = %q, want %q", tt.filename, got, tt.want)
+		}
+	}
+}

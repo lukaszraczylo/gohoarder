@@ -197,7 +197,7 @@ func (m *memMetadata) ClearArtifactExpiry(context.Context) (int64, error) {
 	defer m.mu.Unlock()
 	var n int64
 	for _, p := range m.pkgs {
-		if p.ExpiresAt != nil && !metadata.IsMetadataEntry(p.Name, p.Version) {
+		if p.ExpiresAt != nil && !metadata.IsMetadataEntry(p.Registry, p.Name, p.Version) {
 			p.ExpiresAt = nil
 			n++
 		}

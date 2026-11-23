@@ -23,13 +23,20 @@ var MetadataVersions = []string{"list", "page", "latest", "metadata"}
 // MetadataNameSuffixes mark Go module metadata files (.mod, .info).
 var MetadataNameSuffixes = []string{".mod", ".info"}
 
+// GoRegistry is the registry whose cache keys carry the name suffixes above.
+const GoRegistry = "go"
+
 // IsMetadataEntry reports whether a cache entry is a metadata page that must
-// refresh, as opposed to an immutable artifact.
-func IsMetadataEntry(name, version string) bool {
+// refresh, as opposed to an immutable artifact. The name suffixes apply to Go
+// only: an npm or PyPI package may legitimately end in .mod or .info.
+func IsMetadataEntry(registry, name, version string) bool {
 	for _, v := range MetadataVersions {
 		if version == v {
 			return true
 		}
+	}
+	if registry != GoRegistry {
+		return false
 	}
 	for _, suffix := range MetadataNameSuffixes {
 		if strings.HasSuffix(name, suffix) {

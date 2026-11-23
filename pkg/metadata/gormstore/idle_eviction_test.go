@@ -12,9 +12,14 @@ import (
 
 func savePkg(t *testing.T, store *GORMStoreV2, name, version string, lastAccessed time.Time, expiresAt *time.Time) {
 	t.Helper()
+	savePkgIn(t, store, "npm", name, version, lastAccessed, expiresAt)
+}
+
+func savePkgIn(t *testing.T, store *GORMStoreV2, registry, name, version string, lastAccessed time.Time, expiresAt *time.Time) {
+	t.Helper()
 	require.NoError(t, store.SavePackage(context.Background(), &metadata.Package{
-		Registry: "npm", Name: name, Version: version,
-		StorageKey: fmt.Sprintf("npm/%s/%s", name, version),
+		Registry: registry, Name: name, Version: version,
+		StorageKey: fmt.Sprintf("%s/%s/%s", registry, name, version),
 		Size:       100, CachedAt: lastAccessed, LastAccessed: lastAccessed, ExpiresAt: expiresAt,
 	}))
 }
@@ -81,23 +86,31 @@ func checkClearArtifactExpiry(t *testing.T, store *GORMStoreV2) {
 	savePkg(t, store, "lodash", "page", now, &exp)
 	savePkg(t, store, "lodash", "latest", now, &exp)
 	savePkg(t, store, "lodash", "metadata", now, &exp)
-	savePkg(t, store, "golang.org/x/text/@v/v0.3.0.mod", "v0.3.0", now, &exp)
-	savePkg(t, store, "golang.org/x/text/@v/v0.3.0.info", "v0.3.0", now, &exp)
+	savePkgIn(t, store, "go", "golang.org/x/text/@v/v0.3.0.mod", "v0.3.0", now, &exp)
+	savePkgIn(t, store, "go", "golang.org/x/text/@v/v0.3.0.info", "v0.3.0", now, &exp)
+	// An npm package named like Go metadata is an artifact.
+	savePkg(t, store, "left.info", "1.0.0", now, &exp)
 
 	cleared, err := store.ClearArtifactExpiry(ctx)
 	require.NoError(t, err)
-	require.Equal(t, int64(2), cleared, "only the two artifacts lose their expiry")
+	require.Equal(t, int64(3), cleared, "only the three artifacts lose their expiry")
 
-	for _, a := range [][2]string{{"lodash", "4.17.21"}, {"left-pad", "1.3.0"}} {
+	for _, a := range [][2]string{{"lodash", "4.17.21"}, {"left-pad", "1.3.0"}, {"left.info", "1.0.0"}} {
 		p, getErr := store.GetPackage(ctx, "npm", a[0], a[1])
 		require.NoError(t, getErr)
 		require.Nil(t, p.ExpiresAt, a[0])
 	}
 	for _, m := range [][2]string{
 		{"lodash", "list"}, {"lodash", "page"}, {"lodash", "latest"}, {"lodash", "metadata"},
-		{"golang.org/x/text/@v/v0.3.0.mod", "v0.3.0"}, {"golang.org/x/text/@v/v0.3.0.info", "v0.3.0"},
 	} {
 		p, getErr := store.GetPackage(ctx, "npm", m[0], m[1])
+		require.NoError(t, getErr)
+		require.NotNil(t, p.ExpiresAt, "metadata entry %s@%s keeps its freshness expiry", m[0], m[1])
+	}
+	for _, m := range [][2]string{
+		{"golang.org/x/text/@v/v0.3.0.mod", "v0.3.0"}, {"golang.org/x/text/@v/v0.3.0.info", "v0.3.0"},
+	} {
+		p, getErr := store.GetPackage(ctx, "go", m[0], m[1])
 		require.NoError(t, getErr)
 		require.NotNil(t, p.ExpiresAt, "metadata entry %s@%s keeps its freshness expiry", m[0], m[1])
 	}

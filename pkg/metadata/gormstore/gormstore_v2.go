@@ -541,9 +541,14 @@ func (s *GORMStoreV2) ClearArtifactExpiry(ctx context.Context) (int64, error) {
 	query := s.db.WithContext(ctx).Model(&PackageModel{}).
 		Where("expires_at IS NOT NULL").
 		Where("version NOT IN ?", metadata.MetadataVersions)
+	// The name suffixes mark metadata for Go modules only.
+	suffixConds := make([]string, 0, len(metadata.MetadataNameSuffixes))
+	args := []interface{}{metadata.GoRegistry}
 	for _, suffix := range metadata.MetadataNameSuffixes {
-		query = query.Where("name NOT LIKE ?", "%"+suffix)
+		suffixConds = append(suffixConds, "name LIKE ?")
+		args = append(args, "%"+suffix)
 	}
+	query = query.Where("NOT (registry_id IN (SELECT id FROM registries WHERE name = ?) AND ("+strings.Join(suffixConds, " OR ")+"))", args...)
 	result := query.UpdateColumn("expires_at", nil)
 	if result.Error != nil {
 		return 0, errors.Wrap(result.Error, errors.ErrCodeStorageFailure, "failed to clear artifact expiry")

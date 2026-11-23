@@ -203,7 +203,7 @@ func (s *Store) ClearArtifactExpiry(ctx context.Context) (int64, error) {
 	}
 	var cleared int64
 	for _, p := range all {
-		if p.Registry == "" || p.Name == "" || p.ExpiresAt == nil || metadata.IsMetadataEntry(p.Name, p.Version) {
+		if p.Registry == "" || p.Name == "" || p.ExpiresAt == nil || metadata.IsMetadataEntry(p.Registry, p.Name, p.Version) {
 			continue
 		}
 		p.ExpiresAt = nil

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -325,7 +324,7 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 				// entries (index pages, lists, .mod/.info) are not scannable
 				// packages, so skip them to avoid a bogus "clean" verdict and
 				// the extra database round-trip.
-				isMetadataEntry := metadata.IsMetadataEntry(name, version)
+				isMetadataEntry := metadata.IsMetadataEntry(registry, name, version)
 				if m.scanner != nil && !isMetadataEntry {
 					blocked, reason, vulnErr := m.scanner.CheckVulnerabilities(ctx, registry, name, version)
 					if vulnErr != nil {
@@ -393,8 +392,7 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 
 	// Skip security scan wait for metadata entries (index pages, lists, etc.)
 	// Also skip Go module metadata files (.mod, .info)
-	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
-		strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
+	isMetadataEntry := metadata.IsMetadataEntry(registry, name, version)
 
 	// Wait briefly for initial scan to complete if scanner is enabled
 	// This prevents serving vulnerable packages on first request.
@@ -581,7 +579,7 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 
 	// Create metadata entry
 	now := m.now()
-	isMetadataEntry := metadata.IsMetadataEntry(name, version)
+	isMetadataEntry := metadata.IsMetadataEntry(registry, name, version)
 
 	// Artifacts are immutable, so only idle eviction removes them; metadata
 	// entries must refresh and keep a freshness expiry.

@@ -17,7 +17,7 @@ describe('Dashboard.vue', () => {
 
   it('renders dashboard component', () => {
     const wrapper = mount(Dashboard)
-    expect(wrapper.find('h2').text()).toBe('Dashboard')
+    expect(wrapper.find('h1').text()).toBe('Dashboard')
   })
 
   it('displays error message when error occurs', async () => {
@@ -57,9 +57,9 @@ describe('Dashboard.vue', () => {
     }
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Total Packages')
-    expect(wrapper.text()).toContain('Total Size')
-    expect(wrapper.text()).toContain('Total Downloads')
+    expect(wrapper.text()).toContain('Total packages')
+    expect(wrapper.text()).toContain('Total size')
+    expect(wrapper.text()).toContain('Total downloads')
   })
 
   it('displays total packages from stats', async () => {
@@ -141,7 +141,7 @@ describe('Dashboard.vue', () => {
     ]
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Recent Packages')
+    expect(wrapper.text()).toContain('Recent packages')
   })
 
   it('shows recent packages sorted by cached_at', async () => {
@@ -173,7 +173,7 @@ describe('Dashboard.vue', () => {
     ]
     await wrapper.vm.$nextTick()
 
-    const recentPackagesSection = wrapper.text().split('Recent Packages')[1]
+    const recentPackagesSection = wrapper.text().split('Recent packages')[1]
 
     // new-package should appear before old-package since it's more recent
     expect(recentPackagesSection.indexOf('new-package')).toBeLessThan(
@@ -198,7 +198,7 @@ describe('Dashboard.vue', () => {
     }))
     await wrapper.vm.$nextTick()
 
-    const recentSection = wrapper.text().split('Recent Packages')[1]
+    const recentSection = wrapper.text().split('Recent packages')[1]
     // Count how many "package" strings appear (each package has the word "package" in its name)
     const packageCount = (recentSection.match(/package\d+/g) || []).length
     expect(packageCount).toBeLessThanOrEqual(10)

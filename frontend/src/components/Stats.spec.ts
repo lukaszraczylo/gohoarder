@@ -1,17 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount as mountWith } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import Stats from './Stats.vue'
+import { createTestRouter } from '@/test/router'
 import { usePackageStore } from '../stores/packages'
 
 describe('Stats.vue', () => {
-  beforeEach(() => {
+  let router: Awaited<ReturnType<typeof createTestRouter>>
+  const mount = (component: typeof Stats) => mountWith(component, { global: { plugins: [router] } })
+
+  beforeEach(async () => {
     setActivePinia(createPinia())
+    router = await createTestRouter('/stats')
   })
 
   it('renders stats component', () => {
     const wrapper = mount(Stats)
-    expect(wrapper.find('h2').text()).toBe('Statistics')
+    expect(wrapper.find('h1').text()).toBe('Statistics')
   })
 
   it('displays loading state when loading', async () => {
@@ -51,7 +56,7 @@ describe('Stats.vue', () => {
     }
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Overall Statistics')
+    expect(wrapper.text()).toContain('Overall statistics')
     expect(wrapper.text()).toContain('100')
     expect(wrapper.text()).toContain('500')
   })
@@ -73,9 +78,9 @@ describe('Stats.vue', () => {
     }
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Security Scanning')
-    expect(wrapper.text()).toContain('Scanned Packages')
-    expect(wrapper.text()).toContain('Vulnerable Packages')
+    expect(wrapper.text()).toContain('Security scanning')
+    expect(wrapper.text()).toContain('Scanned packages')
+    expect(wrapper.text()).toContain('Vulnerable packages')
   })
 
   it('displays registry breakdown', async () => {
@@ -112,13 +117,15 @@ describe('Stats.vue', () => {
     }
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Registry Breakdown')
-    expect(wrapper.text()).toContain('NPM Registry')
-    expect(wrapper.text()).toContain('PyPI Registry')
-    expect(wrapper.text()).toContain('Go Modules')
-    expect(wrapper.text()).toContain('50 packages')
-    expect(wrapper.text()).toContain('30 packages')
-    expect(wrapper.text()).toContain('20 packages')
+    expect(wrapper.text()).toContain('Registry breakdown')
+    expect(wrapper.text()).toContain('npm')
+    expect(wrapper.text()).toContain('PyPI')
+    expect(wrapper.text()).toContain('Go modules')
+    // The cards layout prefixes each cell with its column label.
+    const packageCounts = wrapper
+      .findAll('tbody tr')
+      .map((row) => row.findAll('td')[0].text().replace(/^Packages/, ''))
+    expect(packageCounts).toEqual(['50', '30', '20'])
   })
 
   it('formats bytes correctly in overall stats', async () => {
@@ -150,7 +157,7 @@ describe('Stats.vue', () => {
     expect(fetchSpy).toHaveBeenCalled()
   })
 
-  it('displays correct icon colors for different registries', async () => {
+  it('lists the registries in the order the API reports them', async () => {
     const wrapper = mount(Stats)
     const store = usePackageStore()
 
@@ -172,13 +179,8 @@ describe('Stats.vue', () => {
     }
     await wrapper.vm.$nextTick()
 
-    // Scope to the registry icon containers (w-12 h-12 rounded-full),
-    // excluding the storage progress bar which also uses rounded-full.
-    const containers = wrapper.findAll('.w-12.h-12.rounded-full')
-    expect(containers).toHaveLength(3)
-    expect(containers[0].classes()).toContain('bg-red-100') // npm
-    expect(containers[1].classes()).toContain('bg-blue-100') // pypi
-    expect(containers[2].classes()).toContain('bg-cyan-100') // go
+    const labels = wrapper.findAll('tbody th').map((cell) => cell.text().replace(/^Registry/, ''))
+    expect(labels).toEqual(['npm', 'PyPI', 'Go modules'])
   })
 
   it('handles empty registries data', async () => {
@@ -199,9 +201,8 @@ describe('Stats.vue', () => {
     store.registries = {}
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Registry Breakdown')
-    // Should have no registry items
-    const registryItems = wrapper.findAll('.bg-gray-50')
-    expect(registryItems.length).toBe(3) // Only the overall stats cards
+    expect(wrapper.text()).toContain('Registry breakdown')
+    expect(wrapper.findAll('tbody th')).toHaveLength(0)
+    expect(wrapper.text()).toContain('No registries reported')
   })
 })

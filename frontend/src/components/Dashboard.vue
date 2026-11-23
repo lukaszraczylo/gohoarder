@@ -1,243 +1,134 @@
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-8">
-      <h2 class="text-3xl font-bold text-gray-900">Dashboard</h2>
-      <div
-        class="flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium"
-        :class="
-          rt.connected
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-            : 'bg-gray-100 border-gray-200 text-gray-500'
-        "
-        data-testid="ws-live-indicator"
-      >
-        <span
-          class="w-2 h-2 rounded-full"
-          :class="rt.connected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'"
-        ></span>
-        {{ rt.connected ? 'Live' : 'Offline' }}
-      </div>
-    </div>
+  <div class="flex flex-col gap-6">
+    <PageHeader title="Dashboard" description="What the cache holds and what is moving through it.">
+      <template #actions>
+        <StatusBadge
+          :status="rt.connected ? 'live' : 'offline'"
+          :label="rt.connected ? 'Live' : 'Offline'"
+          :tones="{ live: 'success', offline: 'neutral' }"
+          :pulse="rt.connected"
+          data-testid="ws-live-indicator"
+        />
+      </template>
+    </PageHeader>
 
-    <!-- Error Alert -->
-    <Alert v-if="error" variant="destructive" class="mb-4">
-      <i class="fas fa-exclamation-circle mr-2"></i>
-      <AlertDescription>{{ error }}</AlertDescription>
-    </Alert>
+    <ErrorState
+      v-if="error"
+      variant="card"
+      title="Could not load statistics"
+      :message="error"
+      @retry="refresh"
+    />
 
-    <!-- Loading State -->
-    <div v-if="loading" class="text-center py-12">
-      <i class="fas fa-spinner fa-spin text-4xl text-primary-600"></i>
-      <p class="mt-4 text-gray-600">Loading statistics...</p>
-    </div>
+    <LoadingState v-if="loading" variant="kpi-grid" :columns="4" label="Loading statistics..." />
 
-    <!-- Stats Grid -->
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-      <Card class="border-0 shadow-lg hover:shadow-xl transition-shadow">
-        <CardContent class="p-6">
-          <div class="flex items-start justify-between">
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-muted-foreground">Total Packages</p>
-              <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatNumber(displayStats?.total_packages || 0) }}
-              </p>
-            </div>
-            <div class="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-              <i class="fas fa-boxes text-slate-700 text-lg"></i>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+    <StatGroup v-else :columns="4" aria-label="Cache totals">
+      <KpiTile label="Total packages" :value="displayStats?.total_packages || 0" :icon="faBoxesStacked" />
+      <KpiTile label="Total size" :value="formatBytes(displayStats?.total_size || 0)" :icon="faHardDrive" />
+      <KpiTile label="Total downloads" :value="displayStats?.total_downloads || 0" :icon="faDownload" />
+      <KpiTile label="Scanned packages" :value="displayStats?.scanned_packages || 0" :icon="faShieldHalved" />
+    </StatGroup>
 
-      <Card class="border-0 shadow-lg hover:shadow-xl transition-shadow">
-        <CardContent class="p-6">
-          <div class="flex items-start justify-between">
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-muted-foreground">Total Size</p>
-              <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatBytes(displayStats?.total_size || 0) }}
-              </p>
-            </div>
-            <div class="w-12 h-12 bg-sky-50 rounded-xl flex items-center justify-center">
-              <i class="fas fa-hard-drive text-sky-600 text-lg"></i>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card class="border-0 shadow-lg hover:shadow-xl transition-shadow">
-        <CardContent class="p-6">
-          <div class="flex items-start justify-between">
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-muted-foreground">Total Downloads</p>
-              <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatNumber(displayStats?.total_downloads || 0) }}
-              </p>
-            </div>
-            <div class="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center">
-              <i class="fas fa-download text-emerald-600 text-lg"></i>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card class="border-0 shadow-lg hover:shadow-xl transition-shadow">
-        <CardContent class="p-6">
-          <div class="flex items-start justify-between">
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-muted-foreground">Scanned Packages</p>
-              <p class="text-3xl font-bold text-foreground tracking-tight">
-                {{ formatNumber(displayStats?.scanned_packages || 0) }}
-              </p>
-            </div>
-            <div class="w-12 h-12 bg-violet-50 rounded-xl flex items-center justify-center">
-              <i class="fas fa-shield-alt text-violet-600 text-lg"></i>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-
-    <!-- Realtime Feed -->
-    <Card v-if="recentRealtimeEvents.length > 0" class="border-0 shadow-lg mb-10" data-testid="ws-event-feed">
-      <CardContent class="p-6">
-        <h3 class="text-xl font-semibold text-foreground mb-4">
-          <i class="fas fa-bolt mr-2 text-amber-500"></i>Live Activity
-        </h3>
-        <ul class="space-y-2">
-          <li
-            v-for="(evt, idx) in recentRealtimeEvents"
-            :key="`${evt.timestamp}-${idx}`"
-            class="flex items-center gap-3 text-sm"
-          >
-            <component :is="iconForEvent(evt.type)" class="w-4 h-4 text-muted-foreground" />
-            <span class="font-medium">{{ labelForEvent(evt.type) }}</span>
-            <span class="text-muted-foreground truncate">
-              {{ describeEvent(evt) }}
-            </span>
-            <span class="ml-auto text-xs text-muted-foreground">
-              {{ formatTimestamp(evt.timestamp) }}
-            </span>
-          </li>
-        </ul>
+    <Card v-if="recentRealtimeEvents.length > 0" data-testid="ws-event-feed">
+      <CardHeader>
+        <CardTitle as="h2">Live activity</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ActivityFeed :events="feedEvents" variant="compact" label="Live activity" />
       </CardContent>
     </Card>
 
-    <!-- Downloads Chart -->
-    <Card class="border-0 shadow-lg mb-10">
-      <CardContent class="p-6">
-        <div class="flex items-center justify-between mb-6">
-          <h3 class="text-xl font-semibold text-foreground">Download Activity</h3>
-          <div class="flex gap-2">
-            <Button
-              v-for="period in chartPeriods"
-              :key="period.value"
-              @click="selectedPeriod = period.value"
-              :variant="selectedPeriod === period.value ? 'default' : 'outline'"
-              size="sm"
-            >
-              {{ period.label }}
-            </Button>
-          </div>
-        </div>
-        <div class="h-64 flex items-end justify-between gap-2">
-          <div
-            v-for="(value, index) in chartData"
-            :key="index"
-            class="flex-1 flex flex-col items-center gap-2"
-          >
-            <div class="w-full bg-slate-100 rounded-t-lg relative" :style="{ height: `${(value / maxChartValue) * 100}%` }">
-              <div class="absolute inset-0 bg-gradient-to-t from-slate-700 to-slate-500 rounded-t-lg"></div>
-            </div>
-            <span class="text-xs text-muted-foreground">{{ getChartLabel(index) }}</span>
-          </div>
-        </div>
-        <div v-if="chartLoading || chartData.length === 0" class="mt-4 text-center">
-          <p class="text-sm text-muted-foreground">
-            <i class="fas fa-info-circle mr-1"></i>
-            {{ chartLoading ? 'Loading chart data...' : 'No download activity in this period' }}
-          </p>
-        </div>
+    <Card>
+      <CardHeader>
+        <CardTitle as="h2">Download activity</CardTitle>
+        <CardAction>
+          <SegmentedControl v-model="selectedPeriod" :options="chartPeriods" aria-label="Period" />
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        <LoadingState
+          v-if="chartLoading && chartData.length === 0"
+          layout="inline"
+          label="Loading chart data..."
+        />
+        <BarChart
+          v-else
+          :labels="chartLabels"
+          :series="[{ name: 'Downloads', data: chartData }]"
+          label="Downloads over the selected period"
+          empty-text="No download activity in this period"
+        />
       </CardContent>
     </Card>
 
-    <!-- Recent Packages -->
-    <Card><CardContent class="p-6">
-      <h3 class="text-xl font-semibold text-gray-900 mb-4">
-        <i class="fas fa-clock mr-2"></i>Recent Packages
-      </h3>
-      <div v-if="packages.length === 0" class="text-center py-8 text-gray-500">
-        <i class="fas fa-inbox text-4xl mb-4"></i>
-        <p>No packages cached yet</p>
-      </div>
-      <div v-else class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead>
-            <tr>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Package
-              </th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Version
-              </th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Registry
-              </th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Size
-              </th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Downloads
-              </th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
-            <tr v-for="pkg in recentPackages" :key="pkg.id">
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                {{ pkg.name }}
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {{ pkg.version }}
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap">
-                <Badge variant="outline" :class="getRegistryBadgeClass(pkg.registry)">
-                  {{ pkg.registry }}
-                </Badge>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {{ formatBytes(pkg.size) }}
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {{ formatNumber(pkg.download_count) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle as="h2">Recent packages</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <EmptyState
+          v-if="packages.length === 0"
+          size="sm"
+          :icon="faBoxOpen"
+          title="No packages cached yet"
+          description="Packages appear here once they are downloaded through the proxy."
+        />
+        <DataTable
+          v-else
+          label="Recent packages"
+          layout="cards"
+          :columns="packageColumns"
+          :rows="recentPackages"
+        >
+          <template #cell-registry="{ row }">
+            <Badge variant="outline">{{ row.registry }}</Badge>
+          </template>
+        </DataTable>
       </CardContent>
     </Card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, type Component } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import axios from 'axios'
 import {
-  Package as PackageIcon,
-  Download as DownloadIcon,
-  Trash2 as TrashIcon,
-  ShieldCheck as ShieldIcon,
-  Activity as ActivityIcon,
-} from 'lucide-vue-next'
-import { usePackageStore } from '../stores/packages'
+  ActivityFeed,
+  BarChart,
+  Badge,
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  KpiTile,
+  LoadingState,
+  PageHeader,
+  SegmentedControl,
+  StatGroup,
+  StatusBadge,
+  type ActivityEvent,
+  type DataTableColumn,
+} from '@perfect-design/ui'
+import type { IconDefinition } from '@perfect-design/ui/lib/icons-tools'
+import { usePackageStore, type Package } from '../stores/packages'
 import { useRealtimeStore } from '../stores/realtime'
 import type { EventType, RealtimeEvent } from '@/lib/ws'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { getRegistryBadgeClass } from '@/composables/useBadgeStyles'
+import { formatBytes, formatNumber } from '@/lib/format'
+import {
+  faBox,
+  faBoxOpen,
+  faBoxesStacked,
+  faChartLine,
+  faDownload,
+  faHardDrive,
+  faShieldHalved,
+  faTrash,
+} from '@/lib/icons'
 
 const store = usePackageStore()
 const { packages, stats, loading, error } = storeToRefs(store)
@@ -261,17 +152,27 @@ const EVENT_LABELS: Record<EventType, string> = {
   stats_update: 'Stats update',
 }
 
-const EVENT_ICONS: Record<EventType, Component> = {
-  package_cached: PackageIcon,
-  package_deleted: TrashIcon,
-  package_downloaded: DownloadIcon,
-  scan_complete: ShieldIcon,
-  stats_update: ActivityIcon,
+const EVENT_ICONS: Record<EventType, IconDefinition> = {
+  package_cached: faBox,
+  package_deleted: faTrash,
+  package_downloaded: faDownload,
+  scan_complete: faShieldHalved,
+  stats_update: faChartLine,
 }
 
-function iconForEvent(type: EventType): Component {
-  return EVENT_ICONS[type] ?? ActivityIcon
+function iconForEvent(type: EventType): IconDefinition {
+  return EVENT_ICONS[type] ?? faChartLine
 }
+
+const feedEvents = computed<ActivityEvent[]>(() =>
+  recentRealtimeEvents.value.map((evt, idx) => ({
+    id: `${evt.timestamp}-${idx}`,
+    action: labelForEvent(evt.type),
+    target: describeEvent(evt) || undefined,
+    time: evt.timestamp,
+    icon: iconForEvent(evt.type),
+  })),
+)
 
 function labelForEvent(type: EventType): string {
   return EVENT_LABELS[type] ?? type
@@ -287,18 +188,13 @@ function describeEvent(evt: RealtimeEvent): string {
   return ''
 }
 
-function formatTimestamp(ts: number): string {
-  if (!ts) return ''
-  return new Date(ts).toLocaleTimeString()
-}
-
 // Chart periods and data
 const selectedPeriod = ref<string>('1day')
 const chartPeriods = [
-  { value: '1h', label: '1 Hour' },
-  { value: '1day', label: '24 Hours' },
-  { value: '7day', label: '7 Days' },
-  { value: '30day', label: '30 Days' },
+  { value: '1h', label: '1 hour' },
+  { value: '1day', label: '24 hours' },
+  { value: '7day', label: '7 days' },
+  { value: '30day', label: '30 days' },
 ]
 
 // Time-series data from API
@@ -338,11 +234,20 @@ const chartData = computed(() => {
   return timeSeriesData.value.data_points.map(point => point.value)
 })
 
-const maxChartValue = computed(() => {
-  if (chartData.value.length === 0) return 100
-  const max = Math.max(...chartData.value)
-  return max === 0 ? 100 : max
-})
+const chartLabels = computed(() => chartData.value.map((_, index) => getChartLabel(index)))
+
+const packageColumns: DataTableColumn<Package>[] = [
+  { key: 'name', header: 'Package', rowHeader: true },
+  { key: 'version', header: 'Version' },
+  { key: 'registry', header: 'Registry' },
+  { key: 'size', header: 'Size', numeric: true, accessor: (pkg) => formatBytes(pkg.size) },
+  { key: 'download_count', header: 'Downloads', numeric: true, accessor: (pkg) => formatNumber(pkg.download_count) },
+]
+
+function refresh() {
+  void store.fetchStats()
+  void store.fetchPackages()
+}
 
 function getChartLabel(index: number): string {
   // Use timestamp from data if available
@@ -396,15 +301,4 @@ onMounted(async () => {
   await fetchTimeSeriesData()
 })
 
-function formatNumber(num: number): string {
-  return new Intl.NumberFormat().format(num)
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
-}
 </script>

@@ -1,159 +1,103 @@
 <template>
-  <div class="max-w-7xl mx-auto px-4 py-8">
-    <!-- Header -->
-    <div class="mb-6">
-      <Button @click="goBack" variant="ghost" class="mb-4">
-        <i class="fas fa-arrow-left mr-2"></i>
-        Back to Stats
-      </Button>
-      <div class="flex items-center gap-3">
-        <i :class="showOnlyBlocked ? 'fas fa-hand' : 'fas fa-exclamation-triangle'" class="text-3xl text-red-600"></i>
-        <div>
-          <h1 class="text-3xl font-bold text-gray-900">
-            {{ showOnlyBlocked ? 'Blocked Packages' : 'Vulnerable Packages' }}
-          </h1>
-          <p class="text-gray-600 mt-1">
-            {{ showOnlyBlocked
-              ? 'Packages blocked from download due to exceeding vulnerability thresholds'
-              : 'Packages with known security vulnerabilities, sorted by risk'
-            }}
-          </p>
-        </div>
-      </div>
-    </div>
+  <div class="flex flex-col gap-6">
+    <PageHeader
+      :title="showOnlyBlocked ? 'Blocked packages' : 'Vulnerable packages'"
+      :description="
+        showOnlyBlocked
+          ? 'Packages blocked from download because they exceed the vulnerability thresholds.'
+          : 'Packages with known security vulnerabilities, sorted by risk.'
+      "
+    >
+      <template #back>
+        <Button variant="ghost" size="sm" :icon-start="faArrowLeft" @click="goBack">Back to stats</Button>
+      </template>
+    </PageHeader>
 
-    <!-- Loading State -->
-    <div v-if="loading" class="text-center py-12">
-      <i class="fas fa-spinner fa-spin text-4xl text-primary-600"></i>
-      <p class="mt-4 text-gray-600">Loading vulnerable packages...</p>
-    </div>
+    <LoadingState v-if="loading" variant="card" label="Loading vulnerable packages..." />
 
-    <!-- Error State -->
-    <Alert v-else-if="error" variant="destructive" class="mb-4">
-      <i class="fas fa-exclamation-circle mr-2"></i>
-      <AlertDescription>{{ error }}</AlertDescription>
-    </Alert>
+    <ErrorState
+      v-else-if="error"
+      variant="card"
+      title="Could not load vulnerable packages"
+      :message="error"
+      @retry="fetchVulnerablePackages"
+    />
 
-    <!-- Empty State -->
     <Card v-else-if="sortedVulnerablePackages.length === 0">
-      <CardContent class="text-center py-12">
-        <i class="fas fa-check-circle text-6xl text-green-500 mb-4"></i>
-        <p class="text-xl font-semibold text-gray-900">No Vulnerable Packages</p>
-        <p class="mt-2 text-gray-600">All your packages are clean and safe to use!</p>
+      <CardContent>
+        <EmptyState
+          tone="success"
+          :icon="faCircleCheck"
+          :title="showOnlyBlocked ? 'No blocked packages' : 'No vulnerable packages'"
+          description="Every cached package is clean."
+        />
       </CardContent>
     </Card>
 
-    <!-- Vulnerable Packages List -->
-    <div v-else class="space-y-6">
-      <!-- Summary Card -->
-      <Card>
-        <CardContent class="p-6">
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="text-center p-4 bg-red-50 rounded-lg border border-red-200">
-              <p class="text-3xl font-bold text-red-600">{{ criticalCount }}</p>
-              <p class="text-sm text-gray-600 mt-1">Critical</p>
-            </div>
-            <div class="text-center p-4 bg-orange-50 rounded-lg border border-orange-200">
-              <p class="text-3xl font-bold text-orange-600">{{ highCount }}</p>
-              <p class="text-sm text-gray-600 mt-1">High</p>
-            </div>
-            <div class="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-              <p class="text-3xl font-bold text-yellow-600">{{ moderateCount }}</p>
-              <p class="text-sm text-gray-600 mt-1">Moderate</p>
-            </div>
-            <div class="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <p class="text-3xl font-bold text-blue-600">{{ lowCount }}</p>
-              <p class="text-sm text-gray-600 mt-1">Low</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+    <template v-else>
+      <SeveritySummary :counts="totalCounts" label="Vulnerabilities by severity" />
 
-      <!-- Packages List -->
       <Card>
-        <CardContent class="p-6">
-          <div class="mb-4">
-            <h3 class="text-xl font-semibold text-gray-900">
-              <i class="fas fa-list mr-2"></i>
-              Vulnerable Packages ({{ sortedVulnerablePackages.length }})
-            </h3>
-            <p class="text-sm text-gray-600 mt-1">
-              {{ groupedPackages.length }} unique package{{ groupedPackages.length !== 1 ? 's' : '' }} • Sorted by risk: Critical → High → Moderate → Low
-            </p>
-          </div>
+        <CardHeader>
+          <CardTitle as="h2">
+            {{ showOnlyBlocked ? 'Blocked' : 'Vulnerable' }} packages ({{ sortedVulnerablePackages.length }})
+          </CardTitle>
+          <CardDescription>
+            {{ groupedPackages.length }} unique package{{ groupedPackages.length !== 1 ? 's' : '' }}, most critical first
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <Accordion type="multiple" class="w-full">
             <AccordionItem
               v-for="group in groupedPackages"
               :key="`${group.registry}:${group.name}`"
               :value="`${group.registry}:${group.name}`"
-              class="border-b border-gray-200"
             >
-              <AccordionTrigger class="px-4 py-4 hover:bg-gray-50">
-                <div class="flex items-center justify-between w-full pr-4">
-                  <div class="flex items-center space-x-4 flex-1 min-w-0">
-                    <div class="text-left flex-1 min-w-0">
-                      <h4 class="font-semibold text-gray-900 break-words">{{ group.name }}</h4>
-                      <p class="text-sm text-gray-500">{{ group.versions.length }} vulnerable version{{ group.versions.length > 1 ? 's' : '' }}</p>
-                    </div>
-                  </div>
-                  <div class="flex items-center space-x-6 flex-shrink-0">
-                    <Badge variant="outline" :class="getRegistryBadgeClass(group.registry)">
-                      {{ group.registry }}
-                    </Badge>
-                    <div class="text-right whitespace-nowrap">
-                      <p class="text-sm font-medium text-gray-900">{{ formatBytes(group.totalSize) }}</p>
-                      <p class="text-xs text-gray-500">{{ formatNumber(group.totalDownloads) }} downloads</p>
-                    </div>
-                  </div>
-                </div>
+              <AccordionTrigger :heading-level="3">
+                <span class="flex w-full min-w-0 items-center justify-between gap-4">
+                  <span class="min-w-0 text-start">
+                    <span class="block break-words font-semibold">{{ group.name }}</span>
+                    <span class="block text-sm text-muted-foreground">
+                      {{ group.versions.length }} vulnerable version{{ group.versions.length > 1 ? 's' : '' }}
+                    </span>
+                  </span>
+                  <span class="flex shrink-0 items-center gap-4">
+                    <Badge variant="outline">{{ group.registry }}</Badge>
+                    <span class="whitespace-nowrap text-end tabular-nums">
+                      <span class="block text-sm font-medium">{{ formatBytes(group.totalSize) }}</span>
+                      <span class="block text-xs text-muted-foreground">{{ formatNumber(group.totalDownloads) }} downloads</span>
+                    </span>
+                  </span>
+                </span>
               </AccordionTrigger>
-              <AccordionContent class="px-4 pb-4">
-                <div class="space-y-3">
-                  <div
-                    v-for="version in group.versions"
-                    :key="version.id"
-                    class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
-                    @click="navigateToPackage(version)"
-                  >
-                    <div class="flex items-center space-x-4 flex-1">
-                      <div class="flex-1">
-                        <p class="font-medium text-gray-900">{{ version.version.startsWith('v') ? version.version : 'v' + version.version }}</p>
-                        <div class="flex items-center space-x-4 mt-1 text-sm text-gray-500">
-                          <span>
-                            <i class="fas fa-download mr-1"></i>{{ formatNumber(version.download_count) }}
-                          </span>
-                          <span>
-                            <i class="fas fa-hard-drive mr-1"></i>{{ formatBytes(version.size) }}
-                          </span>
-                          <span>
-                            <i class="fas fa-clock mr-1"></i>{{ formatDate(version.cached_at) }}
-                          </span>
-                        </div>
-                        <!-- Vulnerability Badge -->
-                        <div v-if="version.vulnerabilities" class="mt-2">
-                          <VulnerabilityBadge
-                            :scanned="version.vulnerabilities.scanned"
-                            :status="version.vulnerabilities.status"
-                            :counts="version.vulnerabilities.counts"
-                            :total="version.vulnerabilities.total"
-                            :scannedAt="version.vulnerabilities.scannedAt"
-                            :isBlocked="version.vulnerabilities.isBlocked"
-                            @click.stop="navigateToPackage(version)"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div class="ml-4 flex-shrink-0">
-                      <i class="fas fa-chevron-right text-gray-400"></i>
-                    </div>
-                  </div>
-                </div>
+              <AccordionContent>
+                <DataTable
+                  :label="`Vulnerable versions of ${group.name}`"
+                  layout="cards"
+                  row-clickable
+                  :columns="versionColumns"
+                  :rows="group.versions"
+                  @row-click="navigateToPackage"
+                >
+                  <template #cell-vulnerabilities="{ row }">
+                    <VulnerabilityBadge
+                      v-if="row.vulnerabilities"
+                      :scanned="row.vulnerabilities.scanned"
+                      :status="row.vulnerabilities.status"
+                      :counts="row.vulnerabilities.counts"
+                      :total="row.vulnerabilities.total"
+                      :scannedAt="row.vulnerabilities.scannedAt"
+                      :isBlocked="row.vulnerabilities.isBlocked"
+                      @click="navigateToPackage(row)"
+                    />
+                  </template>
+                </DataTable>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
         </CardContent>
       </Card>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -161,18 +105,30 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePackageStore, type Package } from '../stores/packages'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from '@/components/ui/accordion'
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  type DataTableColumn,
+} from '@perfect-design/ui'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
-import { getRegistryBadgeClass } from '@/composables/useBadgeStyles'
+import SeveritySummary from './SeveritySummary.vue'
+import { formatBytes, formatDate, formatNumber, withVersionPrefix } from '@/lib/format'
+import { faArrowLeft, faCircleCheck } from '@/lib/icons'
+import { NO_VULNERABILITIES } from '@/lib/severity'
 
 const store = usePackageStore()
 const router = useRouter()
@@ -267,21 +223,28 @@ const groupedPackages = computed(() => {
 })
 
 // Calculate total counts across all packages
-const criticalCount = computed(() =>
-  vulnerablePackages.value.reduce((sum, pkg) => sum + (pkg.vulnerabilities?.counts?.critical || 0), 0)
+const totalCounts = computed(() =>
+  vulnerablePackages.value.reduce(
+    (sum, pkg) => {
+      const counts = pkg.vulnerabilities?.counts ?? NO_VULNERABILITIES
+      return {
+        critical: sum.critical + counts.critical,
+        high: sum.high + counts.high,
+        moderate: sum.moderate + counts.moderate,
+        low: sum.low + counts.low,
+      }
+    },
+    { ...NO_VULNERABILITIES },
+  ),
 )
 
-const highCount = computed(() =>
-  vulnerablePackages.value.reduce((sum, pkg) => sum + (pkg.vulnerabilities?.counts?.high || 0), 0)
-)
-
-const moderateCount = computed(() =>
-  vulnerablePackages.value.reduce((sum, pkg) => sum + (pkg.vulnerabilities?.counts?.moderate || 0), 0)
-)
-
-const lowCount = computed(() =>
-  vulnerablePackages.value.reduce((sum, pkg) => sum + (pkg.vulnerabilities?.counts?.low || 0), 0)
-)
+const versionColumns: DataTableColumn<Package>[] = [
+  { key: 'version', header: 'Version', rowHeader: true, accessor: (pkg) => withVersionPrefix(pkg.version) },
+  { key: 'download_count', header: 'Downloads', numeric: true, accessor: (pkg) => formatNumber(pkg.download_count) },
+  { key: 'size', header: 'Size', numeric: true, accessor: (pkg) => formatBytes(pkg.size) },
+  { key: 'cached_at', header: 'Cached', accessor: (pkg) => formatDate(pkg.cached_at) },
+  { key: 'vulnerabilities', header: 'Vulnerabilities', accessor: () => '' },
+]
 
 function navigateToPackage(pkg: Package) {
   router.push(`/package/${pkg.registry}/${pkg.name}/${pkg.version}`)
@@ -289,33 +252,5 @@ function navigateToPackage(pkg: Package) {
 
 function goBack() {
   router.push('/stats')
-}
-
-function formatNumber(num: number): string {
-  return new Intl.NumberFormat().format(num)
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
-}
-
-function formatDate(dateString: string): string {
-  if (!dateString) return 'N/A'
-  try {
-    const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  } catch {
-    return dateString
-  }
 }
 </script>

@@ -46,7 +46,7 @@ describe('PackageList.vue', () => {
 
   it('renders package list component', async () => {
     const wrapper = await mountWithRouter()
-    expect(wrapper.find('h2').text()).toBe('Packages')
+    expect(wrapper.find('h1').text()).toBe('Packages')
   })
 
   it('displays loading state when loading', async () => {
@@ -169,7 +169,7 @@ describe('PackageList.vue', () => {
     expect(wrapper.text()).toContain('1 MB')
   })
 
-  it('applies correct registry badge classes', async () => {
+  it('prints every registry as a badge with its name', async () => {
     const wrapper = await mountWithRouter()
     const store = usePackageStore()
 
@@ -214,11 +214,8 @@ describe('PackageList.vue', () => {
     expect(wrapper.text()).toContain('pypi')
     expect(wrapper.text()).toContain('go')
 
-    // Verify badge component is used with correct classes
-    // (matches getRegistryBadgeClass in src/composables/useBadgeStyles.ts)
-    const html = wrapper.html()
-    expect(html).toContain('bg-red-100') // npm badge
-    expect(html).toContain('bg-blue-100') // pypi badge
-    expect(html).toContain('bg-cyan-100') // go badge
+    // Each registry is printed as text in an outline badge, never as colour alone.
+    const badges = wrapper.findAll('[data-slot="badge"]').map((badge) => badge.text())
+    expect(badges).toEqual(['go', 'npm', 'pypi'])
   })
 })

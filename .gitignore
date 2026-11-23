@@ -80,3 +80,6 @@ test-go-proxy
 frontend/node_modules
 data/storage
 *.pid
+
+# Local worktrees
+.worktrees/

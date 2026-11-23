@@ -75,7 +75,7 @@
       </CardHeader>
       <CardContent>
         <EmptyState
-          v-if="packages.length === 0"
+          v-if="recentPackages.length === 0"
           size="sm"
           :icon="faBoxOpen"
           title="No packages cached yet"
@@ -140,7 +140,7 @@ import {
 } from '@/lib/icons'
 
 const store = usePackageStore()
-const { packages, stats, loading, error } = storeToRefs(store)
+const { recentPackages, stats, loading, error } = storeToRefs(store)
 
 const rt = useRealtimeStore()
 const { lastStats, events: rtEvents } = storeToRefs(rt)
@@ -259,7 +259,7 @@ const packageColumns: DataTableColumn<Package>[] = [
 
 function refresh() {
   void store.fetchStats()
-  void store.fetchPackages()
+  void store.fetchRecentPackages()
 }
 
 function getChartLabel(index: number): string {
@@ -291,14 +291,6 @@ function getChartLabel(index: number): string {
   return labels[selectedPeriod.value]?.(index) || `${index}`
 }
 
-// API returns clean, deduplicated data - just sort and limit
-const recentPackages = computed(() => {
-  return packages.value
-    .slice()
-    .sort((a, b) => new Date(b.cached_at).getTime() - new Date(a.cached_at).getTime())
-    .slice(0, 10)
-})
-
 // Watch for period changes and fetch new data
 watch(selectedPeriod, () => {
   fetchTimeSeriesData()
@@ -309,9 +301,7 @@ onMounted(async () => {
   // initial polling resolves. Singleton survives navigation, so we
   // intentionally do not disconnect on unmount.
   rt.connect()
-  await store.fetchStats()
-  await store.fetchPackages()
-  await fetchTimeSeriesData()
+  await Promise.all([store.fetchStats(), store.fetchRecentPackages(), fetchTimeSeriesData()])
 })
 
 </script>

@@ -12,7 +12,7 @@ describe('Dashboard.vue', () => {
     // Mock the fetch functions to prevent actual API calls
     const store = usePackageStore()
     vi.spyOn(store, 'fetchStats').mockResolvedValue()
-    vi.spyOn(store, 'fetchPackages').mockResolvedValue()
+    vi.spyOn(store, 'fetchRecentPackages').mockResolvedValue()
   })
 
   it('renders dashboard component', () => {
@@ -127,7 +127,7 @@ describe('Dashboard.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = [
+    store.recentPackages = [
       {
         id: '1',
         registry: 'npm',
@@ -144,22 +144,12 @@ describe('Dashboard.vue', () => {
     expect(wrapper.text()).toContain('Recent packages')
   })
 
-  it('shows recent packages sorted by cached_at', async () => {
+  it('lists recent packages in the order the store holds them, newest first', async () => {
     const wrapper = mount(Dashboard)
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = [
-      {
-        id: '1',
-        registry: 'npm',
-        name: 'old-package',
-        version: '1.0.0',
-        size: 1024,
-        cached_at: '2025-01-01T00:00:00Z',
-        last_accessed: '2025-01-01T00:00:00Z',
-        download_count: 10,
-      },
+    store.recentPackages = [
       {
         id: '2',
         registry: 'npm',
@@ -170,38 +160,25 @@ describe('Dashboard.vue', () => {
         last_accessed: '2025-01-02T00:00:00Z',
         download_count: 5,
       },
+      {
+        id: '1',
+        registry: 'npm',
+        name: 'old-package',
+        version: '1.0.0',
+        size: 1024,
+        cached_at: '2025-01-01T00:00:00Z',
+        last_accessed: '2025-01-01T00:00:00Z',
+        download_count: 10,
+      },
     ]
     await wrapper.vm.$nextTick()
 
     const recentPackagesSection = wrapper.text().split('Recent packages')[1]
 
-    // new-package should appear before old-package since it's more recent
+    // The store sorts by cached_at; the view keeps that order
     expect(recentPackagesSection.indexOf('new-package')).toBeLessThan(
       recentPackagesSection.indexOf('old-package')
     )
-  })
-
-  it('limits recent packages to 10 items', async () => {
-    const wrapper = mount(Dashboard)
-    const store = usePackageStore()
-
-    store.loading = false
-    store.packages = Array.from({ length: 15 }, (_, i) => ({
-      id: `${i}`,
-      registry: 'npm',
-      name: `package${i}`,
-      version: '1.0.0',
-      size: 1024,
-      cached_at: `2025-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
-      last_accessed: `2025-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
-      download_count: i,
-    }))
-    await wrapper.vm.$nextTick()
-
-    const recentSection = wrapper.text().split('Recent packages')[1]
-    // Count how many "package" strings appear (each package has the word "package" in its name)
-    const packageCount = (recentSection.match(/package\d+/g) || []).length
-    expect(packageCount).toBeLessThanOrEqual(10)
   })
 
   it('handles empty packages array', async () => {
@@ -209,7 +186,7 @@ describe('Dashboard.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = []
+    store.recentPackages = []
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('0')

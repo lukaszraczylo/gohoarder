@@ -1,10 +1,18 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { defineComponent, h } from 'vue'
 import PackageList from './PackageList.vue'
 import { usePackageStore } from '../stores/packages'
+
+type Row = ReturnType<typeof usePackageStore>['packagePage']['packages'][number]
+
+// A page as the server sends it: whole groups, flattened to rows.
+function setRows(store: ReturnType<typeof usePackageStore>, packages: Row[]) {
+  const groups = new Set(packages.map((p) => `${p.registry}:${p.name}`))
+  store.packagePage = { packages, totalGroups: groups.size, page: 1, pageSize: 25 }
+}
 
 const Stub = defineComponent({ render: () => h('div') })
 
@@ -41,7 +49,7 @@ describe('PackageList.vue', () => {
     setActivePinia(createPinia())
     // Prevent real network calls from store actions on mount
     const store = usePackageStore()
-    vi.spyOn(store, 'fetchPackages').mockResolvedValue()
+    vi.spyOn(store, 'fetchPackagePage').mockResolvedValue()
   })
 
   it('renders package list component', async () => {
@@ -74,7 +82,7 @@ describe('PackageList.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = []
+    setRows(store, [])
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('No packages cached yet')
@@ -85,7 +93,7 @@ describe('PackageList.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = [
+    setRows(store, [
       {
         id: '1',
         registry: 'npm',
@@ -96,17 +104,17 @@ describe('PackageList.vue', () => {
         last_accessed: '2025-01-01T00:00:00Z',
         download_count: 10,
       },
-    ]
+    ])
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('test-package')
     expect(wrapper.text()).toContain('1 version')
   })
 
-  it('calls fetchPackages on mount', async () => {
+  it('asks the server for the first page on mount', async () => {
     const store = usePackageStore()
     // beforeEach already spied with mockResolvedValue; reuse that spy
-    const fetchSpy = store.fetchPackages as ReturnType<typeof vi.spyOn>
+    const fetchSpy = store.fetchPackagePage as ReturnType<typeof vi.spyOn>
     fetchSpy.mockClear()
 
     await mountWithRouter()
@@ -119,7 +127,7 @@ describe('PackageList.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = [
+    setRows(store, [
       {
         id: '1',
         registry: 'npm',
@@ -140,7 +148,7 @@ describe('PackageList.vue', () => {
         last_accessed: '2025-01-02T00:00:00Z',
         download_count: 20,
       },
-    ]
+    ])
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('test-package')
@@ -152,7 +160,7 @@ describe('PackageList.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = [
+    setRows(store, [
       {
         id: '1',
         registry: 'npm',
@@ -163,7 +171,7 @@ describe('PackageList.vue', () => {
         last_accessed: '2025-01-01T00:00:00Z',
         download_count: 10,
       },
-    ]
+    ])
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('1 MB')
@@ -174,7 +182,17 @@ describe('PackageList.vue', () => {
     const store = usePackageStore()
 
     store.loading = false
-    store.packages = [
+    setRows(store, [
+      {
+        id: '3',
+        registry: 'go',
+        name: 'go-module',
+        version: '1.0.0',
+        size: 1024,
+        cached_at: '2025-01-01T00:00:00Z',
+        last_accessed: '2025-01-01T00:00:00Z',
+        download_count: 3,
+      },
       {
         id: '1',
         registry: 'npm',
@@ -195,21 +213,11 @@ describe('PackageList.vue', () => {
         last_accessed: '2025-01-01T00:00:00Z',
         download_count: 5,
       },
-      {
-        id: '3',
-        registry: 'go',
-        name: 'go-module',
-        version: '1.0.0',
-        size: 1024,
-        cached_at: '2025-01-01T00:00:00Z',
-        last_accessed: '2025-01-01T00:00:00Z',
-        download_count: 3,
-      },
-    ]
+    ])
     await wrapper.vm.$nextTick()
 
     // Verify that all registry badges are displayed
-    // Packages are grouped and sorted alphabetically, so order is: go-module, npm-package, python-package
+    // The server sends groups in name order: go-module, npm-package, python-package
     expect(wrapper.text()).toContain('npm')
     expect(wrapper.text()).toContain('pypi')
     expect(wrapper.text()).toContain('go')
@@ -223,7 +231,7 @@ describe('PackageList.vue', () => {
     const wrapper = await mountWithRouter()
     const store = usePackageStore()
 
-    store.packages = [
+    setRows(store, [
       {
         id: '1',
         registry: 'pypi',
@@ -235,12 +243,83 @@ describe('PackageList.vue', () => {
         last_accessed: '2026-11-23T00:00:00Z',
         download_count: 0,
       },
-    ]
+    ])
     await wrapper.vm.$nextTick()
     await wrapper.find('button[aria-expanded]').trigger('click')
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('v1.17.0')
     expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')
+  })
+
+  describe('server-side paging, search and registry filter', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('debounces the search box into one request with q and page 1', async () => {
+      const wrapper = await mountWithRouter()
+      const store = usePackageStore()
+      const fetchSpy = store.fetchPackagePage as ReturnType<typeof vi.spyOn>
+      fetchSpy.mockClear()
+
+      const input = wrapper.find('input[type="search"], input')
+      await input.setValue('l')
+      await input.setValue('le')
+      await input.setValue('left')
+      expect(fetchSpy).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(300)
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      expect(fetchSpy).toHaveBeenCalledWith({ page: 1, pageSize: 25, registry: 'all', q: 'left' })
+    })
+
+    it('sends the registry of the route with every request', async () => {
+      const router = createTestRouter()
+      router.push('/packages/pypi')
+      await router.isReady()
+      const store = usePackageStore()
+      const fetchSpy = store.fetchPackagePage as ReturnType<typeof vi.spyOn>
+      fetchSpy.mockClear()
+      mount(PackageList, { props: { registry: 'pypi' }, global: { plugins: [router] } })
+      expect(fetchSpy).toHaveBeenCalledWith({ page: 1, pageSize: 25, registry: 'pypi', q: '' })
+    })
+
+    it('pages through the server, not the loaded rows', async () => {
+      const wrapper = await mountWithRouter()
+      const store = usePackageStore()
+      store.loading = false
+      store.packagePage = {
+        packages: [
+          { id: '1', registry: 'npm', name: 'a', version: '1', size: 1, cached_at: '2025-01-01T00:00:00Z', last_accessed: '2025-01-01T00:00:00Z', download_count: 0 },
+        ],
+        totalGroups: 60,
+        page: 1,
+        pageSize: 25,
+      }
+      await wrapper.vm.$nextTick()
+      expect(wrapper.text()).toContain('Page 1 of 3 (60 total packages)')
+
+      const fetchSpy = store.fetchPackagePage as ReturnType<typeof vi.spyOn>
+      fetchSpy.mockClear()
+      window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
+      const next = wrapper.findAll('button').find((b) => /next/i.test(b.attributes('aria-label') ?? b.text()))
+      await next!.trigger('click')
+      expect(fetchSpy).toHaveBeenCalledWith({ page: 2, pageSize: 25, registry: 'all', q: '' })
+    })
+
+    it('says no packages match when a filter empties the page', async () => {
+      const wrapper = await mountWithRouter()
+      const store = usePackageStore()
+      store.loading = false
+      setRows(store, [])
+      await wrapper.find('input').setValue('zzz')
+      await vi.advanceTimersByTimeAsync(300)
+      expect(wrapper.text()).toContain('No packages match')
+      expect(wrapper.text()).not.toContain('No packages cached yet')
+    })
   })
 })

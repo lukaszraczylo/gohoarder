@@ -44,16 +44,60 @@ export interface Stats {
   idle_ttl?: number
 }
 
+export type PackageSort = 'name' | 'cached_at' | 'downloads' | 'size'
+
+export interface PackagePageParams {
+  page: number
+  pageSize: number
+  /** Empty or 'all' means every registry. */
+  registry?: string
+  /** Case-insensitive match on name, version or release version. */
+  q?: string
+  sort?: PackageSort
+  order?: 'asc' | 'desc'
+}
+
+/** One page of package groups: every version row of each group, in group order. */
+export interface PackagePage {
+  packages: Package[]
+  totalGroups: number
+  page: number
+  pageSize: number
+}
+
+/** Rows shown under "Recent packages". */
+export const RECENT_PACKAGES = 10
+
+function distinctGroups(rows: Package[]): number {
+  return new Set(rows.map((p) => `${p.registry}\u0000${p.name}`)).size
+}
+
 export const usePackageStore = defineStore('packages', () => {
   const packages = ref<Package[]>([])
+  const packagePage = ref<PackagePage>({ packages: [], totalGroups: 0, page: 1, pageSize: 25 })
+  const recentPackages = ref<Package[]>([])
   const stats = ref<Stats | null>(null)
   const registries = ref<Record<string, any>>({})
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetchPackages() {
+  // Requests overlap (stats next to the recent list, a new search before the last answer),
+  // so loading stays on until the last one settles.
+  let inFlight = 0
+  function begin() {
+    inFlight++
     loading.value = true
     error.value = null
+  }
+  function settle() {
+    inFlight = Math.max(inFlight - 1, 0)
+    if (inFlight === 0) loading.value = false
+  }
+  let pageRequest = 0
+
+  /** Every package, unpaginated. Only views that filter on scan results need it. */
+  async function fetchPackages() {
+    begin()
     try {
       const response = await axios.get('/api/packages')
       // Only update packages if we got valid data
@@ -68,13 +112,68 @@ export const usePackageStore = defineStore('packages', () => {
       error.value = err.message
       // Don't clear packages on error - keep showing the cached data
     } finally {
-      loading.value = false
+      settle()
+    }
+  }
+
+  async function fetchPackagePage(params: PackagePageParams) {
+    const request = ++pageRequest
+    begin()
+    try {
+      const query = new URLSearchParams({ page: String(params.page), page_size: String(params.pageSize) })
+      if (params.registry && params.registry !== 'all') query.set('registry', params.registry)
+      if (params.q?.trim()) query.set('q', params.q.trim())
+      if (params.sort) query.set('sort', params.sort)
+      if (params.order) query.set('order', params.order)
+      const response = await axios.get(`/api/packages?${query.toString()}`)
+      // A newer request is on its way; its answer must win.
+      if (request !== pageRequest) return
+      const data = response.data
+      if (data && Array.isArray(data.packages)) {
+        packagePage.value = {
+          packages: data.packages,
+          totalGroups: Number.isFinite(data.total_groups) ? data.total_groups : distinctGroups(data.packages),
+          page: params.page,
+          pageSize: params.pageSize,
+        }
+      } else {
+        console.warn('Unexpected API response format:', data)
+        error.value = 'Unexpected response format from server'
+      }
+    } catch (err: any) {
+      if (request !== pageRequest) return
+      console.error('Failed to fetch packages:', err)
+      error.value = err.message
+    } finally {
+      settle()
+    }
+  }
+
+  async function fetchRecentPackages() {
+    begin()
+    try {
+      const response = await axios.get(
+        `/api/packages?page=1&page_size=${RECENT_PACKAGES}&sort=cached_at&order=desc`,
+      )
+      if (response.data && Array.isArray(response.data.packages)) {
+        // The page holds whole groups, so the newest rows are in there but not in order.
+        recentPackages.value = [...response.data.packages]
+          .sort((a: Package, b: Package) => new Date(b.cached_at).getTime() - new Date(a.cached_at).getTime())
+          .slice(0, RECENT_PACKAGES)
+      } else {
+        console.warn('Unexpected API response format:', response.data)
+        error.value = 'Unexpected response format from server'
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch recent packages:', err)
+      error.value = err.message
+    } finally {
+      settle()
     }
   }
 
   async function fetchStats(registry = '') {
-    loading.value = true
-    error.value = null
+    begin()
     try {
       const url = registry ? `/api/stats?registry=${registry}` : '/api/stats'
       const response = await axios.get(url)
@@ -91,30 +190,33 @@ export const usePackageStore = defineStore('packages', () => {
       error.value = err.message
       // Don't clear stats on error - keep showing the cached data
     } finally {
-      loading.value = false
+      settle()
     }
   }
 
+  /** Deletes one version; the caller reloads whichever list it shows. */
   async function deletePackage(registry: string, name: string, version: string) {
-    loading.value = true
-    error.value = null
+    begin()
     try {
       await axios.delete(`/api/packages/${registry}/${name}/${version}`)
-      await fetchPackages()
     } catch (err: any) {
       error.value = err.message
     } finally {
-      loading.value = false
+      settle()
     }
   }
 
   return {
     packages,
+    packagePage,
+    recentPackages,
     stats,
     registries,
     loading,
     error,
     fetchPackages,
+    fetchPackagePage,
+    fetchRecentPackages,
     fetchStats,
     deletePackage,
   }

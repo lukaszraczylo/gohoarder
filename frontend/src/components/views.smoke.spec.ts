@@ -208,7 +208,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
 
   it('PackageList still fetches through the store on mount', async () => {
     await smoke(PackageList, '/packages')
-    expect(usePackageStore().packages.length).toBe(PACKAGES.length)
+    expect(usePackageStore().packagePage.packages.length).toBe(PACKAGES.length)
   })
 })
 

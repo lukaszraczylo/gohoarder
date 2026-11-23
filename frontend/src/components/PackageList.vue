@@ -2,7 +2,7 @@
   <div class="flex flex-col gap-6">
     <PageHeader title="Packages" description="Everything the proxy has cached, grouped by package.">
       <template #actions>
-        <Button variant="outline" :icon-start="faRotateRight" @click="store.fetchPackages()">Refresh</Button>
+        <Button variant="outline" :icon-start="faRotateRight" @click="load()">Refresh</Button>
       </template>
     </PageHeader>
 
@@ -23,26 +23,26 @@
       variant="card"
       title="Could not load packages"
       :message="error"
-      @retry="store.fetchPackages()"
+      @retry="load()"
     />
 
     <Card v-else>
       <CardContent>
         <EmptyState
-          v-if="packages.length === 0"
+          v-if="totalGroups === 0 && !filtersActive"
           :icon="faBoxOpen"
           title="No packages cached yet"
           description="Packages will appear here once they are downloaded through the proxy."
         />
         <EmptyState
-          v-else-if="groupedPackages.length === 0"
+          v-else-if="groups.length === 0"
           :icon="faMagnifyingGlass"
           title="No packages match"
           description="Change the registry filter or the search text."
         />
         <Accordion v-else type="multiple" class="w-full">
           <AccordionItem
-            v-for="group in groupedPackages"
+            v-for="group in groups"
             :key="`${group.registry}:${group.name}`"
             :value="`${group.registry}:${group.name}`"
           >
@@ -110,12 +110,12 @@
 
         <div v-if="totalPages > 1" class="mt-6 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p class="m-0 text-sm text-muted-foreground">
-            Page {{ currentPage }} of {{ totalPages }} ({{ allGroupedPackages.length }} total packages)
+            Page {{ currentPage }} of {{ totalPages }} ({{ totalGroups }} total packages)
           </p>
           <Pagination
             :page="currentPage"
-            :total="allGroupedPackages.length"
-            :page-size="itemsPerPage"
+            :total="totalGroups"
+            :page-size="PAGE_SIZE"
             :show-edges="false"
             @update:page="changePage"
           />
@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { usePackageStore, type Package } from '../stores/packages'
@@ -179,7 +179,7 @@ const route = useRoute()
 const router = useRouter()
 const store = usePackageStore()
 const toasts = useToastStore()
-const { packages, loading, error } = storeToRefs(store)
+const { packagePage, loading, error } = storeToRefs(store)
 
 const showDeleteModal = ref(false)
 const packageToDelete = ref<Package | null>(null)
@@ -190,88 +190,77 @@ const REGISTRY_OPTIONS = [
   { value: 'go', label: 'Go' },
 ]
 
+const PAGE_SIZE = 25
+const SEARCH_DEBOUNCE_MS = 300
+
 const selectedRegistry = ref<string>(props.registry || 'all')
 const searchTerm = ref<string>('')
+// What the server was last asked: the search text lags the input by the debounce.
+const activeQuery = ref<string>('')
 const currentPage = ref<number>(1)
-const itemsPerPage = ref<number>(10)
 
-// Group packages by name
-const allGroupedPackages = computed(() => {
-  const groups = new Map<string, Package[]>()
+const totalGroups = computed(() => packagePage.value.totalGroups)
+const totalPages = computed(() => Math.ceil(totalGroups.value / PAGE_SIZE))
+const filtersActive = computed(() => selectedRegistry.value !== 'all' || activeQuery.value.trim() !== '')
 
-  // Filter packages by selected registry and search term
-  let filteredPackages = selectedRegistry.value === 'all'
-    ? packages.value
-    : packages.value.filter(pkg => pkg.registry === selectedRegistry.value)
-
-  // Apply search filter if search term exists
-  if (searchTerm.value.trim()) {
-    const searchLower = searchTerm.value.toLowerCase()
-    filteredPackages = filteredPackages.filter(pkg =>
-      pkg.name.toLowerCase().includes(searchLower) ||
-      displayVersion(pkg).toLowerCase().includes(searchLower) ||
-      pkg.version.toLowerCase().includes(searchLower)
-    )
+// The server pages whole (registry, name) groups and sends every version row of each.
+const groups = computed(() => {
+  const byKey = new Map<string, { registry: string; name: string; versions: Package[] }>()
+  for (const pkg of packagePage.value.packages) {
+    const key = `${pkg.registry}\u0000${pkg.name}`
+    let group = byKey.get(key)
+    if (!group) {
+      group = { registry: pkg.registry, name: pkg.name, versions: [] }
+      byKey.set(key, group)
+    }
+    group.versions.push(pkg)
   }
+  return Array.from(byKey.values()).map((group) => ({
+    ...group,
+    totalSize: group.versions.reduce((sum, v) => sum + v.size, 0),
+    totalDownloads: group.versions.reduce((sum, v) => sum + v.download_count, 0),
+  }))
+})
 
-  filteredPackages.forEach(pkg => {
-    const key = `${pkg.registry}:${pkg.name}`
-    if (!groups.has(key)) {
-      groups.set(key, [])
-    }
-    groups.get(key)!.push(pkg)
+async function load() {
+  await store.fetchPackagePage({
+    page: currentPage.value,
+    pageSize: PAGE_SIZE,
+    registry: selectedRegistry.value,
+    q: activeQuery.value,
   })
-
-  // Convert to array and sort versions within each group
-  return Array.from(groups.entries()).map(([key, versions]) => {
-    const [registry, name] = key.split(':')
-    return {
-      registry,
-      name,
-      versions: versions.sort((a, b) =>
-        new Date(b.cached_at).getTime() - new Date(a.cached_at).getTime()
-      ),
-      totalSize: versions.reduce((sum, v) => sum + v.size, 0),
-      totalDownloads: versions.reduce((sum, v) => sum + v.download_count, 0),
-    }
-  }).sort((a, b) => a.name.localeCompare(b.name))
-})
-
-// Pagination
-const totalPages = computed(() => Math.ceil(allGroupedPackages.value.length / itemsPerPage.value))
-
-const groupedPackages = computed(() => {
-  const start = (currentPage.value - 1) * itemsPerPage.value
-  const end = start + itemsPerPage.value
-  return allGroupedPackages.value.slice(start, end)
-})
+}
 
 function changePage(page: number) {
   if (page >= 1 && page <= totalPages.value) {
     currentPage.value = page
+    void load()
     // Scroll to top of packages list
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
 
-// Reset to page 1 when filters change
-function resetPagination() {
-  currentPage.value = 1
-}
-
-// Watch for filter/search changes and reset pagination
-watch([selectedRegistry, searchTerm], () => {
-  resetPagination()
+// A burst of keystrokes asks the server once.
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(searchTerm, (term) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    if (term === activeQuery.value) return
+    activeQuery.value = term
+    currentPage.value = 1
+    void load()
+  }, SEARCH_DEBOUNCE_MS)
 })
+onBeforeUnmount(() => clearTimeout(searchTimer))
 
 // Watch for route parameter changes to update filter
 watch(() => route.params.registry, (newRegistry) => {
   selectedRegistry.value = (newRegistry as string) || 'all'
+  currentPage.value = 1
+  void load()
 })
 
-onMounted(async () => {
-  await store.fetchPackages()
-})
+onMounted(load)
 
 function confirmDelete(pkg: Package) {
   packageToDelete.value = pkg
@@ -289,7 +278,15 @@ async function deletePackage() {
     toasts.error('Could not delete package', `${label}: ${store.error}`)
     // The toast reports it; the list loaded fine, so it must not be replaced by a load error.
     store.error = null
-  } else toasts.success('Package deleted', label)
+  } else {
+    toasts.success('Package deleted', label)
+    await load()
+    // Deleting the last group of the last page leaves that page empty.
+    if (packagePage.value.packages.length === 0 && totalGroups.value > 0 && currentPage.value > 1) {
+      currentPage.value = Math.max(totalPages.value, 1)
+      await load()
+    }
+  }
 }
 
 function showVulnerabilityDetails(registry: string, name: string, version: string) {

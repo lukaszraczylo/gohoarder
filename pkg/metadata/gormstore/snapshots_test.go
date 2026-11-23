@@ -106,11 +106,11 @@ func checkBackfillStatsSnapshots(t *testing.T, store *GORMStoreV2) {
 	require.Equal(t, [5]int64{1, 0, 1, 0, 0}, vulns(day(4)))
 
 	require.EqualValues(t, 2, day(3).TotalPackages)
-	require.Equal(t, [5]int64{2, 1, 1, 0, 0}, vulns(day(3)))
+	require.Equal(t, [5]int64{2, 1, 1, 0, 1}, vulns(day(3)), "a counts under critical and low")
 
 	require.EqualValues(t, 1, day(2).TotalPackages, "b was deleted on day -2; early lived and died within it")
 	require.EqualValues(t, 10, day(2).TotalSize)
-	require.Equal(t, [5]int64{1, 1, 0, 0, 0}, vulns(day(2)))
+	require.Equal(t, [5]int64{1, 1, 0, 0, 1}, vulns(day(2)))
 
 	require.EqualValues(t, 1, day(1).TotalPackages)
 	require.Equal(t, [5]int64{0, 0, 0, 0, 0}, vulns(day(1)), "the clean rescan clears the vulnerability")

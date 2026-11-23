@@ -3,6 +3,7 @@ package gormstore
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/stretchr/testify/require"
@@ -52,6 +53,19 @@ func checkSeverityFilter(t *testing.T, store *GORMStoreV2) {
 
 	require.Equal(t, []string{"crit"}, pick(metadata.GroupListOptions{Severities: []string{"critical"}, Query: "cr"}), "composes with search")
 	require.Empty(t, pick(metadata.GroupListOptions{Severities: []string{"critical"}, Query: "high"}))
+
+	// The trend snapshot counts a package under every severity it holds, exactly as the filter selects it.
+	snap, err := liveSnapshot(ctx, store.db, time.Now(), nil)
+	require.NoError(t, err)
+	for sev, got := range map[string]*int64{
+		metadata.SeverityCritical: snap.Critical, metadata.SeverityHigh: snap.High,
+		metadata.SeverityModerate: snap.Moderate, metadata.SeverityLow: snap.Low,
+	} {
+		require.EqualValues(t, len(pick(metadata.GroupListOptions{Severities: []string{sev}})), *got, sev)
+	}
+	require.EqualValues(t, 5, *snap.VulnerablePackages)
+	require.EqualValues(t, len(pick(metadata.GroupListOptions{Severities: metadata.Severities})), *snap.VulnerablePackages)
+	require.EqualValues(t, [4]int64{1, 2, 1, 2}, [4]int64{*snap.Critical, *snap.High, *snap.Moderate, *snap.Low}, "multi counts under high and low")
 }
 
 func checkSeverityFilterStatementsAreConstant(t *testing.T, store *GORMStoreV2) {

@@ -39,14 +39,18 @@ func liveSnapshot(ctx context.Context, db *gorm.DB, at time.Time, blocked *int64
 		Moderate   int64
 		Low        int64
 	}
+	// A package counts under every severity its latest scan holds, as the severity filter selects it.
+	scanned := func(col string) string {
+		return "COALESCE(SUM(CASE WHEN security_scanned = ? AND id IN (" + latestScanWith(col+" > 0") + ") THEN 1 ELSE 0 END), 0)"
+	}
 	err := artifactPackages(db.WithContext(ctx).Model(&PackageModel{})).Select(`
 		COUNT(*) AS total,
 		COALESCE(SUM(size), 0) AS size,
-		COALESCE(SUM(CASE WHEN vulnerability_count > 0 THEN 1 ELSE 0 END), 0) AS vulnerable,
-		COALESCE(SUM(CASE WHEN highest_severity = 'critical' THEN 1 ELSE 0 END), 0) AS critical,
-		COALESCE(SUM(CASE WHEN highest_severity = 'high' THEN 1 ELSE 0 END), 0) AS high,
-		COALESCE(SUM(CASE WHEN highest_severity = 'medium' THEN 1 ELSE 0 END), 0) AS moderate,
-		COALESCE(SUM(CASE WHEN highest_severity = 'low' THEN 1 ELSE 0 END), 0) AS low`).
+		`+scanned("vuln_count")+` AS vulnerable,
+		`+scanned(severityColumns[metadata.SeverityCritical])+` AS critical,
+		`+scanned(severityColumns[metadata.SeverityHigh])+` AS high,
+		`+scanned(severityColumns[metadata.SeverityModerate])+` AS moderate,
+		`+scanned(severityColumns[metadata.SeverityLow])+` AS low`, true, true, true, true, true).
 		Scan(&r).Error
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to read stats for snapshot")
@@ -214,14 +218,17 @@ func (p backfillPackage) stateAtDayEnd(end time.Time, scans []backfillScan, with
 	if sc.vulns > 0 {
 		st.vulnerable = 1
 	}
-	switch {
-	case sc.critical > 0:
+	// Every severity the scan holds counts, as in liveSnapshot.
+	if sc.critical > 0 {
 		st.critical = 1
-	case sc.high > 0:
+	}
+	if sc.high > 0 {
 		st.high = 1
-	case sc.moderate > 0:
+	}
+	if sc.moderate > 0 {
 		st.moderate = 1
-	case sc.lowCounts > 0:
+	}
+	if sc.lowCounts > 0 {
 		st.low = 1
 	}
 	return st

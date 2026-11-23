@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -36,4 +37,52 @@ func TestShippedExamplesKeepMetadataTTLWithinGate(t *testing.T) {
 			require.LessOrEqual(t, d, 72*time.Hour, "%s: override %s", file, o[0])
 		}
 	}
+}
+
+func TestTTLOverridesValidation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		overrides map[string]time.Duration
+		wantErr   string
+	}{
+		"known registries": {map[string]time.Duration{"npm": time.Hour, "pypi": time.Hour, "go": time.Hour}, ""},
+		"pip alias":        {map[string]time.Duration{"pip": time.Hour}, ""},
+		"unknown registry": {map[string]time.Duration{"cargo": time.Hour}, "cache.ttl_overrides"},
+		"zero":             {map[string]time.Duration{"npm": 0}, "cache.ttl_overrides"},
+		"negative":         {map[string]time.Duration{"go": -time.Hour}, "cache.ttl_overrides"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			c.Cache.TTLOverrides = tc.overrides
+			err := c.Validate()
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestMetadataTTLOverridesNormalisesPip(t *testing.T) {
+	c := CacheConfig{TTLOverrides: map[string]time.Duration{"pip": time.Hour, "npm": 2 * time.Hour}}
+	require.Equal(t, map[string]time.Duration{"pypi": time.Hour, "npm": 2 * time.Hour}, c.MetadataTTLOverrides())
+}
+
+func TestDefaultsKeepNoTTLOverrides(t *testing.T) {
+	require.Empty(t, Default().Cache.TTLOverrides, "an unset override must not shadow default_ttl")
+}
+
+func TestLoadReadsTTLOverridesFromYAML(t *testing.T) {
+	write := func(body string) string {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		return path
+	}
+
+	cfg, err := Load(write("cache:\n  ttl_overrides:\n    npm: 2h\n    pip: 30m\n"))
+	require.NoError(t, err)
+	require.Equal(t, map[string]time.Duration{"npm": 2 * time.Hour, "pypi": 30 * time.Minute}, cfg.Cache.MetadataTTLOverrides())
+
+	_, err = Load(write("cache:\n  ttl_overrides:\n    cargo: 2h\n"))
+	require.ErrorContains(t, err, "cache.ttl_overrides")
 }

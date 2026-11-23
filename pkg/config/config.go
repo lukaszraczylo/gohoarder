@@ -142,6 +142,18 @@ const DefaultMetadataTTL = 24 * time.Hour
 // that send OIDC session cookies plus a long Referer or URL with 431.
 const DefaultReadBufferSize = 16384
 
+// ttlOverrideRegistries maps each accepted cache.ttl_overrides key to its registry name.
+var ttlOverrideRegistries = map[string]string{"npm": "npm", "pypi": "pypi", "pip": "pypi", "go": "go"}
+
+// MetadataTTLOverrides returns the per-registry metadata freshness TTLs keyed by registry name.
+func (c CacheConfig) MetadataTTLOverrides() map[string]time.Duration {
+	out := make(map[string]time.Duration, len(c.TTLOverrides))
+	for key, ttl := range c.TTLOverrides {
+		out[ttlOverrideRegistries[key]] = ttl
+	}
+	return out
+}
+
 // DefaultIdleTTL is how long a cached item can go unrequested before cleanup removes it.
 const DefaultIdleTTL = 7 * 24 * time.Hour
 
@@ -370,11 +382,6 @@ func Default() *Config {
 			IdleTTL:         DefaultIdleTTL,
 			MaxSizeBytes:    500 * 1024 * 1024 * 1024, // 500GB
 			PerProjectQuota: 50 * 1024 * 1024 * 1024,  // 50GB
-			TTLOverrides: map[string]time.Duration{
-				"npm": DefaultMetadataTTL,
-				"pip": DefaultMetadataTTL,
-				"go":  DefaultMetadataTTL,
-			},
 		},
 		Security: SecurityConfig{
 			Enabled:         false,
@@ -525,6 +532,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Cache.IdleTTL < 0 {
 		return fmt.Errorf("cache.idle_ttl cannot be negative")
+	}
+	for key, ttl := range c.Cache.TTLOverrides {
+		if _, ok := ttlOverrideRegistries[key]; !ok {
+			return fmt.Errorf("cache.ttl_overrides: unknown registry %q (want npm, pypi or go)", key)
+		}
+		if ttl <= 0 {
+			return fmt.Errorf("cache.ttl_overrides.%s must be positive, got %s", key, ttl)
+		}
 	}
 	if c.Cache.MaxSizeBytes < 0 {
 		return fmt.Errorf("cache.max_size_bytes cannot be negative")

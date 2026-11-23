@@ -80,15 +80,16 @@ func (m *Manager) emit(eventType string, payload map[string]interface{}) {
 
 // Config holds cache manager configuration
 type Config struct {
-	Now               func() time.Time // Clock; nil means time.Now
-	DefaultTTL        time.Duration    // Freshness TTL for metadata entries
-	CleanupInterval   time.Duration    // How often to run cleanup
-	IdleTTL           time.Duration    // Remove entries not requested for this long (0 = off)
-	EvictionThreshold float64          // Trigger eviction when usage > threshold (0.0-1.0)
-	MaxConcurrent     int              // Max concurrent upstream fetches
-	MaxPackageSize    int64            // Maximum package size in bytes (0 = default 2GB)
-	ScanWaitTimeout   time.Duration    // How long the first download waits for its scan (0 = 30s)
-	FailClosed        bool             // Refuse a package whose scan did not finish in time
+	Now               func() time.Time         // Clock; nil means time.Now
+	TTLOverrides      map[string]time.Duration // Per-registry metadata freshness TTL; falls back to DefaultTTL
+	DefaultTTL        time.Duration            // Freshness TTL for metadata entries
+	CleanupInterval   time.Duration            // How often to run cleanup
+	IdleTTL           time.Duration            // Remove entries not requested for this long (0 = off)
+	EvictionThreshold float64                  // Trigger eviction when usage > threshold (0.0-1.0)
+	MaxConcurrent     int                      // Max concurrent upstream fetches
+	MaxPackageSize    int64                    // Maximum package size in bytes (0 = default 2GB)
+	ScanWaitTimeout   time.Duration            // How long the first download waits for its scan (0 = 30s)
+	FailClosed        bool                     // Refuse a package whose scan did not finish in time
 }
 
 const defaultScanWaitTimeout = 30 * time.Second
@@ -586,7 +587,7 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 	// entries must refresh and keep a freshness expiry.
 	var expiresAt *time.Time
 	if isMetadataEntry {
-		exp := now.Add(m.config.DefaultTTL)
+		exp := now.Add(m.metadataTTL(registry))
 		expiresAt = &exp
 	}
 
@@ -735,6 +736,14 @@ func (m *Manager) Delete(ctx context.Context, registry, name, version string) er
 	}
 
 	return m.deletePackage(ctx, pkg)
+}
+
+// metadataTTL returns the freshness window for a registry's metadata entries.
+func (m *Manager) metadataTTL(registry string) time.Duration {
+	if ttl, ok := m.config.TTLOverrides[registry]; ok {
+		return ttl
+	}
+	return m.config.DefaultTTL
 }
 
 // deletePackage deletes a package from both storage and metadata

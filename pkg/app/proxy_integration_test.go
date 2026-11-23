@@ -3,6 +3,7 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
+	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 )
 
 // newTestApp builds a full App on temp storage with the given config tweaks.
@@ -283,4 +285,34 @@ func TestPyPI_UVExcludeNewerResolvesThroughProxy(t *testing.T) {
 	if err == nil {
 		t.Fatalf("uv resolved foo although it was uploaded after the cutoff:\n%s", out)
 	}
+}
+
+func TestNPMMetadataTTLOverrideReachesCache(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"left-pad","versions":{}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	a := newTestApp(t, func(c *config.Config) {
+		c.Handlers.NPM.UpstreamRegistry = upstream.URL
+		c.Cache.TTLOverrides = map[string]time.Duration{"npm": 90 * time.Minute}
+	})
+	if code, _, body := doRequest(t, a, "/npm/left-pad", nil); code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", code, body)
+	}
+
+	pkgs, err := a.metadata.ListPackages(context.Background(), &metadata.ListOptions{Registry: "npm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pkgs {
+		if p.ExpiresAt == nil {
+			continue
+		}
+		if got := p.ExpiresAt.Sub(p.CachedAt); got < 89*time.Minute || got > 91*time.Minute {
+			t.Errorf("npm metadata freshness = %s, want 90m from cache.ttl_overrides", got)
+		}
+		return
+	}
+	t.Fatalf("no npm metadata entry with an expiry among %d packages", len(pkgs))
 }

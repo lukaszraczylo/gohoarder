@@ -383,9 +383,9 @@ cache:
   idleTTL: "168h"  # Remove cached items not requested for this long; "0" disables
   maxSizeBytes: 536870912000  # 500GB
   perProjectQuota: 53687091200  # 50GB
-  ttlOverrides:
+  ttlOverrides:  # Per-registry metadata freshness; replaces defaultTTL for that registry. Keys: npm, pypi, go
     npm: "24h"
-    pip: "24h"
+    pypi: "24h"
     go: "24h"
 
 # Security scanning configuration

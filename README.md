@@ -236,6 +236,8 @@ security:
 cache:
   default_ttl: 24h    # Freshness window for metadata pages (version lists, package documents)
   idle_ttl: 168h      # Remove cached items not requested for 7 days; 0 disables
+  ttl_overrides:      # Per-registry metadata freshness (npm, pypi, go); replaces default_ttl, never applies to artifacts
+    pypi: 12h
   cleanup_interval: 1h
 
 logging:

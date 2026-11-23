@@ -51,8 +51,11 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 
 ### Notes on the fixed rows
 
-- **GH-15.** `cache.ttl_overrides` has no consumer in the Go code (`grep TTLOverrides pkg cmd`: the field and its compiled default
-  only). The per-registry keys are kept and now default to 24h; they change nothing until something reads them.
+- **GH-15.** `cache.ttl_overrides` now has a consumer: `cache.Config.TTLOverrides` sets the metadata freshness per registry
+  (`npm`, `pypi`, `go`; `pip` is an alias of `pypi`), and a registry without an override keeps `default_ttl`. Artifacts keep no
+  age expiry. Defaults hold no override, so lowering `default_ttl` still applies everywhere. Config load rejects an unknown
+  registry key or a non-positive value. Tests: `TestMetadataTTLOverridesApplyPerRegistry`, `TestMetadataTTLOverridesSkipArtifacts`,
+  `TestNPMMetadataTTLOverrideReachesCache`, `TestTTLOverridesValidation`.
 - **GH-18.** New keys read `ghk_<id>.<secret>`; the hash covers the secret and one lookup selects the stored key. A miss
   compares a dummy hash. Keys minted before are accepted through a legacy path capped at 4 concurrent bcrypt compares. They
   cannot be migrated: the raw key holds no id and the stored hash covers the whole raw key. Re-issue them to leave the

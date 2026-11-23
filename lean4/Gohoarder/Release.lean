@@ -56,6 +56,27 @@ theorem old_default_ttl_exceeded_gate :
     ∃ gate ttl now s t : ℤ, now - s ≤ ttl ∧ s < t ∧ gateAccepts gate now t ∧ ttl = 168 ∧ gate = 72 := by
   exact ⟨72, 168, 200, 100, 116, by decide, by decide, by unfold gateAccepts; decide, rfl, rfl⟩
 
+/-! ### Per-registry override (`cache.ttl_overrides`, `Manager.metadataTTL`) -/
+
+/-- The freshness window of a metadata entry: the registry's override when set, else `default_ttl`. -/
+def effectiveTtl (override : Option ℤ) (default : ℤ) : ℤ := override.getD default
+
+/-- The staleness bound holds for a registry exactly when its effective window is within the gate. -/
+theorem override_within_gate_hides_only_gated (gate default now s t : ℤ) (override : Option ℤ)
+    (hcfg : effectiveTtl override default ≤ gate) (hstale : now - s ≤ effectiveTtl override default)
+    (hnew : s < t) : ¬ gateAccepts gate now t :=
+  stale_hides_only_gated gate _ now s t hstale hcfg hnew
+
+/-- An override replaces `default_ttl`; it does not add to it, and an absent override keeps it. -/
+theorem override_replaces_default (default o : ℤ) :
+    effectiveTtl (some o) default = o ∧ effectiveTtl none default = default := ⟨rfl, rfl⟩
+
+/-- An override above the gate loses the bound: operator choice, not enforced by config load. -/
+theorem override_above_gate_breaks_bound :
+    ∃ gate default now s t : ℤ, effectiveTtl (some 168) default = 168 ∧ now - s ≤ 168 ∧ s < t ∧
+      gateAccepts gate now t ∧ gate = 72 := by
+  exact ⟨72, 24, 200, 100, 116, rfl, by decide, by decide, by unfold gateAccepts; decide, rfl⟩
+
 /-- Publish times never change, so a version present in a stale snapshot is gated identically to a fresh one. -/
 theorem listed_versions_gated_identically (gate now t : ℤ) : gateAccepts gate now t ↔ gateAccepts gate now t :=
   Iff.rfl

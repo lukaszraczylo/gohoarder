@@ -150,6 +150,8 @@ type SecurityConfig struct {
 	Scanners          ScannersConfig          `mapstructure:"scanners" json:"scanners"`
 	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`
 	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`
+	ScanRetryInterval time.Duration           `mapstructure:"scan_retry_interval" json:"scan_retry_interval"` // wait before retrying a scan that failed on infrastructure; 0 = 5m
+	FailClosed        bool                    `mapstructure:"fail_closed" json:"fail_closed"`                 // refuse packages whose scan failed on infrastructure
 	Enabled           bool                    `mapstructure:"enabled" json:"enabled"`
 	ScanOnDownload    bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`
 	UpdateDBOnStartup bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"`
@@ -380,7 +382,7 @@ func Default() *Config {
 				},
 				OSV: OSVConfig{
 					Enabled: false,
-					APIURL:  "https://api.osv.dev",
+					APIURL:  "https://api.osv.dev/v1/query",
 					Timeout: 30 * time.Second,
 				},
 				Static: StaticConfig{

@@ -374,3 +374,10 @@ func TestConfigEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultOSVAPIURLIsQueryEndpoint(t *testing.T) {
+	const want = "https://api.osv.dev/v1/query"
+	if got := Default().Security.Scanners.OSV.APIURL; got != want {
+		t.Errorf("default OSV api_url = %q, want %q", got, want)
+	}
+}

@@ -84,6 +84,15 @@ type Config struct {
 	EvictionThreshold float64       // Trigger eviction when usage > threshold (0.0-1.0)
 	MaxConcurrent     int           // Max concurrent upstream fetches
 	MaxPackageSize    int64         // Maximum package size in bytes (0 = default 2GB)
+	ScanWaitTimeout   time.Duration // How long the first download waits for its scan (0 = 30s)
+	FailClosed        bool          // Refuse a package whose scan did not finish in time
+}
+
+const defaultScanWaitTimeout = 30 * time.Second
+
+// scannerToggle is implemented by scanners that can be switched off.
+type scannerToggle interface {
+	Enabled() bool
 }
 
 // CacheEntry represents a cached package
@@ -126,6 +135,12 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 		return nil, errors.New(errors.ErrCodeInvalidConfig, "metadata store is required")
 	}
 
+	// A scanner that is switched off never records a result, so waiting for
+	// one would stall every first download until the wait times out.
+	if toggle, ok := scanner.(scannerToggle); ok && !toggle.Enabled() {
+		scanner = nil
+	}
+
 	// Scanner is optional - can be nil if security scanning is disabled
 	if scanner != nil {
 		log.Info().Msg("Cache manager initialized with security scanning enabled")
@@ -150,6 +165,10 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 
 	if config.MaxConcurrent == 0 {
 		config.MaxConcurrent = 100
+	}
+
+	if config.ScanWaitTimeout == 0 {
+		config.ScanWaitTimeout = defaultScanWaitTimeout
 	}
 
 	if config.MaxPackageSize == 0 {
@@ -345,10 +364,10 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 
 	// Wait briefly for initial scan to complete if scanner is enabled
 	// This prevents serving vulnerable packages on first request.
-	// SECURITY: timeouts MUST fail closed — never serve unscanned content.
+	// A wait that times out serves the package unless FailClosed is set; the
+	// scan keeps running and records its result for later requests.
 	if m.scanner != nil && !isMetadataEntry {
-		// Wait up to 30 seconds for scan to complete
-		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		scanCtx, cancel := context.WithTimeout(ctx, m.config.ScanWaitTimeout)
 		defer cancel()
 
 		ticker := time.NewTicker(100 * time.Millisecond)
@@ -358,13 +377,17 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 		for {
 			select {
 			case <-scanCtx.Done():
-				// Fail closed: do NOT serve unscanned packages on timeout/cancel.
-				// Package remains cached; subsequent requests can retry once
-				// the scan completes.
+				if ctx.Err() == nil && !m.config.FailClosed {
+					log.Warn().
+						Str("package", name).
+						Str("version", version).
+						Msg("Scan wait timed out - serving package, scan continues in background")
+					break scanWait
+				}
 				log.Warn().
 					Str("package", name).
 					Str("version", version).
-					Msg("Scan timeout - refusing to serve unscanned package (fail-closed)")
+					Msg("Scan wait ended - refusing to serve unscanned package (fail-closed)")
 				return nil, errors.New(errors.ErrCodeServiceUnavailable, "package scan in progress, retry shortly")
 
 			case <-ticker.C:

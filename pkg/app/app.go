@@ -234,6 +234,7 @@ func (a *App) initializeComponents() error {
 		DefaultTTL:      a.config.Cache.DefaultTTL,
 		CleanupInterval: cleanupInterval,
 		MaxPackageSize:  a.config.Security.Scanners.Static.MaxPackageSize,
+		FailClosed:      a.config.Security.FailClosed,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize cache: %w", err)
@@ -528,6 +529,12 @@ func (a *App) setupServer() error {
 			Upstream: npmUpstream,
 		})
 		npmProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/npm", npmProxyHandler))
+		a.app.Use("/npm", func(c fiber.Ctx) error {
+			if canonical := npm.CanonicalPath(c.Path()); canonical != c.Path() {
+				c.Path(canonical)
+			}
+			return c.Next()
+		})
 		if authEnabled {
 			a.app.All("/npm/*", mwAuth, adaptor.HTTPHandler(npmProxyWithCDN))
 		} else {
@@ -671,6 +678,11 @@ func (a *App) Shutdown() error {
 	// Stop rescan worker if running
 	if a.rescanWorker != nil {
 		a.rescanWorker.Stop()
+	}
+
+	// Cancel pending scan retries before the backends close.
+	if a.scanManager != nil {
+		a.scanManager.Stop()
 	}
 
 	// Close analytics engine

@@ -103,6 +103,10 @@ security:
   block_on_severity: "high"  # none, low, medium, high, critical
   scan_on_download: true  # Scan packages on first download
   rescan_interval: "24h"  # How often to re-scan packages (e.g., 24h, 168h for weekly)
+  # When a scan fails on infrastructure (timeout, upstream 5xx) the package is served and the
+  # scan is retried every scan_retry_interval. Set fail_closed to refuse such packages instead.
+  fail_closed: false
+  scan_retry_interval: "5m"
   update_db_on_startup: false  # Update vulnerability databases on startup
   allowed_packages: []  # Packages that bypass security checks (format: "registry/name@version")
   ignored_cves: []  # CVE IDs to ignore globally (e.g., "CVE-2021-23337")
@@ -125,7 +129,7 @@ security:
     # Supports: npm, PyPI, Go, Maven, NuGet, etc.
     osv:
       enabled: false
-      api_url: "https://api.osv.dev"
+      api_url: "https://api.osv.dev/v1/query" # full query endpoint, not the host
       timeout: "30s"
 
     # Grype - Multi-ecosystem vulnerability scanner from Anchore

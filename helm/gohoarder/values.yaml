@@ -406,7 +406,7 @@ security:
 
     osv:
       enabled: false
-      apiUrl: "https://api.osv.dev"
+      apiUrl: "https://api.osv.dev/v1/query"
       timeout: "30s"
 
     grype:

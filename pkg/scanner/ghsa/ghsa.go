@@ -15,6 +15,7 @@ import (
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -164,7 +165,7 @@ func (s *Scanner) queryAdvisories(ctx context.Context, ecosystem, packageName st
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("github api returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &scanerr.StatusError{Service: "github api", Code: resp.StatusCode, Body: string(body)}
 	}
 
 	var advisories []GHSAAdvisory

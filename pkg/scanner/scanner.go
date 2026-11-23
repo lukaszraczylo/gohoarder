@@ -20,6 +20,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/npmaudit"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/osv"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/pipaudit"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/trivy"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
@@ -43,14 +44,88 @@ type DatabaseUpdater interface {
 	UpdateDatabase(ctx context.Context) error
 }
 
+const (
+	// DetailInfrastructureError marks a stored scan-error result as caused by
+	// scanner infrastructure (timeout, upstream 5xx) rather than by the package.
+	DetailInfrastructureError = "infrastructure_error"
+
+	defaultScanRetryInterval = 5 * time.Minute
+	maxScanRetries           = 6
+)
+
 // Manager manages multiple security scanners
 type Manager struct {
 	metadataStore metadata.MetadataStore
 	broadcaster   events.Broadcaster
+	retryTimers   map[string]*time.Timer
+	inflight      map[string]int
 	scanners      []Scanner
 	config        config.SecurityConfig
 	bcMu          sync.RWMutex
+	stateMu       sync.Mutex
 	enabled       bool
+	stopped       bool
+}
+
+// Enabled reports whether security scanning is on.
+func (m *Manager) Enabled() bool {
+	return m.enabled
+}
+
+// Stop cancels pending scan retries.
+func (m *Manager) Stop() {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	m.stopped = true
+	for key, timer := range m.retryTimers {
+		timer.Stop()
+		delete(m.retryTimers, key)
+	}
+}
+
+func scanKey(registry, packageName, version string) string {
+	return registry + "/" + packageName + "@" + version
+}
+
+func (m *Manager) markInflight(key string, delta int) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	m.inflight[key] += delta
+	if m.inflight[key] <= 0 {
+		delete(m.inflight, key)
+	}
+}
+
+func (m *Manager) isInflight(key string) bool {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	return m.inflight[key] > 0
+}
+
+// scheduleRetry rescans a package whose scan failed on infrastructure.
+func (m *Manager) scheduleRetry(registry, packageName, version, filePath string, attempt int) {
+	interval := m.config.ScanRetryInterval
+	if interval <= 0 {
+		interval = defaultScanRetryInterval
+	}
+	key := scanKey(registry, packageName, version)
+
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	if m.stopped {
+		return
+	}
+	if old, ok := m.retryTimers[key]; ok {
+		old.Stop()
+	}
+	m.retryTimers[key] = time.AfterFunc(interval, func() {
+		m.stateMu.Lock()
+		delete(m.retryTimers, key)
+		m.stateMu.Unlock()
+		if err := m.scan(context.Background(), registry, packageName, version, filePath, attempt); err != nil {
+			log.Warn().Err(err).Str("package", packageName).Int("attempt", attempt).Msg("Scan retry failed")
+		}
+	})
 }
 
 // SetBroadcaster wires an events.Broadcaster onto the scanner so scan
@@ -81,6 +156,8 @@ func New(cfg config.SecurityConfig, metadataStore metadata.MetadataStore) (*Mana
 		enabled:       cfg.Enabled,
 		config:        cfg,
 		metadataStore: metadataStore,
+		retryTimers:   make(map[string]*time.Timer),
+		inflight:      make(map[string]int),
 	}
 
 	if !cfg.Enabled {
@@ -165,9 +242,19 @@ func (m *Manager) RegisterScanner(scanner Scanner) {
 
 // ScanPackage scans a package using all registered scanners and saves results
 func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, version string, filePath string) error {
+	return m.scan(ctx, registry, packageName, version, filePath, 0)
+}
+
+// scan runs every applicable scanner. attempt is 0 for the first scan and
+// counts retries after an infrastructure failure.
+func (m *Manager) scan(ctx context.Context, registry, packageName, version string, filePath string, attempt int) error {
 	if !m.enabled {
 		return nil
 	}
+
+	key := scanKey(registry, packageName, version)
+	m.markInflight(key, 1)
+	defer m.markInflight(key, -1)
 
 	log.Info().
 		Str("registry", registry).
@@ -178,6 +265,7 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 	// Collect results from all scanners
 	var scanResults []*metadata.ScanResult
 	scannerNames := make([]string, 0)
+	var infraFailures, otherFailures int
 
 	for _, scanner := range m.scanners {
 		// Skip scanners that don't support this registry
@@ -196,6 +284,11 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 				Str("scanner", scanner.Name()).
 				Str("package", packageName).
 				Msg("Scanner failed")
+			if scanerr.IsInfrastructure(err) {
+				infraFailures++
+			} else {
+				otherFailures++
+			}
 			continue
 		}
 
@@ -214,9 +307,16 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 	// fail closed (no scan == blocked) rather than silently leaving
 	// SecurityScanned=false which would allow the package to be served.
 	if len(scanResults) == 0 {
+		infraOnly := infraFailures > 0 && otherFailures == 0
+		if attempt > 0 && !infraOnly {
+			// Keep the earlier infrastructure-error result rather than
+			// replacing it with a failure the package did not cause.
+			return nil
+		}
 		log.Warn().
 			Str("package", packageName).
-			Msg("All scanners failed, saving scan-error result for fail-closed enforcement")
+			Bool("infrastructure", infraOnly).
+			Msg("All scanners failed, saving scan-error result")
 
 		errResult := &metadata.ScanResult{
 			ID:                 uuid.New().String(),
@@ -229,7 +329,8 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 			VulnerabilityCount: 0,
 			Vulnerabilities:    []metadata.Vulnerability{},
 			Details: map[string]interface{}{
-				"error": "all configured scanners failed for this package",
+				"error":                   "all configured scanners failed for this package",
+				DetailInfrastructureError: infraOnly,
 			},
 		}
 		if err := m.metadataStore.SaveScanResult(ctx, errResult); err != nil {
@@ -246,6 +347,9 @@ func (m *Manager) ScanPackage(ctx context.Context, registry, packageName, versio
 			"status":              string(errResult.Status),
 			"vulnerability_count": errResult.VulnerabilityCount,
 		})
+		if infraOnly && attempt < maxScanRetries {
+			m.scheduleRetry(registry, packageName, version, filePath, attempt+1)
+		}
 		return nil
 	}
 
@@ -468,6 +572,9 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	if err != nil {
 		var hErr *hoardererrors.Error
 		if stderrors.As(err, &hErr) && hErr.Code == hoardererrors.ErrCodeNotFound {
+			if !m.config.FailClosed && m.isInflight(scanKey(registry, packageName, version)) {
+				return false, "", nil
+			}
 			return true, "no scan available - fail closed", nil
 		}
 		// Real backend error (DB transient, etc.) — also block.
@@ -486,6 +593,10 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	// block. A scan-error record means we don't actually know whether the
 	// package is safe.
 	if result.Status == metadata.ScanStatusError {
+		if infra, _ := result.Details[DetailInfrastructureError].(bool); infra && !m.config.FailClosed {
+			log.Warn().Str("package", packageName).Msg("Scan failed on infrastructure, serving package; scan will be retried")
+			return false, "", nil
+		}
 		return true, "scan failed - fail closed", nil
 	}
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -94,10 +95,7 @@ type OSVEvent struct {
 
 // New creates a new OSV scanner
 func New(cfg config.OSVConfig) *Scanner {
-	apiURL := cfg.APIURL
-	if apiURL == "" {
-		apiURL = defaultOSVAPIURL
-	}
+	cfg.APIURL = queryURL(cfg.APIURL)
 
 	timeout := cfg.Timeout
 	if timeout == 0 {
@@ -113,6 +111,18 @@ func New(cfg config.OSVConfig) *Scanner {
 }
 
 // Name returns the scanner name
+// queryURL returns the OSV query endpoint. A bare host is what older docs
+// listed as api_url, and it answers 404 to a POST, so the path is added.
+func queryURL(apiURL string) string {
+	if apiURL == "" {
+		return defaultOSVAPIURL
+	}
+	if strings.TrimRight(apiURL, "/") == "" || !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(apiURL, "https://"), "http://"), "/") {
+		return strings.TrimRight(apiURL, "/") + "/v1/query"
+	}
+	return apiURL
+}
+
 func (s *Scanner) Name() string {
 	return ScannerName
 }
@@ -169,7 +179,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OSV API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &scanerr.StatusError{Service: "OSV API", Code: resp.StatusCode, Body: string(body)}
 	}
 
 	// Parse response

@@ -19,6 +19,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// routePrefix is where the handler is mounted.
+const routePrefix = "/npm/"
+
 // Handler implements the NPM registry protocol
 type Handler struct {
 	cache           *cache.Manager
@@ -73,6 +76,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Error(w, "Invalid NPM request", http.StatusBadRequest)
 	}
+}
+
+// CanonicalPath turns the escaped scope separator npm and pnpm send
+// (/npm/@scope%2fname) into the literal form (/npm/@scope/name). Fiber's
+// net/http adaptor answers 404 to any escaped slash, so the rewrite must
+// happen before the adaptor. Only the first escape in the first segment is
+// rewritten, so a name cannot smuggle extra path segments.
+func CanonicalPath(path string) string {
+	rest, ok := strings.CutPrefix(path, routePrefix)
+	if !ok {
+		return path
+	}
+	segment, tail, _ := strings.Cut(rest, "/")
+	if !strings.HasPrefix(segment, "@") {
+		return path
+	}
+	for _, escaped := range []string{"%2f", "%2F"} {
+		if scope, name, found := strings.Cut(segment, escaped); found {
+			canonical := routePrefix + scope + "/" + name
+			if rest != segment {
+				canonical += "/" + tail
+			}
+			return canonical
+		}
+	}
+	return path
 }
 
 // handleMetadata handles package metadata requests

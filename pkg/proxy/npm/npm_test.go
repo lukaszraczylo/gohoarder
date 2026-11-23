@@ -79,3 +79,21 @@ func TestExtractTarballInfo_Scoped(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalPath(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"/npm/@types%2fnode", "/npm/@types/node"},
+		{"/npm/@types%2Fnode", "/npm/@types/node"},
+		{"/npm/@types%2fnode/-/node-1.0.0.tgz", "/npm/@types/node/-/node-1.0.0.tgz"},
+		{"/npm/@types/node", "/npm/@types/node"},
+		{"/npm/express", "/npm/express"},
+		{"/npm/express/-/express-4.0.0.tgz", "/npm/express/-/express-4.0.0.tgz"},
+		{"/npm/@a%2f..%2fb", "/npm/@a/..%2fb"},
+		{"/go/@a%2fb", "/go/@a%2fb"},
+	}
+	for _, tt := range tests {
+		if got := CanonicalPath(tt.in); got != tt.want {
+			t.Errorf("CanonicalPath(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

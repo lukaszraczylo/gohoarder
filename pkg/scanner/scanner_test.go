@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -329,4 +330,126 @@ func TestCheckVulnerabilities_GoPackageBypassNotFound(t *testing.T) {
 		context.Background(), "go", "github.com/foo/bar/@v/v1.2.3.zip", "v1.2.3")
 	require.NoError(t, err)
 	assert.True(t, blocked, "a non-matching bypass should not unblock the package")
+}
+
+// resultStore returns a fixed scan result from GetScanResult and records saves.
+type resultStore struct {
+	*stubMetadataStore
+	scan *metadata.ScanResult
+}
+
+func (m *resultStore) GetScanResult(context.Context, string, string, string) (*metadata.ScanResult, error) {
+	return m.scan, nil
+}
+
+func (m *resultStore) saved() []*metadata.ScanResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*metadata.ScanResult(nil), m.savedResults...)
+}
+
+func TestScanPackage_InfrastructureErrorIsMarked(t *testing.T) {
+	store := &stubMetadataStore{}
+	mgr := newTestManager(t, store)
+	mgr.RegisterScanner(&stubScanner{name: "osv", err: fmt.Errorf("OSV API request failed: %w", context.DeadlineExceeded)})
+
+	require.NoError(t, mgr.ScanPackage(context.Background(), "npm", "left-pad", "1.0.0", "/tmp/x"))
+
+	require.Len(t, store.savedResults, 1)
+	assert.Equal(t, metadata.ScanStatusError, store.savedResults[0].Status)
+	assert.Equal(t, true, store.savedResults[0].Details[DetailInfrastructureError])
+}
+
+func TestScanPackage_NonInfrastructureErrorIsNotMarked(t *testing.T) {
+	store := &stubMetadataStore{}
+	mgr := newTestManager(t, store)
+	mgr.RegisterScanner(&stubScanner{name: "broken", err: errors.New("scanner exploded")})
+
+	require.NoError(t, mgr.ScanPackage(context.Background(), "npm", "left-pad", "1.0.0", "/tmp/x"))
+
+	require.Len(t, store.savedResults, 1)
+	assert.NotEqual(t, true, store.savedResults[0].Details[DetailInfrastructureError])
+}
+
+func infraErrorScan() *metadata.ScanResult {
+	return &metadata.ScanResult{
+		ID: "r", Scanner: "all", ScannedAt: time.Now(), Status: metadata.ScanStatusError,
+		Details: map[string]interface{}{DetailInfrastructureError: true},
+	}
+}
+
+func TestCheckVulnerabilities_InfrastructureErrorServesByDefault(t *testing.T) {
+	store := &resultStore{stubMetadataStore: &stubMetadataStore{}, scan: infraErrorScan()}
+	mgr := newTestManager(t, store)
+
+	blocked, reason, err := mgr.CheckVulnerabilities(context.Background(), "npm", "left-pad", "1.0.0")
+	require.NoError(t, err)
+	assert.False(t, blocked, "infrastructure scan error must not block, got reason %q", reason)
+}
+
+func TestCheckVulnerabilities_InfrastructureErrorBlocksWhenFailClosed(t *testing.T) {
+	store := &resultStore{stubMetadataStore: &stubMetadataStore{}, scan: infraErrorScan()}
+	mgr, err := New(config.SecurityConfig{Enabled: true, FailClosed: true}, store)
+	require.NoError(t, err)
+
+	blocked, _, err := mgr.CheckVulnerabilities(context.Background(), "npm", "left-pad", "1.0.0")
+	require.NoError(t, err)
+	assert.True(t, blocked)
+}
+
+func TestCheckVulnerabilities_PlainScanErrorStillBlocks(t *testing.T) {
+	scan := infraErrorScan()
+	scan.Details = map[string]interface{}{}
+	store := &resultStore{stubMetadataStore: &stubMetadataStore{}, scan: scan}
+	mgr := newTestManager(t, store)
+
+	blocked, _, err := mgr.CheckVulnerabilities(context.Background(), "npm", "left-pad", "1.0.0")
+	require.NoError(t, err)
+	assert.True(t, blocked)
+}
+
+// flakyScanner fails with an infrastructure error until failures is exhausted.
+type flakyScanner struct {
+	failures int
+	calls    int
+	mu       sync.Mutex
+}
+
+func (f *flakyScanner) Name() string { return "osv" }
+func (f *flakyScanner) Scan(_ context.Context, registry, name, version, _ string) (*metadata.ScanResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.calls <= f.failures {
+		return nil, fmt.Errorf("OSV API request failed: %w", context.DeadlineExceeded)
+	}
+	return &metadata.ScanResult{
+		ID: "ok", Registry: registry, PackageName: name, PackageVersion: version,
+		Scanner: "osv", ScannedAt: time.Now(), Status: metadata.ScanStatusClean,
+	}, nil
+}
+func (f *flakyScanner) Health(context.Context) error { return nil }
+
+func TestScanPackage_InfrastructureErrorIsRetried(t *testing.T) {
+	store := &stubMetadataStore{}
+	mgr, err := New(config.SecurityConfig{Enabled: true, ScanRetryInterval: 10 * time.Millisecond}, store)
+	require.NoError(t, err)
+	t.Cleanup(mgr.Stop)
+	mgr.RegisterScanner(&flakyScanner{failures: 1})
+
+	require.NoError(t, mgr.ScanPackage(context.Background(), "npm", "left-pad", "1.0.0", "/tmp/x"))
+
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		n := len(store.savedResults)
+		return n == 2 && store.savedResults[1].Status == metadata.ScanStatusClean
+	}, 2*time.Second, 10*time.Millisecond, "retry must save a clean result after the infrastructure error")
+}
+
+func TestScanner_DisabledReportsNotEnabled(t *testing.T) {
+	mgr, err := New(config.SecurityConfig{Enabled: false}, &stubMetadataStore{})
+	require.NoError(t, err)
+	assert.False(t, mgr.Enabled())
+	assert.True(t, newTestManager(t, &stubMetadataStore{}).Enabled())
 }

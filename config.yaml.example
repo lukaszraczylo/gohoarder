@@ -113,6 +113,8 @@ security:
   # When a scan fails on infrastructure (timeout, upstream 5xx) the package is served and the
   # scan is retried every scan_retry_interval. Set fail_closed to refuse such packages instead.
   fail_closed: false
+  # How long a first download waits for its scan before it is served (or refused with fail_closed). Default 30s.
+  scan_wait_timeout: "30s"
   scan_retry_interval: "5m"
   update_db_on_startup: false  # Update vulnerability databases on startup
   allowed_packages: []  # Packages that bypass security checks (format: "registry/name@version")

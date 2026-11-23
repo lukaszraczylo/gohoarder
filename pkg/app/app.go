@@ -242,6 +242,7 @@ func (a *App) initializeComponents() error {
 		DeletedRetention: a.config.Cache.DeletedRetention,
 		MaxPackageSize:   a.config.Security.Scanners.Static.MaxPackageSize,
 		FailClosed:       a.config.Security.FailClosed,
+		ScanWaitTimeout:  a.config.Security.ScanWaitTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize cache: %w", err)

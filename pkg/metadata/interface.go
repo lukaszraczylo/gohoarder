@@ -86,6 +86,11 @@ type MetadataStore interface {
 	// the given time, oldest first. A limit <= 0 means DefaultBatchSize.
 	ListExpiredPackages(ctx context.Context, expiredBefore time.Time, limit int) ([]*Package, error)
 
+	// PurgeDeletedPackages hard-deletes up to limit soft-deleted packages whose
+	// deletion is older than deletedBefore, with their scan and vulnerability
+	// rows, and returns the number removed. A limit <= 0 means DefaultBatchSize.
+	PurgeDeletedPackages(ctx context.Context, deletedBefore time.Time, limit int) (int64, error)
+
 	// GetStatsTrend returns the daily stats snapshots from the UTC day of since
 	// on, oldest first. Backends without history return none.
 	GetStatsTrend(ctx context.Context, since time.Time) ([]*StatsSnapshot, error)

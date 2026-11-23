@@ -381,6 +381,7 @@ cache:
   defaultTTL: "24h"  # Freshness window for metadata pages; keep below the 72h client release-age gate
   cleanupInterval: "1h"
   idleTTL: "168h"  # Remove cached items not requested for this long; "0" disables
+  deletedRetention: "720h"  # Purge deleted package rows after this long; "0" keeps them forever
   maxSizeBytes: 536870912000  # 500GB
   perProjectQuota: 53687091200  # 50GB
   ttlOverrides:  # Per-registry metadata freshness; replaces defaultTTL for that registry. Keys: npm, pypi, go

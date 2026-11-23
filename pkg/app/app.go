@@ -239,6 +239,7 @@ func (a *App) initializeComponents() error {
 		TTLOverrides:     a.config.Cache.MetadataTTLOverrides(),
 		CleanupInterval:  cleanupInterval,
 		IdleTTL:          a.config.Cache.IdleTTL,
+		DeletedRetention: a.config.Cache.DeletedRetention,
 		MaxPackageSize:   a.config.Security.Scanners.Static.MaxPackageSize,
 		FailClosed:       a.config.Security.FailClosed,
 	})

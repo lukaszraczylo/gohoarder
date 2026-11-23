@@ -236,6 +236,7 @@ security:
 cache:
   default_ttl: 24h    # Freshness window for metadata pages (version lists, package documents)
   idle_ttl: 168h      # Remove cached items not requested for 7 days; 0 disables
+  deleted_retention: 720h  # Purge deleted package rows after 30 days; 0 keeps them
   ttl_overrides:      # Per-registry metadata freshness (npm, pypi, go); replaces default_ttl, never applies to artifacts
     pypi: 12h
   cleanup_interval: 1h
@@ -256,6 +257,8 @@ Every `cleanup_interval` the cleanup run removes:
 
 - **Idle items.** Any cached item, artifact or metadata page, whose last request is older than `idle_ttl` (default `168h`, seven days). Each request, hit or miss, resets the clock. Set `idle_ttl: 0` to turn idle eviction off.
 - **Stale metadata.** Version lists, package documents and Go `.mod`/`.info` files past `default_ttl` (default `24h`, below the 72h release-age gate clients apply). They refresh on the next request.
+
+- **Deleted rows.** Evicting or deleting a package marks its database row deleted. Rows deleted longer ago than `deleted_retention` (default `720h`, 30 days) are removed for good, in batches of 500. Download history and the daily trend snapshots are kept. Set `deleted_retention: 0` to keep every row.
 
 Artifacts (tarballs, wheels, module zips) never expire by age, so a package that clients keep requesting stays cached. Size-based LRU eviction at `max_size_bytes` is unchanged. Removed items keep their download history in the statistics.
 

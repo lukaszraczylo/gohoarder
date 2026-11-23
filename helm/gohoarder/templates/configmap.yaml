@@ -76,6 +76,7 @@ data:
       default_ttl: {{ .Values.cache.defaultTTL | quote }}
       cleanup_interval: {{ .Values.cache.cleanupInterval | quote }}
       idle_ttl: {{ .Values.cache.idleTTL | quote }}
+      deleted_retention: {{ .Values.cache.deletedRetention | default "720h" | quote }}
       max_size_bytes: {{ .Values.cache.maxSizeBytes }}
       per_project_quota: {{ .Values.cache.perProjectQuota }}
       ttl_overrides:

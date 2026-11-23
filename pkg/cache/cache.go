@@ -85,6 +85,7 @@ type Config struct {
 	DefaultTTL        time.Duration            // Freshness TTL for metadata entries
 	CleanupInterval   time.Duration            // How often to run cleanup
 	IdleTTL           time.Duration            // Remove entries not requested for this long (0 = off)
+	DeletedRetention  time.Duration            // Hard-delete soft-deleted rows older than this (0 = keep forever)
 	EvictionThreshold float64                  // Trigger eviction when usage > threshold (0.0-1.0)
 	MaxConcurrent     int                      // Max concurrent upstream fetches
 	MaxPackageSize    int64                    // Maximum package size in bytes (0 = default 2GB)
@@ -96,6 +97,9 @@ const defaultScanWaitTimeout = 30 * time.Second
 
 // cleanupBatchSize bounds how many rows one cleanup query reads.
 const cleanupBatchSize = metadata.DefaultBatchSize
+
+// maxPurgeBatches bounds the soft-delete purge of one cleanup pass; the next pass continues.
+const maxPurgeBatches = 100
 
 // getAttempts bounds how often Get re-resolves an entry whose blob vanished.
 const getAttempts = 2
@@ -917,12 +921,38 @@ func (m *Manager) cleanup(ctx context.Context) {
 			func(p *metadata.Package) bool { return p.LastAccessed.Before(cutoff) })
 	}
 
+	purged := m.purgeDeleted(ctx, start)
+
 	log.Info().
 		Int("expired", expired.count).
 		Int("idle", idle.count).
 		Int64("bytes_freed", expired.bytes+idle.bytes).
 		Dur("idle_ttl", m.config.IdleTTL).
+		Int64("purged_deleted", purged).
+		Dur("deleted_retention", m.config.DeletedRetention).
 		Msg("Cleanup completed")
+}
+
+// purgeDeleted hard-deletes soft-deleted rows past DeletedRetention in bounded
+// batches and returns how many it removed.
+func (m *Manager) purgeDeleted(ctx context.Context, now time.Time) int64 {
+	if m.config.DeletedRetention <= 0 {
+		return 0
+	}
+	cutoff := now.Add(-m.config.DeletedRetention)
+	var total int64
+	for i := 0; i < maxPurgeBatches && ctx.Err() == nil; i++ {
+		n, err := m.metadata.PurgeDeletedPackages(ctx, cutoff, cleanupBatchSize)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to purge soft-deleted packages")
+			break
+		}
+		total += n
+		if n < cleanupBatchSize {
+			break
+		}
+	}
+	return total
 }
 
 // generateStorageKey generates a storage key for a package

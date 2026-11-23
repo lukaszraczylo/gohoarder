@@ -157,14 +157,19 @@ func (c CacheConfig) MetadataTTLOverrides() map[string]time.Duration {
 // DefaultIdleTTL is how long a cached item can go unrequested before cleanup removes it.
 const DefaultIdleTTL = 7 * 24 * time.Hour
 
+// DefaultDeletedRetention is how long a soft-deleted package row is kept before cleanup purges it.
+const DefaultDeletedRetention = 30 * 24 * time.Hour
+
 // CacheConfig contains cache management configuration
 type CacheConfig struct {
 	TTLOverrides    map[string]time.Duration `mapstructure:"ttl_overrides" json:"ttl_overrides"`
 	DefaultTTL      time.Duration            `mapstructure:"default_ttl" json:"default_ttl"`
 	CleanupInterval time.Duration            `mapstructure:"cleanup_interval" json:"cleanup_interval"`
 	IdleTTL         time.Duration            `mapstructure:"idle_ttl" json:"idle_ttl"` // 0 disables idle eviction
-	MaxSizeBytes    int64                    `mapstructure:"max_size_bytes" json:"max_size_bytes"`
-	PerProjectQuota int64                    `mapstructure:"per_project_quota" json:"per_project_quota"`
+	// DeletedRetention is how long soft-deleted package rows stay before cleanup purges them; 0 keeps them forever.
+	DeletedRetention time.Duration `mapstructure:"deleted_retention" json:"deleted_retention"`
+	MaxSizeBytes     int64         `mapstructure:"max_size_bytes" json:"max_size_bytes"`
+	PerProjectQuota  int64         `mapstructure:"per_project_quota" json:"per_project_quota"`
 }
 
 // SecurityConfig contains security scanning configuration
@@ -377,11 +382,12 @@ func Default() *Config {
 			},
 		},
 		Cache: CacheConfig{
-			DefaultTTL:      DefaultMetadataTTL,
-			CleanupInterval: 1 * time.Hour,
-			IdleTTL:         DefaultIdleTTL,
-			MaxSizeBytes:    500 * 1024 * 1024 * 1024, // 500GB
-			PerProjectQuota: 50 * 1024 * 1024 * 1024,  // 50GB
+			DefaultTTL:       DefaultMetadataTTL,
+			CleanupInterval:  1 * time.Hour,
+			IdleTTL:          DefaultIdleTTL,
+			DeletedRetention: DefaultDeletedRetention,
+			MaxSizeBytes:     500 * 1024 * 1024 * 1024, // 500GB
+			PerProjectQuota:  50 * 1024 * 1024 * 1024,  // 50GB
 		},
 		Security: SecurityConfig{
 			Enabled:         false,
@@ -540,6 +546,9 @@ func (c *Config) Validate() error {
 		if ttl <= 0 {
 			return fmt.Errorf("cache.ttl_overrides.%s must be positive, got %s", key, ttl)
 		}
+	}
+	if c.Cache.DeletedRetention < 0 {
+		return fmt.Errorf("cache.deleted_retention cannot be negative")
 	}
 	if c.Cache.MaxSizeBytes < 0 {
 		return fmt.Errorf("cache.max_size_bytes cannot be negative")

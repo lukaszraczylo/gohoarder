@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -89,6 +90,29 @@ func (s *Store) GetPackage(ctx context.Context, registry, name, version string) 
 	return &pkg, nil
 }
 
+// walkJSON visits every .json file under dir through an os.Root, so a symlink
+// planted in the tree cannot redirect reads or removals outside dir.
+func walkJSON(dir string, skipMissing bool, fn func(root *os.Root, name string) error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		if skipMissing && os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(name) != ".json" {
+			return nil
+		}
+		return fn(root, name)
+	})
+}
+
 // ListPackages lists all packages
 func (s *Store) ListPackages(ctx context.Context, opts *metadata.ListOptions) ([]*metadata.Package, error) {
 	s.mu.RLock()
@@ -97,16 +121,8 @@ func (s *Store) ListPackages(ctx context.Context, opts *metadata.ListOptions) ([
 	var packages []*metadata.Package
 
 	// Walk through all files
-	err := filepath.Walk(s.basePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() || filepath.Ext(path) != ".json" {
-			return nil
-		}
-
-		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
+	err := walkJSON(s.basePath, false, func(root *os.Root, name string) error {
+		data, err := root.ReadFile(name)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
@@ -206,16 +222,8 @@ func (s *Store) GetStats(ctx context.Context, registry string) (*metadata.Stats,
 	}
 
 	// Walk through files and calculate stats
-	err := filepath.Walk(s.basePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() || filepath.Ext(path) != ".json" {
-			return nil
-		}
-
-		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
+	err := walkJSON(s.basePath, false, func(root *os.Root, name string) error {
+		data, err := root.ReadFile(name)
 		if err != nil {
 			return nil
 		}
@@ -343,26 +351,15 @@ func (s *Store) GetActiveCVEBypasses(ctx context.Context) ([]*metadata.CVEBypass
 	now := time.Now()
 
 	// Read all bypass files
-	err := filepath.Walk(bypassesDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil // bypasses directory doesn't exist yet
-			}
-			return err
-		}
-
-		if info.IsDir() || filepath.Ext(path) != ".json" {
-			return nil
-		}
-
-		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
+	err := walkJSON(bypassesDir, true, func(root *os.Root, name string) error {
+		data, err := root.ReadFile(name)
 		if err != nil {
 			return err
 		}
 
 		var bypass metadata.CVEBypass
 		if err := json.Unmarshal(data, &bypass); err != nil {
-			log.Warn().Err(err).Str("file", path).Msg("Failed to unmarshal bypass")
+			log.Warn().Err(err).Str("file", name).Msg("Failed to unmarshal bypass")
 			return nil
 		}
 
@@ -391,26 +388,15 @@ func (s *Store) ListCVEBypasses(ctx context.Context, opts *metadata.BypassListOp
 	now := time.Now()
 
 	// Read all bypass files
-	err := filepath.Walk(bypassesDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil // bypasses directory doesn't exist yet
-			}
-			return err
-		}
-
-		if info.IsDir() || filepath.Ext(path) != ".json" {
-			return nil
-		}
-
-		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
+	err := walkJSON(bypassesDir, true, func(root *os.Root, name string) error {
+		data, err := root.ReadFile(name)
 		if err != nil {
 			return err
 		}
 
 		var bypass metadata.CVEBypass
 		if err := json.Unmarshal(data, &bypass); err != nil {
-			log.Warn().Err(err).Str("file", path).Msg("Failed to unmarshal bypass")
+			log.Warn().Err(err).Str("file", name).Msg("Failed to unmarshal bypass")
 			return nil
 		}
 
@@ -481,33 +467,22 @@ func (s *Store) CleanupExpiredBypasses(ctx context.Context) (int, error) {
 	now := time.Now()
 
 	// Read all bypass files
-	err := filepath.Walk(bypassesDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil // bypasses directory doesn't exist yet
-			}
-			return err
-		}
-
-		if info.IsDir() || filepath.Ext(path) != ".json" {
-			return nil
-		}
-
-		data, err := os.ReadFile(path) // #nosec G304 -- Path from internal file structure
+	err := walkJSON(bypassesDir, true, func(root *os.Root, name string) error {
+		data, err := root.ReadFile(name)
 		if err != nil {
 			return err
 		}
 
 		var bypass metadata.CVEBypass
 		if err := json.Unmarshal(data, &bypass); err != nil {
-			log.Warn().Err(err).Str("file", path).Msg("Failed to unmarshal bypass")
+			log.Warn().Err(err).Str("file", name).Msg("Failed to unmarshal bypass")
 			return nil
 		}
 
 		// Delete if expired
 		if bypass.ExpiresAt.Before(now) {
-			if err := os.Remove(path); err != nil {
-				log.Warn().Err(err).Str("file", path).Msg("Failed to delete expired bypass")
+			if err := root.Remove(name); err != nil {
+				log.Warn().Err(err).Str("file", name).Msg("Failed to delete expired bypass")
 			} else {
 				count++
 			}

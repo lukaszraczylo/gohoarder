@@ -44,6 +44,8 @@ type Manager struct {
 	analytics   AnalyticsInterface
 	broadcaster events.Broadcaster
 	stopCh      chan struct{}
+	bgCtx       context.Context // cancelled by Close; parent of background scans
+	bgCancel    context.CancelFunc
 	sf          singleflight.Group
 	config      Config
 	cleanupWG   sync.WaitGroup
@@ -175,7 +177,10 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 		config.MaxPackageSize = 2 * 1024 * 1024 * 1024 // 2GB default
 	}
 
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	manager := &Manager{
+		bgCtx:     bgCtx,
+		bgCancel:  bgCancel,
 		storage:   storage,
 		metadata:  metadata,
 		scanner:   scanner,
@@ -616,7 +621,7 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		}
 
 		go func() {
-			scanCtx := context.Background()
+			scanCtx := m.bgCtx
 			var filePath string
 			var cleanupFunc func()
 
@@ -826,6 +831,7 @@ func (m *Manager) Close() error {
 
 	// Stop cleanup worker (idempotent via sync.Once).
 	m.closeOnce.Do(func() {
+		m.bgCancel()
 		close(m.stopCh)
 		m.cleanupWG.Wait()
 	})

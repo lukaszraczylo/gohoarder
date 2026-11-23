@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -42,14 +43,14 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 		Str("version", version).
 		Msg("Getting vulnerabilities for package")
 
-	pkg, pkgErr := a.metadata.GetPackage(ctx, registry, name, version)
+	key, pkg, pkgErr := a.resolvePackageKey(ctx, registry, name, version)
 	releaseVersion := ""
 	if pkgErr == nil && pkg != nil {
 		releaseVersion = pkg.ReleaseVersion
 	}
 
 	// Get scan result from metadata store
-	scanResult, err := a.metadata.GetScanResult(ctx, registry, name, version)
+	scanResult, err := a.metadata.GetScanResult(ctx, registry, key, version)
 	if err != nil {
 		if pkgErr != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "package not found"})
@@ -168,4 +169,24 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response)
+}
+
+// goCacheKeyExts orders the Go cache files a module version is stored under; the
+// .zip carries the scan result.
+var goCacheKeyExts = []string{"zip", "mod", "info"}
+
+// resolvePackageKey maps the name the dashboard shows to the stored row name.
+// Go rows are stored under cache keys (module/@v/version.ext), not the module path.
+func (a *App) resolvePackageKey(ctx context.Context, registry, name, version string) (string, *metadata.Package, error) {
+	pkg, err := a.metadata.GetPackage(ctx, registry, name, version)
+	if err == nil || registry != "go" || strings.Contains(name, "/@v/") {
+		return name, pkg, err
+	}
+	for _, ext := range goCacheKeyExts {
+		key := name + "/@v/" + version + "." + ext
+		if p, kerr := a.metadata.GetPackage(ctx, registry, key, version); kerr == nil {
+			return key, p, nil
+		}
+	}
+	return name, nil, err
 }

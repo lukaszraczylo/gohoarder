@@ -80,6 +80,10 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 	if len(allowed) == 0 {
 		allowed = defaultAllowedPyPIHosts
 	}
+	// A private index serves its files from its own host.
+	if parsed, err := url.Parse(config.Upstream); err == nil && parsed.Hostname() != "" {
+		allowed = append(append([]string(nil), allowed...), parsed.Hostname())
+	}
 
 	return &Handler{
 		cache:           cacheManager,
@@ -156,10 +160,24 @@ func (h *Handler) handleIndex(ctx context.Context, w http.ResponseWriter, r *htt
 
 // handlePackagePage handles package page requests
 func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, r *http.Request, path string) {
+	pageFormat, ok := negotiateFormat(r.Header.Get("Accept"))
+	if !ok {
+		http.Error(w, "No acceptable simple API representation", http.StatusNotAcceptable)
+		return
+	}
+
 	url := h.upstream + path
 	packageName := extractPackageName(path)
-	entry, err := h.cache.Get(ctx, "pypi", packageName, "page", func(ctx context.Context) (*cache.FetchResult, error) {
-		body, statusCode, err := h.client.Get(ctx, url, nil)
+
+	cacheVersion := "page"
+	var upstreamHeaders map[string]string
+	if pageFormat == formatJSON {
+		cacheVersion = jsonPageVersion
+		upstreamHeaders = map[string]string{"Accept": contentTypeJSON}
+	}
+
+	entry, err := h.cache.Get(ctx, "pypi", packageName, cacheVersion, func(ctx context.Context) (*cache.FetchResult, error) {
+		body, statusCode, err := h.client.Get(ctx, url, upstreamHeaders)
 		if err != nil {
 			return nil, err
 		}
@@ -194,10 +212,24 @@ func (h *Handler) handlePackagePage(ctx context.Context, w http.ResponseWriter, 
 
 	// Rewrite package file URLs to point to our proxy
 	proxyBaseURL := getProxyBaseURL(r)
+	w.Header().Add("Vary", "Accept")
+
+	if pageFormat == formatJSON {
+		rewritten, err := rewriteJSONPage(buf.Bytes(), packageName, url, proxyBaseURL)
+		if err != nil {
+			log.Error().Err(err).Str("url", url).Msg("Failed to rewrite package page JSON")
+			http.Error(w, "Failed to parse package page", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", contentTypeJSON)
+		_, _ = w.Write(rewritten) // #nosec G104 -- HTTP response write
+		return
+	}
+
 	modifiedHTML := rewritePackagePageURLs(buf.String(), packageName, proxyBaseURL)
 
-	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-	_, _ = w.Write([]byte(modifiedHTML)) // #nosec G104 -- Websocket buffer write
+	w.Header().Set("Content-Type", contentTypeHTML)
+	_, _ = w.Write([]byte(modifiedHTML)) // #nosec G104 -- HTTP response write
 }
 
 // handlePackageFile handles package file download requests
@@ -240,6 +272,13 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			log.Warn().Str("original_url", originalURL).Msg("Rejected invalid original_url")
 			http.Error(w, "Invalid original_url", http.StatusBadRequest)
 			return
+		}
+		// The page links the wheel; a PEP 658 sidecar request appends
+		// ".metadata" to the proxy path, so the upstream URL needs it too.
+		if strings.HasSuffix(path, metadataSuffix) && !strings.HasSuffix(parsed.Path, metadataSuffix) {
+			parsed.Path += metadataSuffix
+			parsed.RawPath = ""
+			originalURL = parsed.String()
 		}
 		if !isAllowedPyPIHost(parsed.Host, h.allowedHosts) {
 			log.Warn().

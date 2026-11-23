@@ -36,6 +36,10 @@ func (pm *PartitionManager) EnsurePartitions() error {
 
 	log.Info().Msg("Ensuring partitions exist")
 
+	if err := pm.ensureStatsUpsertIndexes(); err != nil {
+		return err
+	}
+
 	// Create partitions for download_events
 	if err := pm.ensureDownloadEventPartitions(); err != nil {
 		return err
@@ -157,16 +161,51 @@ func (pm *PartitionManager) createDownloadEventPartition(month time.Time) error 
 	return nil
 }
 
+// statsUpsertIndexes are the unique indexes that the ON CONFLICT clauses in
+// aggregation_worker.go name; AutoMigrate cannot express the COALESCE.
+var statsUpsertIndexes = []string{
+	"CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_hourly_upsert ON download_stats_hourly (registry_id, COALESCE(package_id, 0), time_bucket)",
+	"CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_daily_upsert ON download_stats_daily (registry_id, COALESCE(package_id, 0), time_bucket)",
+}
+
+func (pm *PartitionManager) ensureStatsUpsertIndexes() error {
+	for _, stmt := range statsUpsertIndexes {
+		if err := pm.db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("failed to create stats upsert index: %w", err)
+		}
+	}
+	return nil
+}
+
 // ensureAuditLogPartitions creates audit_log partitions
 func (pm *PartitionManager) ensureAuditLogPartitions() error {
-	// Check if table exists
-	var exists bool
-	err := pm.db.Raw("SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'audit_log')").Scan(&exists).Error
+	var partitioned bool
+	err := pm.db.Raw("SELECT EXISTS (SELECT 1 FROM pg_partitioned_table WHERE partrelid = to_regclass('audit_log'))").Scan(&partitioned).Error
 	if err != nil {
 		return err
 	}
 
-	if !exists {
+	if !partitioned {
+		// AutoMigrate creates audit_log as a plain table. An empty one can be
+		// replaced; one that holds rows stays as it is.
+		var exists bool
+		if err := pm.db.Raw("SELECT to_regclass('audit_log') IS NOT NULL").Scan(&exists).Error; err != nil {
+			return err
+		}
+		if exists {
+			var rows int64
+			if err := pm.db.Raw("SELECT COUNT(*) FROM audit_log").Scan(&rows).Error; err != nil {
+				return err
+			}
+			if rows > 0 {
+				log.Warn().Int64("rows", rows).Msg("audit_log holds rows and is not partitioned, leaving it as is")
+				return nil
+			}
+			if err := pm.db.Exec("DROP TABLE audit_log").Error; err != nil {
+				return fmt.Errorf("failed to replace empty audit_log: %w", err)
+			}
+		}
+
 		// Create partitioned table
 		createTableSQL := `
 			CREATE TABLE IF NOT EXISTS audit_log (

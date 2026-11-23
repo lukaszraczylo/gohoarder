@@ -3,17 +3,24 @@
 package govulncheck
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/gomodule"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -64,62 +71,67 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		Str("version", version).
 		Msg("Starting govulncheck scan")
 
-	// Create a temporary directory for extraction
+	module := gomodule.Path(packageName)
+	if !validModule.MatchString(module) || !validVersion.MatchString(version) {
+		return s.errorResult(ctx, registry, packageName, version,
+			fmt.Sprintf("not a module path and version: %q %q", module, version), ""), nil
+	}
+
 	tmpDir, err := os.MkdirTemp("", "govulncheck-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	// Extract the .zip file
-	if extractErr := s.extractZip(filePath, tmpDir); extractErr != nil {
-		return nil, fmt.Errorf("failed to extract zip: %w", extractErr)
+	// govulncheck never reports advisories against the main module of the tree it scans, so
+	// scanning the module's own source reports a vulnerable module clean. The module is
+	// scanned as a dependency of a wrapper module instead, and the wrapper imports its
+	// packages because module-mode scanning only considers modules that provide an import.
+	// Resolving the module reaches the module proxy.
+	env := append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local", "GOWORK=off")
+	goMod := fmt.Sprintf("module gohoarder.audit\n\nrequire %s %s\n", module, version)
+	if err = os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o600); err != nil {
+		return nil, fmt.Errorf("failed to write go.mod: %w", err)
 	}
 
-	// Locate the Go module root (directory containing go.mod). Go modules
-	// in the proxy zip layout are nested under <module>@<version>/.
-	moduleDir, err := findGoModDir(tmpDir)
+	listCmd := exec.CommandContext(ctx, "go", "list", "-e", "-f", listFormat, module+"/...") // #nosec G204 -- module path is validated
+	listCmd.Dir = tmpDir
+	listCmd.Env = env
+	var listErr bytes.Buffer
+	listCmd.Stderr = &listErr
+	listOut, err := listCmd.Output()
 	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("package", packageName).
-			Str("version", version).
-			Msg("Could not locate go.mod in extracted module, skipping govulncheck")
-		return s.skippedResult(registry, packageName, version, "no go.mod in extracted module"), nil
+		return s.errorResult(ctx, registry, packageName, version,
+			fmt.Sprintf("go list failed: %v: %s", err, strings.TrimSpace(listErr.String())), listErr.String()), nil
 	}
 
-	// Run govulncheck in source mode against the module's package set.
-	// -mode=binary requires a compiled binary which we do not have; the
-	// default (source) mode wants a Go source tree with a go.mod.
-	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "./...") // #nosec G204 -- fixed args, cwd is controlled temp dir
-	cmd.Dir = moduleDir
-	output, _ := cmd.CombinedOutput()
-
-	// govulncheck returns non-zero when vulnerabilities are found
-	// Parse output regardless of error
-	var vulns []GovulncheckVuln
-	if len(output) > 0 {
-		// Parse line-delimited JSON
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			var entry GovulncheckEntry
-			if err := json.Unmarshal([]byte(line), &entry); err != nil {
-				log.Warn().Err(err).Str("line", line).Msg("Failed to parse govulncheck line")
-				continue
-			}
-			if entry.Finding != nil && entry.Finding.OSV != "" {
-				vulns = append(vulns, GovulncheckVuln{
-					OSV:          entry.Finding.OSV,
-					FixedVersion: entry.Finding.FixedVersion,
-				})
-			}
-		}
+	imports := importable(string(listOut))
+	if len(imports) == 0 {
+		return s.skippedResult(registry, packageName, version, "no importable package in module"), nil
+	}
+	var mainSrc strings.Builder
+	mainSrc.WriteString("package main\n\nimport (\n")
+	for _, pkg := range imports {
+		fmt.Fprintf(&mainSrc, "\t_ %q\n", pkg)
+	}
+	mainSrc.WriteString(")\n\nfunc main() {}\n")
+	if err = os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte(mainSrc.String()), 0o600); err != nil {
+		return nil, fmt.Errorf("failed to write main.go: %w", err)
 	}
 
-	// Convert to our format
+	cmd := exec.CommandContext(ctx, "govulncheck", "-json", "-scan", "module") // #nosec G204 -- fixed args, cwd is controlled temp dir
+	cmd.Dir = tmpDir
+	cmd.Env = env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, _ := cmd.Output() // govulncheck -json exits 0 whether or not it finds anything
+
+	vulns, err := parseFindings(output)
+	if err != nil {
+		return s.errorResult(ctx, registry, packageName, version,
+			fmt.Sprintf("govulncheck failed: %v: %s", err, strings.TrimSpace(stderr.String())), stderr.String()), nil
+	}
+
 	result := s.convertResult(vulns, registry, packageName, version)
 
 	log.Info().
@@ -131,6 +143,76 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	return result, nil
 }
 
+// listFormat prints "import-path name go-files cgo-files [ERR]" per package.
+const listFormat = "{{.ImportPath}} {{.Name}} {{len .GoFiles}} {{len .CgoFiles}} {{if .Error}}ERR{{end}}"
+
+var (
+	validModule  = regexp.MustCompile(`^[A-Za-z0-9._~/-]+$`)
+	validVersion = regexp.MustCompile(`^v[0-9A-Za-z.+_-]+$`)
+)
+
+// importable lists the packages of `go list` output that another module can import.
+func importable(listOut string) []string {
+	var pkgs []string
+	for _, line := range strings.Split(listOut, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 4 || f[1] == "main" || (len(f) > 4 && f[4] == "ERR") {
+			continue
+		}
+		if f[2] == "0" && f[3] == "0" {
+			continue
+		}
+		if hasPathElement(f[0], "internal") || hasPathElement(f[0], "testdata") || hasPathElement(f[0], "vendor") {
+			continue
+		}
+		pkgs = append(pkgs, f[0])
+	}
+	return pkgs
+}
+
+func hasPathElement(importPath, element string) bool {
+	return slices.Contains(strings.Split(importPath, "/"), element)
+}
+
+// parseFindings reads govulncheck's stream of JSON messages. An output without the config
+// message did not come from a completed run.
+func parseFindings(output []byte) ([]GovulncheckVuln, error) {
+	summaries := make(map[string]string)
+	var vulns []GovulncheckVuln
+	seen := make(map[string]bool)
+	sawConfig := false
+	dec := json.NewDecoder(bytes.NewReader(output))
+	for {
+		var msg GovulncheckEntry
+		if err := dec.Decode(&msg); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("parse govulncheck output: %w", err)
+		}
+		switch {
+		case msg.Config != nil:
+			sawConfig = true
+		case msg.OSV != nil:
+			summaries[msg.OSV.ID] = msg.OSV.Summary
+		case msg.Finding != nil && msg.Finding.OSV != "" && !seen[msg.Finding.OSV]:
+			seen[msg.Finding.OSV] = true
+			v := GovulncheckVuln{OSV: msg.Finding.OSV, FixedVersion: msg.Finding.FixedVersion}
+			if len(msg.Finding.Trace) > 0 {
+				v.Module = msg.Finding.Trace[0].Module
+				v.ModuleVersion = msg.Finding.Trace[0].Version
+			}
+			vulns = append(vulns, v)
+		}
+	}
+	if !sawConfig {
+		return nil, errors.New("no config message in output")
+	}
+	for i := range vulns {
+		vulns[i].Summary = summaries[vulns[i].OSV]
+	}
+	return vulns, nil
+}
+
 // Health checks if govulncheck is available
 func (s *Scanner) Health(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "govulncheck", "-version")
@@ -140,48 +222,26 @@ func (s *Scanner) Health(ctx context.Context) error {
 	return nil
 }
 
-// extractZip extracts a zip file to destination
-func (s *Scanner) extractZip(zipPath, destDir string) error {
-	cmd := exec.Command("unzip", "-q", zipPath, "-d", destDir)
-	return cmd.Run()
+// errorResult returns a scan-error result. The manager leaves it out of the merge and counts it as
+// an infrastructure failure when the context ended or the tool output shows the network was unreachable.
+func (s *Scanner) errorResult(ctx context.Context, registry, packageName, version, reason, toolOutput string) *metadata.ScanResult {
+	infra := ctx.Err() != nil || scanerr.NetworkFailure(toolOutput)
+	return &metadata.ScanResult{
+		ID:                 uuid.New().String(),
+		Registry:           registry,
+		PackageName:        packageName,
+		PackageVersion:     version,
+		Scanner:            ScannerName,
+		ScannedAt:          time.Now(),
+		Status:             metadata.ScanStatusError,
+		VulnerabilityCount: 0,
+		Vulnerabilities:    []metadata.Vulnerability{},
+		Details:            scanerr.ErrorDetails(reason, infra),
+	}
 }
 
-// findGoModDir walks the directory tree under root looking for a directory
-// that contains a go.mod file. The Go module proxy ships zips with layout
-// "<module>@<version>/...", so the module root is typically one or two
-// levels below the extraction directory. Returns an error if none is found.
-func findGoModDir(root string) (string, error) {
-	// Quick check: does the root itself contain go.mod?
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-		return root, nil
-	}
-
-	var found string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil // keep searching
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if d.Name() == "go.mod" {
-			found = filepath.Dir(path)
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	if found == "" {
-		return "", fmt.Errorf("go.mod not found under %s", root)
-	}
-	return found, nil
-}
-
-// skippedResult returns a clean ScanResult marked as skipped with an
-// explanation. Using clean (not error) here because the package is simply
-// not a Go module we can analyse — not a scanner failure.
+// skippedResult returns a clean ScanResult marked as skipped with an explanation: the module has
+// nothing another module can import, so there is nothing to audit.
 func (s *Scanner) skippedResult(registry, packageName, version, reason string) *metadata.ScanResult {
 	return &metadata.ScanResult{
 		ID:                 uuid.New().String(),
@@ -221,7 +281,7 @@ func (s *Scanner) convertResult(vulns []GovulncheckVuln, registry, packageName, 
 			ID:          vuln.OSV,
 			Severity:    severity,
 			Title:       vuln.OSV,
-			Description: fmt.Sprintf("Vulnerability %s found by govulncheck", vuln.OSV),
+			Description: describe(vuln),
 			References:  []string{fmt.Sprintf("https://pkg.go.dev/vuln/%s", vuln.OSV)},
 			FixedIn:     vuln.FixedVersion,
 		})
@@ -249,17 +309,46 @@ func (s *Scanner) convertResult(vulns []GovulncheckVuln, registry, packageName, 
 	}
 }
 
-// GovulncheckEntry represents a single line of govulncheck JSON output
+func describe(v GovulncheckVuln) string {
+	desc := v.Summary
+	if desc == "" {
+		desc = "Vulnerability " + v.OSV
+	}
+	if v.Module != "" {
+		desc += fmt.Sprintf(" (%s@%s)", v.Module, v.ModuleVersion)
+	}
+	return desc
+}
+
+// GovulncheckEntry is one message of govulncheck's JSON stream; exactly one field is set.
 type GovulncheckEntry struct {
+	Config  *struct{}           `json:"config,omitempty"`
+	OSV     *GovulncheckOSV     `json:"osv,omitempty"`
 	Finding *GovulncheckFinding `json:"finding,omitempty"`
 }
 
+// GovulncheckOSV is the advisory a finding refers to.
+type GovulncheckOSV struct {
+	ID      string `json:"id"`
+	Summary string `json:"summary"`
+}
+
 type GovulncheckFinding struct {
-	OSV          string `json:"osv"`
-	FixedVersion string `json:"fixed_version,omitempty"`
+	OSV          string              `json:"osv"`
+	FixedVersion string              `json:"fixed_version,omitempty"`
+	Trace        []GovulncheckModule `json:"trace"`
+}
+
+// GovulncheckModule is the module a finding is in.
+type GovulncheckModule struct {
+	Module  string `json:"module"`
+	Version string `json:"version"`
 }
 
 type GovulncheckVuln struct {
-	OSV          string
-	FixedVersion string
+	OSV           string
+	FixedVersion  string
+	Module        string
+	ModuleVersion string
+	Summary       string
 }

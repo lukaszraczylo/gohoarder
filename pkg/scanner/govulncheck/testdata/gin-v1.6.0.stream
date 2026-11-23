@@ -1,0 +1,522 @@
+{
+  "config": {
+    "protocol_version": "v1.0.0",
+    "scanner_name": "govulncheck",
+    "scanner_version": "v1.9.0",
+    "db": "https://vuln.go.dev",
+    "db_last_modified": "2026-11-11T02:51:11Z",
+    "go_version": "go1.26.11",
+    "scan_level": "module",
+    "scan_mode": "source"
+  }
+}
+{
+  "progress": {
+    "message": "Fetching vulnerabilities from the database..."
+  }
+}
+{
+  "osv": {
+    "schema_version": "1.3.1",
+    "id": "GO-2022-0493",
+    "modified": "2024-05-20T16:03:47Z",
+    "published": "2022-07-15T23:30:12Z",
+    "aliases": [
+      "CVE-2022-29526",
+      "GHSA-p782-xgp4-8hr8"
+    ],
+    "summary": "Incorrect privilege reporting in syscall and golang.org/x/sys/unix",
+    "details": "When called with a non-zero flags parameter, the Faccessat function can incorrectly report that a file is accessible.",
+    "affected": [
+      {
+        "package": {
+          "name": "stdlib",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "1.17.10"
+              },
+              {
+                "introduced": "1.18.0-0"
+              },
+              {
+                "fixed": "1.18.2"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "syscall",
+              "symbols": [
+                "Faccessat"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "package": {
+          "name": "golang.org/x/sys",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "0.0.0-20220412211240-33da011f77ad"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "golang.org/x/sys/unix",
+              "symbols": [
+                "Faccessat"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "references": [
+      {
+        "type": "FIX",
+        "url": "https://go.dev/cl/399539"
+      },
+      {
+        "type": "REPORT",
+        "url": "https://go.dev/issue/52313"
+      },
+      {
+        "type": "FIX",
+        "url": "https://go.dev/cl/400074"
+      },
+      {
+        "type": "WEB",
+        "url": "https://groups.google.com/g/golang-announce/c/Y5qrqw_lWdU"
+      }
+    ],
+    "credits": [
+      {
+        "name": "Jo\u00ebl G\u00e4hwiler (@256dpi)"
+      }
+    ],
+    "database_specific": {
+      "url": "https://pkg.go.dev/vuln/GO-2022-0493",
+      "review_status": "REVIEWED"
+    }
+  }
+}
+{
+  "osv": {
+    "schema_version": "1.3.1",
+    "id": "GO-2021-0052",
+    "modified": "2024-05-20T16:03:47Z",
+    "published": "2021-04-14T20:04:52Z",
+    "aliases": [
+      "CVE-2020-28483",
+      "GHSA-h395-qcrw-5vmq"
+    ],
+    "summary": "Inconsistent interpretation of HTTP Requests in github.com/gin-gonic/gin",
+    "details": "Due to improper HTTP header sanitization, a malicious user can spoof their source IP address by setting the X-Forwarded-For header. This may allow a user to bypass IP based restrictions, or obfuscate their true source.",
+    "affected": [
+      {
+        "package": {
+          "name": "github.com/gin-gonic/gin",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "1.7.7"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "github.com/gin-gonic/gin",
+              "symbols": [
+                "Context.ClientIP",
+                "Context.Next",
+                "Context.RemoteIP",
+                "Engine.HandleContext",
+                "Engine.Run",
+                "Engine.RunFd",
+                "Engine.RunListener",
+                "Engine.RunTLS",
+                "Engine.RunUnix",
+                "Engine.ServeHTTP"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "references": [
+      {
+        "type": "REPORT",
+        "url": "https://github.com/gin-gonic/gin/issues/2862"
+      },
+      {
+        "type": "REPORT",
+        "url": "https://github.com/gin-gonic/gin/issues/2473"
+      },
+      {
+        "type": "REPORT",
+        "url": "https://github.com/gin-gonic/gin/issues/2232"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/pull/2844"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/commit/5929d521715610c9dd14898ebbe1d188d5de8937"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/pull/2632"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/commit/bfc8ca285eb46dad60e037d57c545cd260636711"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/pull/2675"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/commit/03e5e05ae089bc989f1ca41841f05504d29e3fd9"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/gin-gonic/gin/pull/2474"
+      }
+    ],
+    "credits": [
+      {
+        "name": "@sorenisanerd"
+      }
+    ],
+    "database_specific": {
+      "url": "https://pkg.go.dev/vuln/GO-2021-0052",
+      "review_status": "REVIEWED"
+    }
+  }
+}
+{
+  "osv": {
+    "schema_version": "1.3.1",
+    "id": "GO-2023-1737",
+    "modified": "2024-05-20T16:03:47Z",
+    "published": "2023-05-11T18:59:56Z",
+    "aliases": [
+      "CVE-2023-29401",
+      "GHSA-2c4m-59x9-fr2g"
+    ],
+    "summary": "Improper handling of filenames in Content-Disposition HTTP header in github.com/gin-gonic/gin",
+    "details": "The filename parameter of the Context.FileAttachment function is not properly sanitized. A maliciously crafted filename can cause the Content-Disposition header to be sent with an unexpected filename value or otherwise modify the Content-Disposition header. For example, a filename of \"setup.bat&quot;;x=.txt\" will be sent as a file named \"setup.bat\".\n\nIf the FileAttachment function is called with names provided by an untrusted source, this may permit an attacker to cause a file to be served with a name different than provided. Maliciously crafted attachment file name can modify the Content-Disposition header.",
+    "affected": [
+      {
+        "package": {
+          "name": "github.com/gin-gonic/gin",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "1.3.1-0.20190301021747-ccb9e902956d"
+              },
+              {
+                "fixed": "1.9.1"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "github.com/gin-gonic/gin",
+              "symbols": [
+                "Context.FileAttachment"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "references": [
+      {
+        "type": "REPORT",
+        "url": "https://github.com/gin-gonic/gin/issues/3555"
+      },
+      {
+        "type": "FIX",
+        "url": "https://github.com/gin-gonic/gin/pull/3556"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/gin-gonic/gin/releases/tag/v1.9.1"
+      }
+    ],
+    "credits": [
+      {
+        "name": "motoyasu-saburi"
+      }
+    ],
+    "database_specific": {
+      "url": "https://pkg.go.dev/vuln/GO-2023-1737",
+      "review_status": "REVIEWED"
+    }
+  }
+}
+{
+  "osv": {
+    "schema_version": "1.3.1",
+    "id": "GO-2022-0493",
+    "modified": "2024-05-20T16:03:47Z",
+    "published": "2022-07-15T23:30:12Z",
+    "aliases": [
+      "CVE-2022-29526",
+      "GHSA-p782-xgp4-8hr8"
+    ],
+    "summary": "Incorrect privilege reporting in syscall and golang.org/x/sys/unix",
+    "details": "When called with a non-zero flags parameter, the Faccessat function can incorrectly report that a file is accessible.",
+    "affected": [
+      {
+        "package": {
+          "name": "stdlib",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "1.17.10"
+              },
+              {
+                "introduced": "1.18.0-0"
+              },
+              {
+                "fixed": "1.18.2"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "syscall",
+              "symbols": [
+                "Faccessat"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "package": {
+          "name": "golang.org/x/sys",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "0.0.0-20220412211240-33da011f77ad"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "golang.org/x/sys/unix",
+              "symbols": [
+                "Faccessat"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "references": [
+      {
+        "type": "FIX",
+        "url": "https://go.dev/cl/399539"
+      },
+      {
+        "type": "REPORT",
+        "url": "https://go.dev/issue/52313"
+      },
+      {
+        "type": "FIX",
+        "url": "https://go.dev/cl/400074"
+      },
+      {
+        "type": "WEB",
+        "url": "https://groups.google.com/g/golang-announce/c/Y5qrqw_lWdU"
+      }
+    ],
+    "credits": [
+      {
+        "name": "Jo\u00ebl G\u00e4hwiler (@256dpi)"
+      }
+    ],
+    "database_specific": {
+      "url": "https://pkg.go.dev/vuln/GO-2022-0493",
+      "review_status": "REVIEWED"
+    }
+  }
+}
+{
+  "osv": {
+    "schema_version": "1.3.1",
+    "id": "GO-2026-5024",
+    "modified": "2026-05-22T18:28:47Z",
+    "published": "2026-05-22T18:28:47Z",
+    "aliases": [
+      "CVE-2026-39824"
+    ],
+    "summary": "Invoking integer overflow in NewNTUnicodeString in golang.org/x/sys/windows",
+    "details": "NewNTUnicodeString does not check for string length overflow. When provided with a string that overflows the maximum size of a NTUnicodeString (a 16-bit number of bytes), it returns a truncated string rather than an error.",
+    "affected": [
+      {
+        "package": {
+          "name": "golang.org/x/sys",
+          "ecosystem": "Go"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "0.44.0"
+              }
+            ]
+          }
+        ],
+        "ecosystem_specific": {
+          "imports": [
+            {
+              "path": "golang.org/x/sys/windows",
+              "goos": [
+                "windows"
+              ],
+              "symbols": [
+                "NewNTUnicodeString"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "references": [
+      {
+        "type": "REPORT",
+        "url": "https://go.dev/issue/78916"
+      },
+      {
+        "type": "FIX",
+        "url": "https://go.dev/cl/770080"
+      },
+      {
+        "type": "WEB",
+        "url": "https://groups.google.com/g/golang-announce/c/6MMI8Lj-Atg"
+      }
+    ],
+    "database_specific": {
+      "url": "https://pkg.go.dev/vuln/GO-2026-5024",
+      "review_status": "REVIEWED"
+    }
+  }
+}
+{
+  "progress": {
+    "message": "Checking the code against the vulnerabilities..."
+  }
+}
+{
+  "finding": {
+    "osv": "GO-2021-0052",
+    "fixed_version": "v1.7.7",
+    "trace": [
+      {
+        "module": "github.com/gin-gonic/gin",
+        "version": "v1.6.0"
+      }
+    ]
+  }
+}
+{
+  "finding": {
+    "osv": "GO-2023-1737",
+    "fixed_version": "v1.9.1",
+    "trace": [
+      {
+        "module": "github.com/gin-gonic/gin",
+        "version": "v1.6.0"
+      }
+    ]
+  }
+}
+{
+  "finding": {
+    "osv": "GO-2022-0493",
+    "fixed_version": "v0.0.0-20220412211240-33da011f77ad",
+    "trace": [
+      {
+        "module": "golang.org/x/sys",
+        "version": "v0.0.0-20200116001909-b77594299b42"
+      }
+    ]
+  }
+}
+{
+  "finding": {
+    "osv": "GO-2026-5024",
+    "fixed_version": "v0.44.0",
+    "trace": [
+      {
+        "module": "golang.org/x/sys",
+        "version": "v0.0.0-20200116001909-b77594299b42"
+      }
+    ]
+  }
+}

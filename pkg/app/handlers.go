@@ -37,6 +37,25 @@ func (a *App) handlePackages(c fiber.Ctx) error {
 	}
 }
 
+// packageSummary is the list payload for one package when scan results are attached.
+func packageSummary(pkg *metadata.Package) map[string]interface{} {
+	summary := map[string]interface{}{
+		"id":              pkg.ID,
+		"registry":        pkg.Registry,
+		"name":            pkg.Name,
+		"version":         pkg.Version,
+		"size":            pkg.Size,
+		"checksum_sha256": pkg.ChecksumSHA256,
+		"cached_at":       pkg.CachedAt,
+		"last_accessed":   pkg.LastAccessed,
+		"download_count":  pkg.DownloadCount,
+	}
+	if pkg.ReleaseVersion != "" {
+		summary["release_version"] = pkg.ReleaseVersion
+	}
+	return summary
+}
+
 // handleListPackages returns list of cached packages
 func (a *App) handleListPackages(c fiber.Ctx) error {
 	ctx := c.Context()
@@ -119,17 +138,7 @@ func (a *App) handleListPackages(c fiber.Ctx) error {
 		enhancedPackages := make([]map[string]interface{}, 0, len(packagesWithNames))
 		for _, entry := range packagesWithNames {
 			pkg := entry.pkg
-			pkgMap := map[string]interface{}{
-				"id":              pkg.ID,
-				"registry":        pkg.Registry,
-				"name":            pkg.Name,
-				"version":         pkg.Version,
-				"size":            pkg.Size,
-				"checksum_sha256": pkg.ChecksumSHA256,
-				"cached_at":       pkg.CachedAt,
-				"last_accessed":   pkg.LastAccessed,
-				"download_count":  pkg.DownloadCount,
-			}
+			pkgMap := packageSummary(pkg)
 
 			// Add vulnerability info if scanned
 			if pkg.SecurityScanned {

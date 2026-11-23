@@ -45,9 +45,6 @@ func (a *App) requireAdmin(c fiber.Ctx) error {
 // handleAdminBypasses handles /api/admin/bypasses endpoint
 func (a *App) handleAdminBypasses(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)

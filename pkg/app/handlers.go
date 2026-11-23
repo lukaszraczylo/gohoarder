@@ -18,9 +18,6 @@ import (
 // handlePackages handles /api/packages endpoint
 func (a *App) handlePackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)
@@ -336,9 +333,6 @@ func (a *App) handleDeletePackage(c fiber.Ctx) error {
 // handleStats handles /api/stats endpoint
 func (a *App) handleStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)
@@ -416,9 +410,6 @@ func (a *App) handleStats(c fiber.Ctx) error {
 // Returns time-series download statistics for charts
 func (a *App) handleTimeSeriesStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)
@@ -458,9 +449,6 @@ func (a *App) handleTimeSeriesStats(c fiber.Ctx) error {
 // Returns runtime configuration for the frontend
 func (a *App) handleConfig(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)
@@ -492,9 +480,6 @@ func (a *App) handleConfig(c fiber.Ctx) error {
 // handleInfo handles /api/info endpoint
 func (a *App) handleInfo(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)

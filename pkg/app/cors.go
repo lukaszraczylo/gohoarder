@@ -58,7 +58,7 @@ func apiOriginGuard(allowed []string) fiber.Handler {
 
 		err := c.Next()
 
-		// Handlers set a wildcard grant; replace it with the allowlist decision.
+		// Drop any grant a handler or upstream set; the allowlist decides.
 		c.Response().Header.Del(headerACAllowOrigin)
 		c.Response().Header.Del(headerACAllowMethods)
 		c.Response().Header.Del(headerACAllowHeaders)

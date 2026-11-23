@@ -61,8 +61,8 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 - **GH-21.** `RescanWorker` still skips remote storage ("No local file path available"); that is a separate, unchanged behaviour.
 - **GH-22.** Frontend nginx dropped the `Cookie` header on `/api/` and `/ws` (the backend reads none; keys travel in `Authorization` / `X-API-Key`).
   The server read buffer is `server.read_buffer_size`, default 16384 (Fiber's default is 8192): a long Referer or `Authorization` no longer gets 431.
-- **GH-17 cleanup.** The per-handler `Access-Control-Allow-Origin: *` lines in `pkg/app/handlers*.go` are now overridden by the
-  guard and are dead; remove them once the API performance work lands.
+- **GH-17 cleanup.** The per-handler `Access-Control-*` lines in `pkg/app/handlers*.go` are removed; `apiOriginGuard` is the only CORS
+  source. `TestHandlersSetNoCORSHeaders` and `TestAPIResponsesNeverCarryWildcardOrigin` guard it.
 
 ## Not fixed
 

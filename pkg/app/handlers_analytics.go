@@ -10,7 +10,6 @@ import (
 // handleAnalyticsTopPackages returns the most downloaded packages
 func (a *App) handleAnalyticsTopPackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	// Get limit from query params (default: 10)
 	limit := 10
@@ -31,7 +30,6 @@ func (a *App) handleAnalyticsTopPackages(c fiber.Ctx) error {
 // handleAnalyticsTrendingPackages returns trending packages
 func (a *App) handleAnalyticsTrendingPackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	// Get limit from query params (default: 10)
 	limit := 10
@@ -52,7 +50,6 @@ func (a *App) handleAnalyticsTrendingPackages(c fiber.Ctx) error {
 // handleAnalyticsTrends returns download trends over time
 func (a *App) handleAnalyticsTrends(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	trends := a.analyticsEngine.GetTrends()
 
@@ -64,7 +61,6 @@ func (a *App) handleAnalyticsTrends(c fiber.Ctx) error {
 // handleAnalyticsTotalStats returns overall statistics
 func (a *App) handleAnalyticsTotalStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	stats := a.analyticsEngine.GetTotalStats()
 
@@ -74,7 +70,6 @@ func (a *App) handleAnalyticsTotalStats(c fiber.Ctx) error {
 // handleAnalyticsRegistryStats returns per-registry statistics
 func (a *App) handleAnalyticsRegistryStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	registry := c.Params("registry")
 	if registry == "" {
@@ -91,7 +86,6 @@ func (a *App) handleAnalyticsRegistryStats(c fiber.Ctx) error {
 // handleAnalyticsPackageStats returns statistics for a specific package
 func (a *App) handleAnalyticsPackageStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	registry := c.Params("registry")
 	name := c.Params("name")
@@ -117,7 +111,6 @@ func (a *App) handleAnalyticsPackageStats(c fiber.Ctx) error {
 // handleAnalyticsSearch searches for packages matching a query
 func (a *App) handleAnalyticsSearch(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
 
 	query := c.Query("q")
 	if query == "" {

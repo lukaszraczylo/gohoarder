@@ -11,9 +11,6 @@ import (
 // handleVulnerabilities handles /api/packages/{registry}/{name}/{version}/vulnerabilities endpoint
 func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	c.Set("Access-Control-Allow-Origin", "*")
-	c.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	c.Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if c.Method() == "OPTIONS" {
 		return c.SendStatus(fiber.StatusOK)

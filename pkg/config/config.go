@@ -187,6 +187,7 @@ type SecurityConfig struct {
 	FailClosed         bool                    `mapstructure:"fail_closed" json:"fail_closed"`                   // refuse packages whose scan failed on infrastructure
 	Enabled            bool                    `mapstructure:"enabled" json:"enabled"`
 	ScanOnDownload     bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`
+	RescanOnAccess     bool                    `mapstructure:"rescan_on_access" json:"rescan_on_access"` // rescan a stale cache hit before serving it; needs rescan_interval
 	UpdateDBOnStartup  bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"`
 }
 

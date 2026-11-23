@@ -234,7 +234,12 @@ func (a *App) initializeComponents() error {
 	if cleanupInterval == 0 {
 		cleanupInterval = 5 * time.Minute
 	}
+	var rescanAfter time.Duration
+	if a.config.Security.RescanOnAccess {
+		rescanAfter = a.config.Security.RescanInterval
+	}
 	a.cache, err = cache.New(a.storage, a.metadata, a.scanManager, a.analyticsEngine, cache.Config{
+		RescanAfter:      rescanAfter,
 		DefaultTTL:       a.config.Cache.DefaultTTL,
 		TTLOverrides:     a.config.Cache.MetadataTTLOverrides(),
 		CleanupInterval:  cleanupInterval,

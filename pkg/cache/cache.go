@@ -47,6 +47,7 @@ type Manager struct {
 	bgCtx       context.Context // cancelled by Close; parent of background scans
 	bgCancel    context.CancelFunc
 	sf          singleflight.Group
+	rescanSF    singleflight.Group
 	config      Config
 	cleanupWG   sync.WaitGroup
 	bcMu        sync.RWMutex
@@ -91,6 +92,7 @@ type Config struct {
 	MaxPackageSize    int64                    // Maximum package size in bytes (0 = default 2GB)
 	ScanWaitTimeout   time.Duration            // How long the first download waits for its scan (0 = 30s)
 	FailClosed        bool                     // Refuse a package whose scan did not finish in time
+	RescanAfter       time.Duration            // Rescan a cache hit whose scan result is older than this before serving (0 = off)
 }
 
 const defaultScanWaitTimeout = 30 * time.Second
@@ -332,6 +334,9 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 				// the extra database round-trip.
 				isMetadataEntry := metadata.IsMetadataEntry(registry, name, version)
 				if m.scanner != nil && !isMetadataEntry {
+					if rescanErr := m.refreshStaleScan(ctx, registry, name, version); rescanErr != nil {
+						return nil, rescanErr
+					}
 					blocked, reason, vulnErr := m.scanner.CheckVulnerabilities(ctx, registry, name, version)
 					if vulnErr != nil {
 						log.Warn().Err(vulnErr).Str("package", name).Msg("Failed to check vulnerabilities")

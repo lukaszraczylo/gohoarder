@@ -207,4 +207,46 @@ describe('Stats.vue', () => {
     expect(wrapper.findAll('tbody th')).toHaveLength(0)
     expect(wrapper.text()).toContain('No registries reported')
   })
+
+  describe('idle eviction note', () => {
+    const baseStats = {
+      registry: '',
+      total_packages: 100,
+      total_size: 1073741824,
+      max_cache_size: 10737418240,
+      total_downloads: 500,
+      scanned_packages: 90,
+      vulnerable_packages: 5,
+      blocked_packages: 0,
+    }
+
+    async function render(idleTtl?: number) {
+      const wrapper = mount(Stats)
+      const store = usePackageStore()
+      store.loading = false
+      store.stats = idleTtl === undefined ? { ...baseStats } : { ...baseStats, idle_ttl: idleTtl }
+      await wrapper.vm.$nextTick()
+      return wrapper
+    }
+
+    it.each([
+      [604800, 'Cached items not requested for 7 days are removed.'],
+      [86400, 'Cached items not requested for 1 day are removed.'],
+      [129600, 'Cached items not requested for 36 hours are removed.'],
+      [5400, 'Cached items not requested for 90 minutes are removed.'],
+    ])('shows the window for idle_ttl=%i', async (seconds, sentence) => {
+      const wrapper = await render(seconds)
+      expect(wrapper.text()).toContain(sentence)
+    })
+
+    it('hides the note when idle eviction is off', async () => {
+      const wrapper = await render(0)
+      expect(wrapper.text()).not.toContain('not requested')
+    })
+
+    it('hides the note when the API sends no idle_ttl', async () => {
+      const wrapper = await render()
+      expect(wrapper.text()).not.toContain('not requested')
+    })
+  })
 })

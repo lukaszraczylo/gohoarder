@@ -13,6 +13,10 @@
     />
 
     <template v-else>
+      <Alert v-if="idleTtl > 0" variant="info">
+        <AlertDescription>Cached items not requested for {{ formatDuration(idleTtl) }} are removed.</AlertDescription>
+      </Alert>
+
       <Card>
         <CardHeader>
           <CardTitle as="h2">Overall statistics</CardTitle>
@@ -91,6 +95,8 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { usePackageStore } from '../stores/packages'
 import {
+  Alert,
+  AlertDescription,
   Card,
   CardContent,
   CardHeader,
@@ -103,7 +109,7 @@ import {
   StatGroup,
   type DataTableColumn,
 } from '@perfect-design/ui'
-import { formatBytes, formatNumber } from '@/lib/format'
+import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { faBan, faDownload, faHardDrive, faBoxesStacked, faCircleCheck, faTriangleExclamation } from '@/lib/icons'
 
 const store = usePackageStore()
@@ -161,6 +167,8 @@ const registries = computed(() => {
     downloads: data.downloads || 0,
   }))
 })
+
+const idleTtl = computed(() => stats.value?.idle_ttl || 0)
 
 const storagePercentage = computed(() => {
   const totalSize = stats.value?.total_size || 0

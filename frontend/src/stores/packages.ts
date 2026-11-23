@@ -40,6 +40,8 @@ export interface Stats {
   scanned_packages: number
   vulnerable_packages: number
   blocked_packages: number
+  /** Seconds a cached item can go unrequested before cleanup removes it; 0 means never. */
+  idle_ttl?: number
 }
 
 export const usePackageStore = defineStore('packages', () => {

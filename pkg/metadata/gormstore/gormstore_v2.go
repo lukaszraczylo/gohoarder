@@ -128,7 +128,7 @@ func NewV2(cfg Config) (*GORMStoreV2, error) {
 	// Start aggregation worker (skip for in-memory databases used in tests)
 	if !strings.Contains(cfg.DSN, ":memory:") {
 		store.aggregationWorker = NewAggregationWorker(db)
-		go store.aggregationWorker.Start()
+		store.aggregationWorker.StartAsync()
 	} else {
 		// For tests: create worker but don't start it
 		store.aggregationWorker = NewAggregationWorker(db)

@@ -1,6 +1,7 @@
 package gormstore
 
 import (
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -17,6 +18,8 @@ type AggregationWorker struct {
 	stopChan chan struct{}
 	ticker   *time.Ticker
 	now      func() time.Time // nil means time.Now
+	wg       sync.WaitGroup
+	stopOnce sync.Once
 }
 
 // NewAggregationWorker creates a new aggregation worker
@@ -34,6 +37,15 @@ func (w *AggregationWorker) clock() time.Time {
 		return w.now()
 	}
 	return time.Now()
+}
+
+// StartAsync runs Start in a goroutine that Stop waits for.
+func (w *AggregationWorker) StartAsync() {
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.Start()
+	}()
 }
 
 // Start begins the aggregation worker
@@ -68,9 +80,10 @@ func (w *AggregationWorker) Start() {
 	}
 }
 
-// Stop stops the aggregation worker
+// Stop stops the aggregation worker and waits for a started one to exit. Safe to call repeatedly.
 func (w *AggregationWorker) Stop() {
-	close(w.stopChan)
+	w.stopOnce.Do(func() { close(w.stopChan) })
+	w.wg.Wait()
 }
 
 // AggregateHourly aggregates download events into hourly stats

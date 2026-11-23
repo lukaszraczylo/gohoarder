@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,10 +155,12 @@ func (m *Manager) GenerateAPIKey(name string, role Role, expiresIn *time.Duratio
 		return nil, "", errors.Wrap(err, errors.ErrCodeInternalServer, "failed to generate random key")
 	}
 
-	rawKey := base64.URLEncoding.EncodeToString(keyBytes)
+	secret := base64.URLEncoding.EncodeToString(keyBytes)
+	id := keyPrefix + generateID()
+	rawKey := id + keySeparator + secret
 
 	// Hash the key with the configured cost.
-	hashedKey, err := bcrypt.GenerateFromPassword([]byte(rawKey), m.cfg.BcryptCost)
+	hashedKey, err := bcrypt.GenerateFromPassword([]byte(secret), m.cfg.BcryptCost)
 	if err != nil {
 		return nil, "", errors.Wrap(err, errors.ErrCodeInternalServer, "failed to hash key")
 	}
@@ -169,7 +172,7 @@ func (m *Manager) GenerateAPIKey(name string, role Role, expiresIn *time.Duratio
 	}
 
 	apiKey := &APIKey{
-		ID:          generateID(),
+		ID:          id,
 		Name:        name,
 		HashedKey:   string(hashedKey),
 		Role:        role,
@@ -198,46 +201,119 @@ func (m *Manager) GenerateAPIKey(name string, role Role, expiresIn *time.Duratio
 	return apiKey, rawKey, nil
 }
 
+// Key format: "<id>.<secret>" with id "ghk_<random>". The id is public and selects one stored
+// key; the bcrypt hash covers the secret only. Keys minted before the format
+// existed have no id in the raw key and hash the whole raw key.
+const (
+	keyPrefix    = "ghk_"
+	keySeparator = "."
+	// maxLegacyCompares bounds concurrent bcrypt checks against pre-id keys,
+	// which can only be found by trying each one.
+	maxLegacyCompares = 4
+	// legacyIDLen is the length of base64url(16 bytes).
+	legacyIDLen = 24
+)
+
+var (
+	bcryptCompare = bcrypt.CompareHashAndPassword
+	legacySlots   = make(chan struct{}, maxLegacyCompares)
+	// dummyHash keeps the cost of an unknown id equal to a wrong secret.
+	dummyHash = mustHash("gohoarder-dummy-secret")
+)
+
+func mustHash(s string) []byte {
+	h, err := bcrypt.GenerateFromPassword([]byte(s), bcrypt.DefaultCost)
+	if err != nil {
+		panic(fmt.Sprintf("auth: dummy hash: %v", err))
+	}
+	return h
+}
+
 // ValidateAPIKey validates an API key and returns the associated key object.
-// Hot path: snapshots candidates, runs bcrypt without holding the lock.
-// LastUsedAt is updated in-memory under the write lock and flushed to the
-// store via a fire-and-forget goroutine.
+// A key with an id costs exactly one bcrypt compare, whatever the number of
+// stored keys. LastUsedAt is updated in-memory under the write lock and
+// flushed to the store via a fire-and-forget goroutine.
 func (m *Manager) ValidateAPIKey(ctx context.Context, rawKey string) (*APIKey, error) {
-	// Phase 1: snapshot non-expired candidates under RLock. We hold pointers
-	// to APIKey; APIKey.HashedKey is an immutable string so reading it
-	// without a lock is safe even if the key is later removed from the map.
+	var apiKey *APIKey
+	if id, secret, ok := splitKey(rawKey); ok {
+		apiKey = m.validateByID(id, secret)
+	} else {
+		apiKey = m.validateLegacy(ctx, rawKey)
+	}
+	if apiKey == nil {
+		return nil, errors.New(errors.ErrCodeUnauthorized, "invalid API key")
+	}
+
+	// Re-check the key still exists to avoid resurrecting a revoked key's metadata.
+	usedAt := time.Now()
+	m.mu.Lock()
+	if _, ok := m.keys[apiKey.ID]; ok {
+		apiKey.LastUsedAt = usedAt
+	}
+	m.mu.Unlock()
+
+	// Async store update: never block validation on a DB write.
+	m.persistLastUsedAsync(apiKey.ID, usedAt)
+	return apiKey, nil
+}
+
+func splitKey(rawKey string) (id, secret string, ok bool) {
+	if !strings.HasPrefix(rawKey, keyPrefix) {
+		return "", "", false
+	}
+	return strings.Cut(rawKey, keySeparator)
+}
+
+// hasKeyID reports whether k was minted with an id embedded in its raw key.
+// Legacy ids are bare generateID output, which is always legacyIDLen long.
+func hasKeyID(k *APIKey) bool {
+	return strings.HasPrefix(k.ID, keyPrefix) && len(k.ID) > legacyIDLen
+}
+
+func (m *Manager) validateByID(id, secret string) *APIKey {
+	m.mu.RLock()
+	apiKey := m.keys[id]
+	m.mu.RUnlock()
+
+	hash := dummyHash
+	if apiKey != nil {
+		hash = []byte(apiKey.HashedKey)
+	}
+	err := bcryptCompare(hash, []byte(secret))
+	if apiKey == nil || err != nil || expired(apiKey, time.Now()) {
+		return nil
+	}
+	return apiKey
+}
+
+func (m *Manager) validateLegacy(ctx context.Context, rawKey string) *APIKey {
 	m.mu.RLock()
 	candidates := make([]*APIKey, 0, len(m.keys))
 	now := time.Now()
-	for _, apiKey := range m.keys {
-		if apiKey.ExpiresAt != nil && now.After(*apiKey.ExpiresAt) {
-			continue
+	for _, k := range m.keys {
+		if !hasKeyID(k) && !expired(k, now) {
+			candidates = append(candidates, k)
 		}
-		candidates = append(candidates, apiKey)
 	}
 	m.mu.RUnlock()
 
-	// Phase 2: run bcrypt comparisons without holding any lock so concurrent
-	// auth checks can proceed in parallel.
-	for _, apiKey := range candidates {
-		if err := bcrypt.CompareHashAndPassword([]byte(apiKey.HashedKey), []byte(rawKey)); err == nil {
-			// Phase 3: briefly take the write lock to update LastUsedAt.
-			// Re-check the key still exists in the map to avoid resurrecting
-			// a revoked key's metadata.
-			usedAt := time.Now()
-			m.mu.Lock()
-			if _, ok := m.keys[apiKey.ID]; ok {
-				apiKey.LastUsedAt = usedAt
-			}
-			m.mu.Unlock()
-
-			// Async store update: never block validation on a DB write.
-			m.persistLastUsedAsync(apiKey.ID, usedAt)
-			return apiKey, nil
+	for _, k := range candidates {
+		select {
+		case legacySlots <- struct{}{}:
+		case <-ctx.Done():
+			return nil
+		}
+		err := bcryptCompare([]byte(k.HashedKey), []byte(rawKey))
+		<-legacySlots
+		if err == nil {
+			return k
 		}
 	}
+	return nil
+}
 
-	return nil, errors.New(errors.ErrCodeUnauthorized, "invalid API key")
+func expired(k *APIKey, now time.Time) bool {
+	return k.ExpiresAt != nil && now.After(*k.ExpiresAt)
 }
 
 // persistLastUsedAsync flushes a LastUsedAt update to the store off the hot

@@ -139,7 +139,7 @@ func (w *AggregationWorker) AggregateHourly() error {
 			// SQLite: Use strftime for time bucketing
 			// Note: SQLite doesn't support UPSERT as elegantly, need to handle separately
 			aggregateSQL = `
-				INSERT OR REPLACE INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
+				INSERT INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
 				SELECT
 					de.registry_id,
 					de.package_id,
@@ -152,6 +152,12 @@ func (w *AggregationWorker) AggregateHourly() error {
 				FROM download_events de
 				WHERE de.downloaded_at < ?
 				GROUP BY de.registry_id, de.package_id, time_bucket
+				ON CONFLICT (registry_id, COALESCE(package_id, 0), time_bucket)
+				DO UPDATE SET
+					download_count = download_stats_hourly.download_count + excluded.download_count,
+					unique_ips = MAX(download_stats_hourly.unique_ips, excluded.unique_ips),
+					auth_downloads = download_stats_hourly.auth_downloads + excluded.auth_downloads,
+					updated_at = datetime('now')
 			`
 		}
 
@@ -221,7 +227,7 @@ func (w *AggregationWorker) AggregateHourly() error {
 		default:
 			// SQLite
 			registryAggSQL = `
-				INSERT OR REPLACE INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
+				INSERT INTO download_stats_hourly (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, created_at, updated_at)
 				SELECT
 					registry_id,
 					NULL as package_id,
@@ -234,6 +240,12 @@ func (w *AggregationWorker) AggregateHourly() error {
 				FROM download_stats_hourly
 				WHERE package_id IS NOT NULL
 				GROUP BY registry_id, time_bucket
+				ON CONFLICT (registry_id, COALESCE(package_id, 0), time_bucket)
+				DO UPDATE SET
+					download_count = excluded.download_count,
+					unique_ips = excluded.unique_ips,
+					auth_downloads = excluded.auth_downloads,
+					updated_at = datetime('now')
 			`
 		}
 
@@ -317,7 +329,7 @@ func (w *AggregationWorker) AggregateDaily() error {
 
 		default: // SQLite
 			aggregateSQL = `
-				INSERT OR REPLACE INTO download_stats_daily (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, top_user_agents, created_at, updated_at)
+				INSERT INTO download_stats_daily (registry_id, package_id, time_bucket, download_count, unique_ips, auth_downloads, top_user_agents, created_at, updated_at)
 				SELECT
 					registry_id,
 					package_id,
@@ -331,6 +343,12 @@ func (w *AggregationWorker) AggregateDaily() error {
 				FROM download_stats_hourly
 				WHERE time_bucket >= ? AND time_bucket < ?
 				GROUP BY registry_id, package_id, date(time_bucket)
+				ON CONFLICT (registry_id, COALESCE(package_id, 0), time_bucket)
+				DO UPDATE SET
+					download_count = excluded.download_count,
+					unique_ips = excluded.unique_ips,
+					auth_downloads = excluded.auth_downloads,
+					updated_at = datetime('now')
 			`
 		}
 

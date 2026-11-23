@@ -103,6 +103,12 @@ func NewV2(cfg Config) (*GORMStoreV2, error) {
 		}
 	}
 
+	if cfg.Driver == "sqlite" {
+		if err := ensureSQLiteStatsIndexes(db); err != nil {
+			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to create stats indexes")
+		}
+	}
+
 	if err := dropEmptyTable(db, legacyDownloadEventsTable); err != nil {
 		log.Warn().Err(err).Str("table", legacyDownloadEventsTable).Msg("Failed to drop empty legacy table")
 	}

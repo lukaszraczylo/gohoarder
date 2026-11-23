@@ -5,6 +5,7 @@ import { themeBootScript } from '@perfect-design/ui/stores/theme-boot'
 
 // Get backend URL from environment or use default
 const BACKEND_URL = process.env.VITE_BACKEND_URL || 'http://localhost:8080'
+const WS_ORIGIN = process.env.VITE_WS_ORIGIN
 const FRONTEND_PORT = parseInt(process.env.VITE_PORT || '5173')
 
 // Applies the saved colour mode before first paint so a dark system never flashes light.
@@ -33,6 +34,8 @@ export default defineConfig({
         target: BACKEND_URL.replace('http', 'ws'),
         ws: true,
         changeOrigin: true,
+        // A backend with an origin allowlist refuses the dev server origin; set this to an allowed one.
+        ...(WS_ORIGIN ? { headers: { Origin: WS_ORIGIN } } : {}),
       },
     },
   },

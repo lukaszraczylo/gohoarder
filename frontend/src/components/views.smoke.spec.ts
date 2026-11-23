@@ -140,6 +140,31 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(document.body.querySelector('textarea')).not.toBeNull()
   })
 
+  it('BypassManagementPanel asks for the admin key in a dialog, not a native prompt', async () => {
+    localStorage.clear()
+    const prompt = vi.spyOn(window, 'prompt')
+    const { wrapper, problems } = await smoke(BypassManagementPanel, '/admin/bypasses')
+    await flushPromises()
+    expect(problems).toEqual([])
+    expect(prompt).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Enter your admin API key to manage bypasses.')
+
+    const input = document.body.querySelector<HTMLInputElement>('input[type="password"]')
+    expect(input).not.toBeNull()
+    input!.value = 'secret-key'
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.body.querySelector<HTMLFormElement>('input[type="password"]')!.form!.requestSubmit()
+    await flushPromises()
+
+    expect(localStorage.getItem('admin_api_key')).toBe('secret-key')
+    expect(vi.mocked(axios.get)).toHaveBeenCalledWith(
+      expect.stringContaining('/api/admin/bypasses'),
+      expect.objectContaining({ headers: { Authorization: 'Bearer secret-key' } }),
+    )
+    expect(wrapper.text()).toContain('CVE-2026-0002')
+  })
+
   it('Stats renders totals, the storage tile and the registry table', async () => {
     const { wrapper, problems } = await smoke(Stats, '/stats')
     expect(problems).toEqual([])

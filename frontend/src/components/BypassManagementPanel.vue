@@ -137,6 +137,24 @@
       </DialogContent>
     </Dialog>
 
+    <Dialog v-model:open="showKeyDialog">
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>Admin API key</DialogTitle>
+          <DialogDescription>Enter your admin API key to manage bypasses.</DialogDescription>
+        </DialogHeader>
+        <form class="flex flex-col gap-4" @submit.prevent="submitApiKey">
+          <Field label="API key" required>
+            <Input v-model="keyInput" type="password" autocomplete="off" />
+          </Field>
+          <DialogFooter>
+            <Button variant="outline" @click="showKeyDialog = false">Cancel</Button>
+            <Button type="submit" :disabled="keyInput.trim() === ''">Continue</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+
     <ConfirmDialog
       v-model:open="showDeleteModal"
       title="Delete bypass?"
@@ -222,6 +240,8 @@ const bypassForm = ref({ ...EMPTY_FORM })
 
 // Get API key from localStorage or prompt user
 const apiKey = ref<string>('')
+const keyInput = ref('')
+const showKeyDialog = ref(false)
 
 const filteredBypasses = computed(() => {
   let filtered = bypasses.value
@@ -264,15 +284,22 @@ onMounted(() => {
 })
 
 function promptForApiKey() {
-  const key = prompt('Enter your admin API key:')
-  if (key) {
-    apiKey.value = key
-    localStorage.setItem('admin_api_key', key)
-    fetchBypasses()
-  } else {
-    error.value = 'Admin API key required to manage bypasses'
-  }
+  keyInput.value = ''
+  showKeyDialog.value = true
 }
+
+function submitApiKey() {
+  const key = keyInput.value.trim()
+  if (!key) return
+  apiKey.value = key
+  localStorage.setItem('admin_api_key', key)
+  showKeyDialog.value = false
+  fetchBypasses()
+}
+
+watch(showKeyDialog, (open) => {
+  if (!open && !apiKey.value) error.value = 'Admin API key required to manage bypasses'
+})
 
 async function fetchBypasses() {
   if (!apiKey.value) {

@@ -413,6 +413,8 @@ func (a *App) setupServer() error {
 		_ = mwOptional // reserved for future endpoints with anonymous fallback
 	}
 
+	a.app.Use("/api", apiOriginGuard(a.config.Server.AllowedOrigins))
+
 	// Health endpoints — ALWAYS public (k8s liveness/readiness probes).
 	a.app.Get("/health", adaptor.HTTPHandlerFunc(a.healthChecker.HealthHandler()))
 	a.app.Get("/health/ready", adaptor.HTTPHandlerFunc(a.healthChecker.ReadyHandler()))
@@ -890,13 +892,13 @@ func buildCheckOrigin(allowed []string) func(*http.Request) bool {
 		}
 		ou, err := url.Parse(origin)
 		if err != nil || ou.Scheme == "" || ou.Host == "" {
-			log.Warn().Str("origin", origin).Msg("Rejecting WebSocket upgrade: malformed Origin header")
+			log.Warn().Str("origin", origin).Msg("Rejecting origin: malformed Origin header")
 			return false
 		}
 		originScheme := strings.ToLower(ou.Scheme)
 		originHost, ok := normalizeOriginHost(originScheme, ou.Host)
 		if !ok {
-			log.Warn().Str("origin", origin).Msg("Rejecting WebSocket upgrade: malformed Origin header")
+			log.Warn().Str("origin", origin).Msg("Rejecting origin: malformed Origin header")
 			return false
 		}
 
@@ -927,7 +929,7 @@ func buildCheckOrigin(allowed []string) func(*http.Request) bool {
 		log.Warn().
 			Str("origin", origin).
 			Str("host", r.Host).
-			Msg("Rejecting WebSocket upgrade: Origin not in allowlist")
+			Msg("Rejecting origin: Origin not in allowlist")
 		return false
 	}
 }

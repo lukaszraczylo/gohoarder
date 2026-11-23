@@ -193,6 +193,7 @@ server:
   host: "0.0.0.0"
   read_timeout: "5m"
   write_timeout: "5m"
+  allowed_origins: []  # Browser origins allowed to use /api and /ws; empty = same-origin only
 
 storage:
   backend: "filesystem"  # Options: filesystem, s3, smb

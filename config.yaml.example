@@ -12,6 +12,10 @@ server:
   read_timeout: "5m"
   write_timeout: "5m"
   idle_timeout: "2m"
+  # Origins allowed to call /api from a browser and to open the WebSocket. Exact
+  # ("https://gohoarder.example.com") or wildcard ("https://*.example.com").
+  # Empty: same-origin only. A cross-origin DELETE/POST/PATCH is refused with 403.
+  allowed_origins: []
   tls:
     enabled: false
     cert_file: ""

@@ -93,6 +93,8 @@ server:
   readTimeout: "5m"
   writeTimeout: "5m"
   idleTimeout: "2m"
+  # Browser origins allowed to use /api and /ws; empty = same-origin only
+  allowedOrigins: []
 
   # Additional environment variables for server container
   # Use this to override config via environment variables

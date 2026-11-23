@@ -6,14 +6,12 @@ import (
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
-	"github.com/lukaszraczylo/gohoarder/pkg/storage"
 	"github.com/rs/zerolog/log"
 )
 
 // RescanWorker handles periodic re-scanning of cached packages
 type RescanWorker struct {
 	metadataStore metadata.MetadataStore
-	storage       storage.StorageBackend
 	manager       *Manager
 	stopCh        chan struct{}
 	stopOnce      sync.Once
@@ -21,11 +19,10 @@ type RescanWorker struct {
 }
 
 // NewRescanWorker creates a new rescan worker
-func NewRescanWorker(manager *Manager, metadataStore metadata.MetadataStore, storageBackend storage.StorageBackend, interval time.Duration) *RescanWorker {
+func NewRescanWorker(manager *Manager, metadataStore metadata.MetadataStore, interval time.Duration) *RescanWorker {
 	return &RescanWorker{
 		manager:       manager,
 		metadataStore: metadataStore,
-		storage:       storageBackend,
 		interval:      interval,
 		stopCh:        make(chan struct{}),
 	}
@@ -123,7 +120,6 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 			Str("version", pkg.Version).
 			Msg("Package needs rescanning")
 
-		// Get file path from storage using the storage key from the package metadata
 		if pkg.StorageKey == "" {
 			log.Warn().
 				Str("registry", pkg.Registry).
@@ -134,7 +130,18 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 			continue
 		}
 
-		filePath, err := w.getPackageFilePath(ctx, pkg.StorageKey)
+		source := w.manager.currentFileSource()
+		if source == nil {
+			log.Debug().
+				Str("registry", pkg.Registry).
+				Str("package", pkg.Name).
+				Str("version", pkg.Version).
+				Msg("No file source configured, skipping rescan")
+			skipped++
+			continue
+		}
+
+		filePath, cleanup, err := source(ctx, pkg.Registry, pkg.Name, pkg.Version)
 		if err != nil {
 			log.Warn().
 				Err(err).
@@ -142,23 +149,15 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 				Str("package", pkg.Name).
 				Str("version", pkg.Version).
 				Str("storage_key", pkg.StorageKey).
-				Msg("Failed to get package file path, skipping rescan")
+				Msg("Failed to read package file, skipping rescan")
 			failed++
 			continue
 		}
 
-		if filePath == "" {
-			log.Debug().
-				Str("registry", pkg.Registry).
-				Str("package", pkg.Name).
-				Str("version", pkg.Version).
-				Msg("No local file path available, skipping rescan")
-			skipped++
-			continue
-		}
-
 		// Perform the actual scan
-		if err := w.manager.ScanPackage(ctx, pkg.Registry, pkg.Name, pkg.Version, filePath); err != nil {
+		err = w.manager.ScanPackage(ctx, pkg.Registry, pkg.Name, pkg.Version, filePath)
+		cleanup()
+		if err != nil {
 			log.Error().
 				Err(err).
 				Str("registry", pkg.Registry).
@@ -209,15 +208,4 @@ func (w *RescanWorker) needsRescan(ctx context.Context, pkg *metadata.Package) (
 	}
 
 	return false, nil
-}
-
-// getPackageFilePath retrieves the local file path for a package from storage
-func (w *RescanWorker) getPackageFilePath(ctx context.Context, storageKey string) (string, error) {
-	// Check if storage backend supports local paths
-	if localProvider, ok := w.storage.(storage.LocalPathProvider); ok {
-		return localProvider.GetLocalPath(ctx, storageKey)
-	}
-
-	// If storage doesn't support local paths (S3, SMB), we can't rescan
-	return "", nil
 }

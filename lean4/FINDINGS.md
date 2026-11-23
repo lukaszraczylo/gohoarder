@@ -61,7 +61,8 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
   cannot be migrated: the raw key holds no id and the stored hash covers the whole raw key. Re-issue them to leave the
   legacy path. Production holds none.
 - **GH-20.** SQLite startup merges old duplicate rows (package rows add up, derived rows keep one) and creates the unique indexes.
-- **GH-21.** `RescanWorker` still skips remote storage ("No local file path available"); that is a separate, unchanged behaviour.
+- **GH-21.** `RescanWorker` reads each blob through the cache `ScanFile` source, so periodic rescans cover S3 and SMB as well as
+  local storage. A remote blob is copied to a temp file for the scan and removed after it. Test: `TestRescanWorkerScansRemoteStorage`.
 - **GH-22.** Frontend nginx dropped the `Cookie` header on `/api/` and `/ws` (the backend reads none; keys travel in `Authorization` / `X-API-Key`).
   The server read buffer is `server.read_buffer_size`, default 16384 (Fiber's default is 8192): a long Referer or `Authorization` no longer gets 431.
 - **GH-17 cleanup.** The per-handler `Access-Control-*` lines in `pkg/app/handlers*.go` are removed; `apiOriginGuard` is the only CORS

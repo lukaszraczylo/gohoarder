@@ -65,6 +65,12 @@ func (m *Manager) SetFileSource(fs FileSource) {
 	m.stateMu.Unlock()
 }
 
+func (m *Manager) currentFileSource() FileSource {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	return m.fileSource
+}
+
 // Manager manages multiple security scanners
 type Manager struct {
 	metadataStore metadata.MetadataStore

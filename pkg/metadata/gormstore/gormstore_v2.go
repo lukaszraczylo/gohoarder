@@ -24,7 +24,8 @@ type GORMStoreV2 struct {
 	registryCache     map[string]int32 // Cache registry name -> ID mapping
 	aggregationWorker *AggregationWorker
 	partitionManager  *PartitionManager
-	registryCacheMu   sync.RWMutex // Protects registryCache for concurrent access
+	registryCacheMu   sync.RWMutex     // Protects registryCache for concurrent access
+	now               func() time.Time // nil means time.Now
 }
 
 // NewV2 creates a new GORM-based metadata store with V2 schema
@@ -695,6 +696,14 @@ func (s *GORMStoreV2) Close() error {
 	return sqlDB.Close()
 }
 
+// clock returns the store's current time.
+func (s *GORMStoreV2) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
 // GetTimeSeriesStats returns time-series download statistics
 func (s *GORMStoreV2) GetTimeSeriesStats(ctx context.Context, period string, registry string) (*metadata.TimeSeriesStats, error) {
 	stats := &metadata.TimeSeriesStats{
@@ -703,7 +712,7 @@ func (s *GORMStoreV2) GetTimeSeriesStats(ctx context.Context, period string, reg
 		DataPoints: make([]*metadata.TimeSeriesDataPoint, 0),
 	}
 
-	now := time.Now().UTC()
+	now := s.clock().UTC()
 	var span, bucketDuration time.Duration
 	daily := false
 	switch period {

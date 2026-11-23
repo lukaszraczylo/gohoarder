@@ -7,11 +7,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// rollupDays is how many completed days each daily pass recomputes; it must stay
+// below the hourly retention of 7 days.
+const rollupDays = 6
+
 // AggregationWorker handles background aggregation of download statistics
 type AggregationWorker struct {
 	db       *gorm.DB
 	stopChan chan struct{}
 	ticker   *time.Ticker
+	now      func() time.Time // nil means time.Now
 }
 
 // NewAggregationWorker creates a new aggregation worker
@@ -21,6 +26,14 @@ func NewAggregationWorker(db *gorm.DB) *AggregationWorker {
 		stopChan: make(chan struct{}),
 		ticker:   time.NewTicker(1 * time.Hour), // Run every hour
 	}
+}
+
+// clock returns the worker's current time.
+func (w *AggregationWorker) clock() time.Time {
+	if w.now != nil {
+		return w.now()
+	}
+	return time.Now()
 }
 
 // Start begins the aggregation worker
@@ -69,7 +82,7 @@ func (w *AggregationWorker) AggregateHourly() error {
 	dialectName := w.db.Name()
 
 	// Calculate cutoff time (aggregate events older than 5 minutes to avoid partial data)
-	cutoff := time.Now().Add(-5 * time.Minute).Truncate(time.Hour)
+	cutoff := w.clock().Add(-5 * time.Minute).Truncate(time.Hour)
 
 	return w.db.Transaction(func(tx *gorm.DB) error {
 		var aggregateSQL string
@@ -245,9 +258,11 @@ func (w *AggregationWorker) AggregateDaily() error {
 
 	dialectName := w.db.Name()
 
-	// Aggregate yesterday's data
-	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
-	dayEnd := yesterday.Add(24 * time.Hour)
+	// Roll up every completed day whose hourly rows are still held. A pass that
+	// ran before its last hour was aggregated, or never ran, is repaired by the
+	// next one; the hourly rows are kept for longer than rollupDays.
+	dayEnd := w.clock().UTC().Truncate(24 * time.Hour)
+	firstDay := dayEnd.Add(-rollupDays * 24 * time.Hour)
 
 	return w.db.Transaction(func(tx *gorm.DB) error {
 		var aggregateSQL string
@@ -319,12 +334,12 @@ func (w *AggregationWorker) AggregateDaily() error {
 			`
 		}
 
-		if err := tx.Exec(aggregateSQL, yesterday, dayEnd).Error; err != nil {
+		if err := tx.Exec(aggregateSQL, firstDay, dayEnd).Error; err != nil {
 			return err
 		}
 
 		// Delete old hourly stats (keep last 7 days)
-		deleteOlder := time.Now().AddDate(0, 0, -7)
+		deleteOlder := w.clock().AddDate(0, 0, -7)
 		deleteResult := tx.Exec("DELETE FROM download_stats_hourly WHERE time_bucket < ?", deleteOlder)
 		if deleteResult.Error != nil {
 			return deleteResult.Error

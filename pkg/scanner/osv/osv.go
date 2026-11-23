@@ -264,6 +264,7 @@ func (s *Scanner) cleanGoModuleName(packageName, version, ecosystem string) (str
 func (s *Scanner) convertOSVResult(osvResp *OSVResponse, registry, packageName, version string) *metadata.ScanResult {
 	vulnerabilities := make([]metadata.Vulnerability, 0, len(osvResp.Vulns))
 	severityCounts := make(map[string]int)
+	queryName, _ := s.cleanGoModuleName(packageName, version, s.registryToEcosystem(registry))
 
 	for _, vuln := range osvResp.Vulns {
 		// Determine severity from various sources
@@ -277,7 +278,7 @@ func (s *Scanner) convertOSVResult(osvResp *OSVResponse, registry, packageName, 
 		}
 
 		// Find fixed version
-		fixedVersion := s.findFixedVersion(&vuln, version)
+		fixedVersion := s.findFixedVersion(&vuln, queryName)
 
 		vulnerabilities = append(vulnerabilities, metadata.Vulnerability{
 			ID:          vuln.ID,
@@ -352,14 +353,30 @@ func (s *Scanner) determineSeverity(vuln *OSVVulnerability) string {
 	return metadata.NormalizeSeverity(rawSeverity)
 }
 
-// findFixedVersion extracts the fixed version from OSV affected ranges
-func (s *Scanner) findFixedVersion(vuln *OSVVulnerability, currentVersion string) string {
+// findFixedVersion returns the first fixed version in the ranges for the queried package; an
+// advisory can cover several packages (stdlib and golang.org/x/net) with different fixes.
+func (s *Scanner) findFixedVersion(vuln *OSVVulnerability, name string) string {
+	fallback := ""
 	for _, affected := range vuln.Affected {
-		for _, r := range affected.Ranges {
-			for _, event := range r.Events {
-				if event.Fixed != "" {
-					return event.Fixed
-				}
+		fixed := firstFixed(affected.Ranges)
+		if fixed == "" {
+			continue
+		}
+		if strings.EqualFold(affected.Package.Name, name) {
+			return fixed
+		}
+		if fallback == "" {
+			fallback = fixed
+		}
+	}
+	return fallback
+}
+
+func firstFixed(ranges []OSVRange) string {
+	for _, r := range ranges {
+		for _, event := range r.Events {
+			if event.Fixed != "" {
+				return event.Fixed
 			}
 		}
 	}

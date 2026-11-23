@@ -26,8 +26,7 @@ func (s *PostgresV2IntegrationTestSuite) SetupSuite() {
 	ctx := context.Background()
 
 	// Start PostgreSQL container
-	container, err := postgres.RunContainer(ctx,
-		testcontainers.WithImage("postgres:16-alpine"),
+	container, err := postgres.Run(ctx, "postgres:16-alpine",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -94,7 +93,7 @@ func (s *PostgresV2IntegrationTestSuite) TearDownTest() {
 			s.store.db.Exec("TRUNCATE TABLE " + table + " CASCADE")
 		}
 
-		s.store.Close()
+		_ = s.store.Close()
 	}
 }
 
@@ -153,8 +152,7 @@ func (s *PostgresV2IntegrationTestSuite) Test_PostgresV2_HighConcurrency() {
 
 	for i := 0; i < concurrency; i++ {
 		go func() {
-			err := s.store.UpdateDownloadCount(s.ctx, "npm", "concurrent-test", "1.0.0")
-			s.NoError(err)
+			s.NoError(s.store.UpdateDownloadCount(s.ctx, "npm", "concurrent-test", "1.0.0"))
 			done <- true
 		}()
 	}
@@ -172,11 +170,11 @@ func (s *PostgresV2IntegrationTestSuite) Test_PostgresV2_HighConcurrency() {
 
 // Test_PostgresV2_JSONB tests PostgreSQL JSONB functionality
 func (s *PostgresV2IntegrationTestSuite) Test_PostgresV2_JSONB() {
-	metadata := map[string]interface{}{
+	meta := map[string]string{
 		"author":      "Test Author",
 		"license":     "MIT",
 		"description": "Test package",
-		"keywords":    []interface{}{"test", "postgres", "jsonb"},
+		"keywords":    "test,postgres,jsonb",
 	}
 
 	pkg := &metadata.Package{
@@ -187,7 +185,7 @@ func (s *PostgresV2IntegrationTestSuite) Test_PostgresV2_JSONB() {
 		Size:         1000,
 		CachedAt:     time.Now(),
 		LastAccessed: time.Now(),
-		Metadata:     metadata,
+		Metadata:     meta,
 	}
 
 	err := s.store.SavePackage(s.ctx, pkg)

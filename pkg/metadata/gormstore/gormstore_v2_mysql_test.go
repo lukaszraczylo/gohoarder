@@ -13,6 +13,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"gorm.io/gorm"
 )
 
 // MySQLV2IntegrationTestSuite embeds the V2 test suite with MySQL container
@@ -26,8 +27,7 @@ func (s *MySQLV2IntegrationTestSuite) SetupSuite() {
 	ctx := context.Background()
 
 	// Start MySQL container
-	container, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8.0"),
+	container, err := mysql.Run(ctx, "mysql:8.0",
 		mysql.WithDatabase("testdb"),
 		mysql.WithUsername("testuser"),
 		mysql.WithPassword("testpass"),
@@ -55,7 +55,7 @@ func (s *MySQLV2IntegrationTestSuite) SetupTest() {
 	s.ctx = context.Background()
 
 	// Get connection string from container
-	connStr, err := s.container.ConnectionString(s.ctx)
+	connStr, err := s.container.ConnectionString(s.ctx, "parseTime=true", "loc=UTC")
 	s.Require().NoError(err)
 
 	// Create GORM store with MySQL
@@ -106,9 +106,9 @@ func (s *MySQLV2IntegrationTestSuite) TearDownTest() {
 		}
 
 		// Rebuild registry cache
-		s.store.rebuildRegistryCache()
+		_ = s.store.loadRegistryCache()
 
-		s.store.Close()
+		_ = s.store.Close()
 	}
 }
 
@@ -156,8 +156,7 @@ func (s *MySQLV2IntegrationTestSuite) Test_MySQLV2_HighConcurrency() {
 
 	for i := 0; i < concurrency; i++ {
 		go func() {
-			err := s.store.UpdateDownloadCount(s.ctx, "npm", "concurrent-test", "1.0.0")
-			s.NoError(err)
+			s.NoError(s.store.UpdateDownloadCount(s.ctx, "npm", "concurrent-test", "1.0.0"))
 			done <- true
 		}()
 	}
@@ -175,11 +174,11 @@ func (s *MySQLV2IntegrationTestSuite) Test_MySQLV2_HighConcurrency() {
 
 // Test_MySQLV2_JSON tests MySQL JSON functionality
 func (s *MySQLV2IntegrationTestSuite) Test_MySQLV2_JSON() {
-	metadata := map[string]interface{}{
+	meta := map[string]string{
 		"author":      "Test Author",
 		"license":     "MIT",
 		"description": "Test package",
-		"keywords":    []interface{}{"test", "mysql", "json"},
+		"keywords":    "test,mysql,json",
 	}
 
 	pkg := &metadata.Package{
@@ -190,7 +189,7 @@ func (s *MySQLV2IntegrationTestSuite) Test_MySQLV2_JSON() {
 		Size:         1000,
 		CachedAt:     time.Now(),
 		LastAccessed: time.Now(),
-		Metadata:     metadata,
+		Metadata:     meta,
 	}
 
 	err := s.store.SavePackage(s.ctx, pkg)
@@ -262,7 +261,7 @@ func (s *MySQLV2IntegrationTestSuite) Test_MySQLV2_CharacterSet() {
 		Size:         1000,
 		CachedAt:     time.Now(),
 		LastAccessed: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]string{
 			"description": "Test with emoji 🎉 and Chinese 中文",
 		},
 	}

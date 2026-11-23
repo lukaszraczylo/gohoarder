@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 // BaseModel provides common fields for all models with audit trail
@@ -48,6 +49,8 @@ type PackageModel struct {
 
 	Name    string `gorm:"not null;size:255;index:idx_package_name;index:idx_package_registry_name_version,priority:2"`
 	Version string `gorm:"not null;size:100;index:idx_package_registry_name_version,priority:3"`
+	// ReleaseVersion is the version shown to users when Version is a cache key (PyPI file names).
+	ReleaseVersion string `gorm:"not null;size:100;default:''"`
 
 	// Storage information
 	StorageKey     string `gorm:"not null;uniqueIndex:idx_package_storage_key;size:512"`
@@ -94,7 +97,7 @@ func (p *PackageModel) BeforeCreate(tx *gorm.DB) error {
 // PackageMetadataModel stores structured package metadata (1:1 with packages)
 // Separated from main table to reduce row size and improve query performance
 type PackageMetadataModel struct {
-	RawMetadata JSONBField `gorm:"type:jsonb"` // Full metadata as JSONB (PostgreSQL) or JSON
+	RawMetadata JSONBField // Full metadata as JSONB (PostgreSQL) or JSON
 	BaseModel
 	Author      string        `gorm:"size:255;index:idx_metadata_author"`
 	License     string        `gorm:"size:100;index:idx_metadata_license"`
@@ -112,7 +115,7 @@ func (PackageMetadataModel) TableName() string {
 // ScanResultModel represents security scan results (optimized)
 type ScanResultModel struct {
 	ScannedAt time.Time  `gorm:"not null;index:idx_scan_scanned_at"`
-	Details   JSONBField `gorm:"type:jsonb"` // Scanner-specific details
+	Details   JSONBField // Scanner-specific details
 	BaseModel
 
 	Scanner string `gorm:"not null;size:50;index:idx_scan_scanner;index:idx_scan_package_scanner,priority:2"`
@@ -237,7 +240,7 @@ func (DownloadStatsHourlyModel) TableName() string {
 type DownloadStatsDailyModel struct {
 	TimeBucket    time.Time  `gorm:"not null;index:idx_stats_daily_composite,priority:2"` // Truncated to day
 	PackageID     *int64     `gorm:"index:idx_stats_daily_package"`                       // NULL = all packages in registry
-	TopUserAgents JSONBField `gorm:"type:jsonb"`                                          // Top 10 user agents
+	TopUserAgents JSONBField // Top 10 user agents
 
 	BaseModel
 	ID            int64 `gorm:"primaryKey;autoIncrement"`
@@ -254,7 +257,7 @@ func (DownloadStatsDailyModel) TableName() string {
 // AuditLogModel tracks all important changes (optional, for compliance)
 type AuditLogModel struct {
 	Timestamp  time.Time  `gorm:"not null;index:idx_audit_timestamp"`
-	Changes    JSONBField `gorm:"type:jsonb"`                                   // Before/after values
+	Changes    JSONBField // Before/after values
 	EntityType string     `gorm:"not null;size:50;index:idx_audit_entity_type"` // package, bypass, registry
 	Action     string     `gorm:"not null;size:20;index:idx_audit_action"`      // create, update, delete
 	Username   string     `gorm:"not null;size:255;index:idx_audit_username"`
@@ -292,6 +295,16 @@ func (APIKeyModel) TableName() string {
 
 // JSONBField is a custom type for JSONB (PostgreSQL) / JSON (MySQL/SQLite)
 type JSONBField map[string]interface{}
+
+func (JSONBField) GormDataType() string { return "json" }
+
+// GormDBDataType picks the column type per dialect: MySQL has no jsonb.
+func (JSONBField) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db.Name() == "mysql" {
+		return "json"
+	}
+	return "jsonb"
+}
 
 func (j JSONBField) Value() (driver.Value, error) {
 	if j == nil {

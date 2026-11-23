@@ -62,6 +62,14 @@ var (
 		[]string{"reason"}, // ttl, lru, manual
 	)
 
+	// WebSocketEventsDropped counts realtime events dropped because the broadcast channel was full.
+	WebSocketEventsDropped = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gohoarder_websocket_events_dropped_total",
+			Help: "Realtime dashboard events dropped because the broadcast channel was full",
+		},
+	)
+
 	// Storage metrics
 	StorageOperations = promauto.NewCounterVec(
 		prometheus.CounterOpts{

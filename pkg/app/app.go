@@ -593,6 +593,19 @@ func (a *App) setupServer() error {
 	return nil
 }
 
+// startWorkers starts the background loops that live as long as ctx.
+func (a *App) startWorkers(ctx context.Context) {
+	// Without the event loop the broadcast channel fills after 256 events and websocket clients never register.
+	a.wsServer.Start(ctx)
+
+	// Start download data aggregation worker (runs every hour)
+	go a.startAggregationWorker(ctx)
+
+	// Start periodic stats broadcaster (every 30s) so connected WS clients
+	// see live counter updates without polling.
+	go a.startStatsBroadcaster(ctx)
+}
+
 func (a *App) Run() error {
 	// Cancellable worker context: aggregation + stats broadcaster goroutines
 	// watch ctx.Done() and exit, so Shutdown can stop them before closing
@@ -601,12 +614,7 @@ func (a *App) Run() error {
 	a.cancel = cancel
 	defer cancel()
 
-	// Start download data aggregation worker (runs every hour)
-	go a.startAggregationWorker(ctx)
-
-	// Start periodic stats broadcaster (every 30s) so connected WS clients
-	// see live counter updates without polling.
-	go a.startStatsBroadcaster(ctx)
+	a.startWorkers(ctx)
 
 	// Start Fiber server in goroutine. Branch on TLS to pick Listen vs ListenTLS.
 	errChan := make(chan error, 1)

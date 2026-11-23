@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+
+	"github.com/lukaszraczylo/gohoarder/pkg/metrics"
 )
 
 // EventType represents the type of event being broadcast
@@ -59,6 +62,8 @@ type Server struct {
 	unregister chan *Client
 	upgrader   websocket.Upgrader
 	mu         sync.RWMutex
+	dropped    atomic.Uint64
+	lastWarn   atomic.Int64
 }
 
 // Config holds WebSocket server configuration
@@ -222,8 +227,28 @@ func (s *Server) Broadcast(eventType EventType, data map[string]interface{}) {
 	select {
 	case s.broadcast <- event:
 	default:
-		log.Warn().Msg("Broadcast channel full - dropping event")
+		s.recordDrop()
 	}
+}
+
+// dropWarnInterval bounds the drop warning to one line per interval, so a burst does not flood the log.
+const dropWarnInterval = time.Minute
+
+// recordDrop counts a dropped event and warns at most once per dropWarnInterval.
+func (s *Server) recordDrop() {
+	total := s.dropped.Add(1)
+	metrics.WebSocketEventsDropped.Inc()
+	now := time.Now().UnixNano()
+	last := s.lastWarn.Load()
+	if now-last < int64(dropWarnInterval) || !s.lastWarn.CompareAndSwap(last, now) {
+		return
+	}
+	log.Warn().Uint64("dropped_total", total).Msg("Broadcast channel full - dropping events")
+}
+
+// Dropped returns how many events were dropped because the broadcast channel was full.
+func (s *Server) Dropped() uint64 {
+	return s.dropped.Load()
 }
 
 // BroadcastEvent satisfies the events.Broadcaster contract used by

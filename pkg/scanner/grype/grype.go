@@ -3,14 +3,17 @@
 package grype
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/gomodule"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -44,25 +47,25 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		Str("file", filePath).
 		Msg("Starting Grype scan")
 
-	// Run grype scan
-	cmd := exec.CommandContext(ctx, "grype", filePath, "-o", "json", "-q")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Grype returns non-zero exit code when vulnerabilities are found
-		// Only treat it as error if we got no output
-		if len(output) == 0 {
-			return nil, fmt.Errorf("grype scan failed: %w (output: %s)", err, string(output))
-		}
+	target := purl(registry, packageName, version)
+	if target == "" {
+		target = filePath
+	}
+	cmd := exec.CommandContext(ctx, "grype", target, "-o", "json", "-q") // #nosec G204 -- target is a purl or the stored artifact path
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil && len(output) == 0 {
+		return nil, fmt.Errorf("grype scan failed: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
 
-	// Parse Grype JSON output
-	var grypeResult GrypeResult
-	if err := json.Unmarshal(output, &grypeResult); err != nil {
-		return nil, fmt.Errorf("failed to parse grype output: %w", err)
+	grypeResult, err := parse(output)
+	if err != nil {
+		return nil, err
 	}
 
 	// Convert to our format
-	result := s.convertGrypeResult(&grypeResult, registry, packageName, version)
+	result := s.convertGrypeResult(grypeResult, registry, packageName, version)
 
 	log.Info().
 		Str("scanner", ScannerName).
@@ -71,6 +74,33 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		Msg("Grype scan completed")
 
 	return result, nil
+}
+
+// purl names the package for grype. A bare npm, PyPI or Go archive has no lockfile or installed
+// metadata, so grype catalogs nothing in it and reports clean; a purl is matched against the
+// database directly. Empty means no purl can be built.
+func purl(registry, name, version string) string {
+	if name == "" || version == "" {
+		return ""
+	}
+	version = strings.ReplaceAll(version, "+", "%2B")
+	switch registry {
+	case "npm":
+		return "pkg:npm/" + strings.Replace(name, "@", "%40", 1) + "@" + version
+	case "go":
+		return "pkg:golang/" + gomodule.Path(name) + "@" + version
+	case "pypi":
+		return "pkg:pypi/" + strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(name)) + "@" + version
+	}
+	return ""
+}
+
+func parse(output []byte) (*GrypeResult, error) {
+	var res GrypeResult
+	if err := json.Unmarshal(output, &res); err != nil {
+		return nil, fmt.Errorf("failed to parse grype output: %w", err)
+	}
+	return &res, nil
 }
 
 // Health checks if Grype is available
@@ -166,8 +196,8 @@ type GrypeDescriptor struct {
 }
 
 type GrypeSource struct {
-	Target map[string]interface{} `json:"target"`
-	Type   string                 `json:"type"`
+	Type   string          `json:"type"`
+	Target json.RawMessage `json:"target"` // a string for file, directory and purl sources, an object for images
 }
 
 type GrypeMatch struct {

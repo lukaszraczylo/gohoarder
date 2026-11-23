@@ -196,6 +196,7 @@ func checkTrendWindow(t *testing.T, store *GORMStoreV2) {
 // attachCounter counts the statements of the store and of its worker, which holds its own handle.
 func attachCounter(store *GORMStoreV2) *dbcount.Counter {
 	var counter *dbcount.Counter
+	store.aggregationWorker.Stop() // its handle is swapped below; a running loop would race
 	store.WrapDB(func(db *gorm.DB) *gorm.DB {
 		counted, c := dbcount.Attach(db)
 		counter = c

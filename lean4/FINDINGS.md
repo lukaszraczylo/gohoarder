@@ -29,6 +29,7 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 | GH-22 | dashboard API | an OIDC-logged-in browser can call `/api` with a long URL; the proxy hop neither forwards session cookies nor exceeds the read buffer | availability | medium (every `/api` call returned 431 for OIDC users) | not modelled (header size, no decision logic) / `TestLargeRequestHeadersAreAccepted`, `TestReadBufferSizeIsConfigurable`, `scripts/check_frontend_cookie_strip.sh` | 536f35a |
 | GH-23 | PyPI sidecar | pip's PEP 658 request (`<link>.metadata`, suffix on `original_url`) is served as its wheel's sidecar; another file's sidecar is still refused | correctness (pip install failed with 400) | medium (every pip install through the proxy) | `Access.pip_form_keeps_key_binding`, `pip_sidecar_of_other_file_rejected`, `pip_sidecar_of_same_file_accepted` / `TestPipSidecarFormIsStreamed`, `TestHandlePackageFile_OriginalURLFilenameBound` | 501bf1a |
 | GH-24 | rescan | with `security.rescan_interval` set, artifacts whose scan never completed are scanned and old results refreshed | correctness (scans lost to a restart stayed unscanned; new CVEs never picked up) | medium | not modelled (worker wiring) / `TestWorkersStartTheRescanWorker` | 378b873 |
+| GH-25 | scanners | an error result from one scanner is left out of the merge, so the row reads error only when every scanner failed; grype, npm-audit, govulncheck and pip-audit give correct results with the scanner image tool versions | correctness (false error, false clean) | high (grype, npm-audit and pip-audit failed on every package; govulncheck and a bare-archive grype scan read vulnerable packages clean) | `Security.old_error_poisons_clean`, `error_and_clean_reads_clean`, `all_error_reads_error`, `merged_not_error_when_one_ran` / `TestScanPackage_ErrorResultPlusCleanReadsClean`, `TestScanPackage_AllErrorResultsReadError`, `TestScanPackage_InfrastructureErrorResultsCountAsInfrastructure`, `TestScanMapsRealOutput`, `TestParseKeepsBothViaShapes`, `TestScanReadsPrettyPrintedFindings`, `TestScanAuditsTheReleaseFromARequirement` | 3731ca0 |
 
 ### Exploit paths and reach
 
@@ -67,6 +68,20 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
   local storage. A remote blob is copied to a temp file for the scan and removed after it. Test: `TestRescanWorkerScansRemoteStorage`.
 - **GH-22.** Frontend nginx dropped the `Cookie` header on `/api/` and `/ws` (the backend reads none; keys travel in `Authorization` / `X-API-Key`).
   The server read buffer is `server.read_buffer_size`, default 16384 (Fiber's default is 8192): a long Referer or `Authorization` no longer gets 431.
+- **GH-25.** `scan` treats an error-status result like a returned error: it is left out of the merge and counted as an
+  infrastructure failure (`infrastructure_error` in its details, set on a deadline or an unreachable network) or another failure.
+  Before, one such result made the merged row an error and `evaluateScan` blocked the package even with `fail_closed: false`.
+  Defects found by running the published scanner image (grype 0.121.2, npm 11.12.1, govulncheck 1.9.0, pip-audit 2.10.1,
+  go 1.26), each with a fixture of real output under the scanner's `testdata/`:
+  grype: `source.target` is a string for file and purl sources, and a bare archive has nothing to catalog, so minimist 0.0.8 read clean;
+  the scanner now passes a purl. npm audit: `via` is an array and `metadata.dependencies` an object in npm 11; the lockfile
+  step resolved devDependencies (dayjs: 1567 packages, 142 findings, 28s) and `npm audit` cannot report the root package itself;
+  the tarball is now installed into a wrapper project and audited with `--omit=dev` (under 1s). govulncheck: the JSON stream is
+  indented, so the line parser read nothing, and govulncheck never reports the main module of the tree it scans (x/text 0.3.5
+  read clean); the module is now a dependency of a wrapper module and scanned at module level. pip-audit: its positional
+  argument is a project directory and `--pyproject` does not exist, so every scan failed; the release is audited from a pinned
+  requirement, an advisory is listed once, and `skip_reason` is an error. trivy is not covered: it reads a bare npm archive
+  as clean the same way grype did.
 - **GH-17 cleanup.** The per-handler `Access-Control-*` lines in `pkg/app/handlers*.go` are removed; `apiOriginGuard` is the only CORS
   source. `TestHandlersSetNoCORSHeaders` and `TestAPIResponsesNeverCarryWildcardOrigin` guard it.
 
@@ -78,7 +93,7 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 | GH-11 | cache hit | the stored SHA-256 is not re-verified on read | by-design | `Put` verifies the stream it just hashed; no doc promises read-side integrity. A check reads up to 2 GB per hit. Disk corruption is outside the proxy's threat model. |
 | GH-12 | idle purge | check and delete are two steps, so a request inside the window loses its blob | by-design | `Cache.purge_window_deletes_fresh_entry`. The consequence is a refetch; GH-07 covers the in-flight request. |
 | GH-13 | scan policy | with `fail_closed: false` a package whose scan keeps failing on infrastructure is served unscanned | by-design, accepted | See "Decision" below. |
-| GH-14 | scan merge | one scanner failing while another returns clean saves a clean result and schedules no retry | by-design | `Security.partial_failure_reads_clean`. `scan` handles only the all-failed case; redundancy across scanners is the intent. |
+| GH-14 | scan merge | one scanner failing while another returns clean saves a clean result and schedules no retry | by-design | `Security.error_and_clean_reads_clean` (a returned error and, since GH-25, an error-status result). `scan` handles only the all-failed case; redundancy across scanners is the intent. |
 | GH-16 | admin API | `requireAdmin` accepts the `bypasses:manage` permission and also guards key minting | tested-clean | Only the admin role holds that permission: `Access.admin_gate_implies_key_manager`. |
 
 ### Decision: `fail_closed: false` with recurring infrastructure errors

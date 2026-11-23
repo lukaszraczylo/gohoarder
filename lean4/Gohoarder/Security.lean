@@ -3,7 +3,7 @@ import Mathlib
 /-!
 # Security decision logic
 
-Models `pkg/scanner/scanner.go` `CheckVulnerabilities`, `scan`, `mergeResults`, `scheduleRetry`,
+Models `pkg/scanner/scanner.go` `CheckVulnerabilities`, `scan`, `mergeResults`, `succeeded`, `scheduleRetry`,
 `pkg/metadata/gormstore/gormstore_v2.go` `GetActiveCVEBypasses`, and the scan gate in
 `pkg/cache/cache.go` `getOrFetch`. Severities are ranks (low 1 .. critical 4). Omits: the
 scanners themselves, threshold counters (`block_thresholds`), network.
@@ -193,7 +193,7 @@ theorem npm_scan_keeps_cache_version (cacheVersion : String) :
 theorem file_name_is_not_release_version :
     "requests-2.19.0-py3-none-any.whl" ≠ "2.19.0" := by decide
 
-/-! ### Merge: worst status wins, but a failed scanner leaves no trace -/
+/-! ### Merge: worst status wins among scanners that ran; a failed scanner leaves no trace -/
 
 /-- ranks: clean 0, pending 1, error 2, vulnerable 3 (`mergeResults`). -/
 def mergeRank (xs : List ℕ) : ℕ := xs.foldr max 0
@@ -207,8 +207,68 @@ theorem merge_dominates (xs : List ℕ) (x : ℕ) (h : x ∈ xs) : x ≤ mergeRa
     · exact le_max_left _ _
     · exact le_trans (ih h) (le_max_right _ _)
 
-/-- Results exist only for scanners that returned; with one scanner failing and one clean, the
-merged status is clean and no retry is scheduled (`scan`: retry only when no scanner succeeded). -/
-theorem partial_failure_reads_clean : mergeRank [0] = 0 := by decide
+def errorRank : ℕ := 2
+
+/-- Before GH-25 a scanner's error-status result took part in the merge, as the rank `errorRank`. -/
+def oldMerge (xs : List ℕ) : ℕ := mergeRank xs
+
+/-- `scan` after GH-25: a scanner that returns an error-status result failed, like one that returns
+an error. Only results of scanners that ran are merged; with none left every scanner failed. -/
+def newMerge (xs : List ℕ) : ℕ :=
+  if (xs.filter (· ≠ errorRank)).isEmpty then errorRank else mergeRank (xs.filter (· ≠ errorRank))
+
+/-- GH-25: one scanner's error result turned a clean package into an error row. -/
+theorem old_error_poisons_clean : oldMerge [0, errorRank] = errorRank := by decide
+
+theorem error_and_clean_reads_clean : newMerge [0, errorRank] = 0 := by decide
+
+theorem error_never_hides_vulnerable : newMerge [errorRank, 3] = 3 := by decide
+
+theorem all_error_reads_error (xs : List ℕ) (h : ∀ x ∈ xs, x = errorRank) : newMerge xs = errorRank := by
+  have : xs.filter (· ≠ errorRank) = [] := by
+    rw [List.filter_eq_nil_iff]
+    intro x hx
+    simp [h x hx]
+  unfold newMerge
+  rw [this]
+  rfl
+
+theorem error_result_ignored (xs : List ℕ) : newMerge (errorRank :: xs) = newMerge xs := by
+  simp [newMerge]
+
+theorem mergeRank_not_error (ys : List ℕ) (h : ∀ y ∈ ys, y ≠ errorRank) : mergeRank ys ≠ errorRank := by
+  induction ys with
+  | nil => simp [mergeRank, errorRank]
+  | cons y ys ih =>
+    simp only [mergeRank, List.foldr_cons]
+    have hy : y ≠ errorRank := h y (List.mem_cons_self ..)
+    have hys : mergeRank ys ≠ errorRank := ih (fun z hz => h z (List.mem_cons_of_mem _ hz))
+    rcases max_choice y (ys.foldr max 0) with e | e
+    · rw [e]; exact hy
+    · rw [e]; exact hys
+
+/-- With any scanner that ran, the merged status is not an error, so `fail_closed` never decides it. -/
+theorem merged_not_error_when_one_ran (xs : List ℕ) (h : ∃ x ∈ xs, x ≠ errorRank) :
+    newMerge xs ≠ errorRank := by
+  obtain ⟨x, hx, hne⟩ := h
+  have hmem : x ∈ xs.filter (· ≠ errorRank) := List.mem_filter.mpr ⟨hx, by simpa using hne⟩
+  unfold newMerge
+  have hne' : ¬ (xs.filter (· ≠ errorRank)).isEmpty = true := by
+    intro hempty
+    rw [List.isEmpty_iff] at hempty
+    rw [hempty] at hmem
+    simp at hmem
+  simp only [hne']
+  apply mergeRank_not_error
+  intro y hy
+  simpa using (List.mem_filter.mp hy).2
+
+/-- The retry is for infrastructure only: `scan` counts each failure by cause and the row is an
+infrastructure error only when there was a failure and every failure was infrastructure. -/
+def infraOnly (failures : List Bool) : Bool := decide (failures ≠ []) && failures.all id
+
+theorem one_package_failure_is_not_infra : infraOnly [true, false] = false := by decide
+
+theorem all_infra_failures_are_infra : infraOnly [true, true] = true := by decide
 
 end Gohoarder.Security

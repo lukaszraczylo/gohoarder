@@ -251,6 +251,11 @@ func (s *Server) Dropped() uint64 {
 	return s.dropped.Load()
 }
 
+// Pending returns how many events wait in the broadcast channel.
+func (s *Server) Pending() int {
+	return len(s.broadcast)
+}
+
 // BroadcastEvent satisfies the events.Broadcaster contract used by
 // cache/scanner sub-systems. It accepts a string event type and an
 // arbitrary payload (typically map[string]any) and forwards to the

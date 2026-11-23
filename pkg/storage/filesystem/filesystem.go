@@ -162,7 +162,12 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 	// only successfully renamed files. Quota check happens before increment
 	// to avoid transient inflation seen by concurrent Puts.
 	fs.mu.Lock()
-	if fs.quota > 0 && fs.used+written > fs.quota {
+	// An overwrite releases the bytes of the file it replaces.
+	var replaced int64
+	if info, statErr := root.Stat(relPath); statErr == nil {
+		replaced = info.Size()
+	}
+	if fs.quota > 0 && fs.used-replaced+written > fs.quota {
 		fs.mu.Unlock()
 		_ = root.Remove(tempPath)
 		metrics.RecordStorageOperation("filesystem", "put", "quota_exceeded")
@@ -174,7 +179,7 @@ func (fs *FilesystemStorage) Put(ctx context.Context, key string, data io.Reader
 		metrics.RecordStorageOperation("filesystem", "put", "error")
 		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to rename temp file")
 	}
-	fs.used += written
+	fs.used += written - replaced
 	currentUsed := fs.used
 	fs.mu.Unlock()
 

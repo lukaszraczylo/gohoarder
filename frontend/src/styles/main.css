@@ -1,83 +1,121 @@
-@import '@fortawesome/fontawesome-free/css/all.min.css';
+@import "tailwindcss";
+@import "@perfect-design/ui/theme.css";
+@import "@perfect-design/ui/packs/workbench.css";
+/* Only the library components the app imports, plus their transitive imports: scanning all of dist adds every component's classes. `pnpm sources` regenerates this list. */
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/ActivityFeed/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/BarChart/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/Card/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/CodeViewer/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/CodeViewer/tokenize/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/DataTable/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/DescriptionList/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/KpiTile/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/Sparkline/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/StatGroup/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/Table/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/_chart/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/_shared/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/Alert/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/ConfirmDialog/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/EmptyState/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/ErrorState/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/LoadingState/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/ToastItem/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/feedback/Toaster/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/Checkbox/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/CheckboxCard/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/Combobox/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/Field/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/Input/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/InputGroup/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/Label/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/NativeSelect/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/SearchInput/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/SegmentedControl/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/forms/Textarea/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/layout/AppShell/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/layout/ConfigProvider/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/layout/Container/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/layout/PageHeader/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/Accordion/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/AppHeader/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/MobileNav/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/NavLink/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/Pagination/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/SidebarNav/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/ThemeToggle/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/overlays/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/overlays/AlertDialog/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/overlays/Dialog/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Avatar/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Badge/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Button/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Icon/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/IconButton/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Link/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/ScrollArea/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Spinner/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/StatusBadge/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/StatusDot/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/typography/Markdown/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/typography/Markdown/parse/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/typography/RelativeTime/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/lib/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/stores/*.js";
 
-@import 'tailwindcss';
-@config '../../tailwind.config.js';
-@custom-variant dark (&:is(.dark *));
-
-@layer base {
-  :root {
-    /* Tailwind slate-50 for background */
-    --background: 210 40% 98%;
-    /* Tailwind slate-900 for foreground */
-    --foreground: 222 47% 11%;
-    /* White for cards */
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    /* Tailwind slate-700 for primary */
-    --primary: 215 25% 27%;
-    --primary-foreground: 0 0% 100%;
-    /* Tailwind slate-100 for secondary */
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    /* Tailwind slate-100 for muted */
-    --muted: 210 40% 96%;
-    /* Tailwind slate-500 for muted-foreground */
-    --muted-foreground: 215 20% 65%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    /* Tailwind red-500 for destructive */
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    /* Tailwind slate-200 for border */
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    /* Tailwind slate-700 for ring */
-    --ring: 215 25% 27%;
-    /* Chart colors using Tailwind palette with slate base */
-    --chart-1: 215 25% 27%;
-    --chart-2: 200 98% 39%;
-    --chart-3: 142 71% 45%;
-    --chart-4: 25 95% 53%;
-    --chart-5: 262 83% 58%;
-    --radius: 0.75rem;
-  }
-
-  .dark {
-    --background: 222 47% 11%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 11%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 200 98% 39%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
-    --ring: 200 98% 39%;
-    --chart-1: 200 98% 39%;
-    --chart-2: 142 71% 45%;
-    --chart-3: 262 83% 58%;
-    --chart-4: 25 95% 53%;
-    --chart-5: 340 82% 52%;
-  }
-
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-  }
+/* woff2 and Latin only: one file per face the interface uses. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
 }
 
-/* Custom component styles have been replaced with shadcn-vue components */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* AppHeader's bar height (its default h-14) and the sidebar's sticky offset. */
+:root {
+  --header-h: calc(var(--spacing) * 14);
+}
+
+html {
+  scroll-padding-top: calc(var(--header-h) + var(--spacing) * 2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

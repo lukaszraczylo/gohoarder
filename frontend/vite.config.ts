@@ -1,17 +1,25 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
-import path from 'path'
+import { themeBootScript } from '@perfect-design/ui/stores/theme-boot'
 
 // Get backend URL from environment or use default
 const BACKEND_URL = process.env.VITE_BACKEND_URL || 'http://localhost:8080'
 const FRONTEND_PORT = parseInt(process.env.VITE_PORT || '5173')
 
+// Applies the saved colour mode before first paint so a dark system never flashes light.
+function themeBoot(): Plugin {
+  return {
+    name: 'theme-boot',
+    transformIndexHtml: () => [{ tag: 'script', children: themeBootScript, injectTo: 'head' }],
+  }
+}
+
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+  plugins: [vue(), tailwindcss(), themeBoot()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': import.meta.dirname + '/src',
     },
   },
   server: {

@@ -71,8 +71,18 @@ func (m *Manager) currentFileSource() FileSource {
 	return m.fileSource
 }
 
+// healthTTL bounds how often /health forks each scanner's version command; under scan load one round took over a second.
+const healthTTL = 30 * time.Second
+
+type healthCache struct {
+	at  time.Time
+	err error
+	mu  sync.Mutex
+}
+
 // Manager manages multiple security scanners
 type Manager struct {
+	health        healthCache
 	metadataStore metadata.MetadataStore
 	broadcaster   events.Broadcaster
 	retryTimers   map[string]*time.Timer
@@ -913,6 +923,20 @@ func (m *Manager) Health(ctx context.Context) error {
 		return nil
 	}
 
+	m.health.mu.Lock()
+	defer m.health.mu.Unlock()
+	if !m.health.at.IsZero() && time.Since(m.health.at) < healthTTL {
+		return m.health.err
+	}
+	err := m.checkScanners(ctx)
+	if ctx.Err() != nil {
+		return err
+	}
+	m.health.at, m.health.err = time.Now(), err
+	return err
+}
+
+func (m *Manager) checkScanners(ctx context.Context) error {
 	for _, scanner := range m.scanners {
 		if err := scanner.Health(ctx); err != nil {
 			return fmt.Errorf("scanner %s health check failed: %w", scanner.Name(), err)

@@ -79,3 +79,27 @@ func TestDailyRollupCoversMissedDay(t *testing.T) {
 
 	require.EqualValues(t, 3, totalAt(t, store, day.Add(9*24*time.Hour+time.Hour), "30day"))
 }
+
+// Hourly rows and events never overcount a day, so a rollup that is behind them must not win.
+func TestTimeSeriesKeepsLateDownloadsAheadOfRollup(t *testing.T) {
+	store := newRollupStore(t)
+	day := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	seedEventsAt(t, store, day.Add(10*time.Hour), day.Add(23*time.Hour+30*time.Minute))
+
+	tick(t, store, day.Add(24*time.Hour+2*time.Minute), true) // rollup counts one download
+	tick(t, store, day.Add(25*time.Hour+2*time.Minute), true) // the 23:30 download reaches the hourly table
+
+	require.EqualValues(t, 2, totalAt(t, store, day.Add(26*time.Hour), "7day"))
+}
+
+// A rollup larger than the hourly rows still wins once the hourly rows have been trimmed.
+func TestTimeSeriesKeepsRollupWhenHourlyRowsAreGone(t *testing.T) {
+	store := newRollupStore(t)
+	day := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	seedEventsAt(t, store, day.Add(10*time.Hour), day.Add(11*time.Hour), day.Add(12*time.Hour))
+
+	tick(t, store, day.Add(24*time.Hour+30*time.Minute), true)
+	require.NoError(t, store.db.Exec("DELETE FROM download_stats_hourly WHERE time_bucket = ?", day.Add(12*time.Hour)).Error)
+
+	require.EqualValues(t, 3, totalAt(t, store, day.Add(26*time.Hour), "7day"))
+}

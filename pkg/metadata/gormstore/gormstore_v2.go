@@ -24,8 +24,8 @@ type GORMStoreV2 struct {
 	registryCache     map[string]int32 // Cache registry name -> ID mapping
 	aggregationWorker *AggregationWorker
 	partitionManager  *PartitionManager
-	registryCacheMu   sync.RWMutex     // Protects registryCache for concurrent access
 	now               func() time.Time // nil means time.Now
+	registryCacheMu   sync.RWMutex     // Protects registryCache for concurrent access
 }
 
 // NewV2 creates a new GORM-based metadata store with V2 schema
@@ -764,13 +764,17 @@ func (s *GORMStoreV2) GetTimeSeriesStats(ctx context.Context, period string, reg
 	}
 
 	if daily {
-		// A completed day's rollup is authoritative over its leftover hourly rows.
 		rollups, err := s.aggregateRows(ctx, "download_stats_daily", since, now, registryID)
 		if err != nil {
 			return nil, err
 		}
+		// Hourly rows and events only ever undercount a day, so the larger of the
+		// two is the better figure; a rollup alone covers days already trimmed.
 		for _, r := range rollups {
-			counts[r.Timestamp.UTC().Truncate(bucketDuration).Unix()] = r.Value
+			day := r.Timestamp.UTC().Truncate(bucketDuration).Unix()
+			if r.Value > counts[day] {
+				counts[day] = r.Value
+			}
 		}
 	}
 

@@ -617,6 +617,11 @@ func (a *App) startWorkers(ctx context.Context) {
 	// Start periodic stats broadcaster (every 30s) so connected WS clients
 	// see live counter updates without polling.
 	go a.startStatsBroadcaster(ctx)
+
+	// Re-scans artifacts whose scan was lost to a restart and refreshes old results.
+	if a.rescanWorker != nil {
+		go a.rescanWorker.Start(ctx)
+	}
 }
 
 func (a *App) Run() error {

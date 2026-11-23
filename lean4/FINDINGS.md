@@ -28,6 +28,7 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 | GH-21 | scan retry | a scan retry on S3 or SMB storage reads the stored blob instead of a removed temp file | correctness | low (file-based scanners on remote storage) | `Security.old_remote_retry_unreadable`, `fixed_retry_always_readable` / `TestScanRetryOnRemoteStorageReadsBlobAgain` | 31db940 |
 | GH-22 | dashboard API | an OIDC-logged-in browser can call `/api` with a long URL; the proxy hop neither forwards session cookies nor exceeds the read buffer | availability | medium (every `/api` call returned 431 for OIDC users) | not modelled (header size, no decision logic) / `TestLargeRequestHeadersAreAccepted`, `TestReadBufferSizeIsConfigurable`, `scripts/check_frontend_cookie_strip.sh` | 536f35a |
 | GH-23 | PyPI sidecar | pip's PEP 658 request (`<link>.metadata`, suffix on `original_url`) is served as its wheel's sidecar; another file's sidecar is still refused | correctness (pip install failed with 400) | medium (every pip install through the proxy) | `Access.pip_form_keeps_key_binding`, `pip_sidecar_of_other_file_rejected`, `pip_sidecar_of_same_file_accepted` / `TestPipSidecarFormIsStreamed`, `TestHandlePackageFile_OriginalURLFilenameBound` | 501bf1a |
+| GH-24 | rescan | with `security.rescan_interval` set, artifacts whose scan never completed are scanned and old results refreshed | correctness (scans lost to a restart stayed unscanned; new CVEs never picked up) | medium | not modelled (worker wiring) / `TestWorkersStartTheRescanWorker` | this change |
 
 ### Exploit paths and reach
 

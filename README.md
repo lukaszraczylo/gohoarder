@@ -233,7 +233,9 @@ security:
       enabled: true
 
 cache:
-  default_ttl: 86400  # 24 hours in seconds
+  default_ttl: 24h    # Freshness window for metadata pages (version lists, package documents)
+  idle_ttl: 168h      # Remove cached items not requested for 7 days; 0 disables
+  cleanup_interval: 1h
 
 logging:
   level: "info"  # debug, info, warn, error
@@ -244,6 +246,15 @@ upstream:
   pypi: "https://pypi.org/simple"
   go: "https://proxy.golang.org"
 ```
+
+#### Cache cleanup
+
+Every `cleanup_interval` the cleanup run removes:
+
+- **Idle items.** Any cached item, artifact or metadata page, whose last request is older than `idle_ttl` (default `168h`, seven days). Each request, hit or miss, resets the clock. Set `idle_ttl: 0` to turn idle eviction off.
+- **Stale metadata.** Version lists, package documents and Go `.mod`/`.info` files past `default_ttl`. They refresh on the next request.
+
+Artifacts (tarballs, wheels, module zips) never expire by age, so a package that clients keep requesting stays cached. Size-based LRU eviction at `max_size_bytes` is unchanged. Removed items keep their download history in the statistics.
 
 ### Environment Variables
 

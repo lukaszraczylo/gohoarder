@@ -133,6 +133,10 @@ type MySQLConfig struct {
 	ParseTime bool   `mapstructure:"parse_time" json:"parse_time"`
 }
 
+// DefaultMetadataTTL is the freshness window for metadata pages. It stays below the 72h
+// release-age gate clients apply, so a cached page never hides the entries the gate reads.
+const DefaultMetadataTTL = 24 * time.Hour
+
 // DefaultIdleTTL is how long a cached item can go unrequested before cleanup removes it.
 const DefaultIdleTTL = 7 * 24 * time.Hour
 
@@ -355,15 +359,15 @@ func Default() *Config {
 			},
 		},
 		Cache: CacheConfig{
-			DefaultTTL:      7 * 24 * time.Hour,
+			DefaultTTL:      DefaultMetadataTTL,
 			CleanupInterval: 1 * time.Hour,
 			IdleTTL:         DefaultIdleTTL,
 			MaxSizeBytes:    500 * 1024 * 1024 * 1024, // 500GB
 			PerProjectQuota: 50 * 1024 * 1024 * 1024,  // 50GB
 			TTLOverrides: map[string]time.Duration{
-				"npm": 7 * 24 * time.Hour,
-				"pip": 7 * 24 * time.Hour,
-				"go":  7 * 24 * time.Hour,
+				"npm": DefaultMetadataTTL,
+				"pip": DefaultMetadataTTL,
+				"go":  DefaultMetadataTTL,
 			},
 		},
 		Security: SecurityConfig{

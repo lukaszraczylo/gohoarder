@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
+	hoarderconfig "github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/events"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
@@ -172,7 +173,7 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 	}
 
 	if config.DefaultTTL == 0 {
-		config.DefaultTTL = 7 * 24 * time.Hour // 7 days default
+		config.DefaultTTL = hoarderconfig.DefaultMetadataTTL
 	}
 
 	if config.CleanupInterval == 0 {

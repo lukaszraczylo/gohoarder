@@ -370,7 +370,7 @@ func TestNew(t *testing.T) {
 
 				// Verify defaults were set
 				if tt.config.DefaultTTL == 0 {
-					assert.Equal(t, 7*24*time.Hour, manager.config.DefaultTTL)
+					assert.Equal(t, 24*time.Hour, manager.config.DefaultTTL)
 				}
 				if tt.config.CleanupInterval == 0 {
 					assert.Equal(t, 1*time.Hour, manager.config.CleanupInterval)

@@ -89,15 +89,15 @@ metadata:
   log_level: "warn"       # GORM log level: silent, error, warn, info
 
 cache:
-  default_ttl: "168h"  # Freshness window for metadata pages (version lists, packuments, .mod/.info); artifacts never expire by age
+  default_ttl: "24h"  # Freshness window for metadata pages (version lists, packuments, .mod/.info); artifacts never expire by age
   cleanup_interval: "1h"
   idle_ttl: "168h"  # Remove cached items not requested for this long; "0" disables
   max_size_bytes: 536870912000  # 500GB
   per_project_quota: 53687091200  # 50GB
   ttl_overrides:
-    npm: "168h"
-    pip: "168h"
-    go: "168h"
+    npm: "24h"
+    pip: "24h"
+    go: "24h"
 
 security:
   enabled: false

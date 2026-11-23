@@ -252,7 +252,7 @@ upstream:
 Every `cleanup_interval` the cleanup run removes:
 
 - **Idle items.** Any cached item, artifact or metadata page, whose last request is older than `idle_ttl` (default `168h`, seven days). Each request, hit or miss, resets the clock. Set `idle_ttl: 0` to turn idle eviction off.
-- **Stale metadata.** Version lists, package documents and Go `.mod`/`.info` files past `default_ttl`. They refresh on the next request.
+- **Stale metadata.** Version lists, package documents and Go `.mod`/`.info` files past `default_ttl` (default `24h`, below the 72h release-age gate clients apply). They refresh on the next request.
 
 Artifacts (tarballs, wheels, module zips) never expire by age, so a package that clients keep requesting stays cached. Size-based LRU eviction at `max_size_bytes` is unchanged. Removed items keep their download history in the statistics.
 

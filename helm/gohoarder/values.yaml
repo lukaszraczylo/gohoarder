@@ -375,15 +375,15 @@ migration:
 
 # Cache configuration
 cache:
-  defaultTTL: "168h"  # 7 days
+  defaultTTL: "24h"  # Freshness window for metadata pages; keep below the 72h client release-age gate
   cleanupInterval: "1h"
   idleTTL: "168h"  # Remove cached items not requested for this long; "0" disables
   maxSizeBytes: 536870912000  # 500GB
   perProjectQuota: 53687091200  # 50GB
   ttlOverrides:
-    npm: "168h"
-    pip: "168h"
-    go: "168h"
+    npm: "24h"
+    pip: "24h"
+    go: "24h"
 
 # Security scanning configuration
 security:

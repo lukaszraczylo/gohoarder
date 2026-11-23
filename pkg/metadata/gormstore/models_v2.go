@@ -114,7 +114,7 @@ func (PackageMetadataModel) TableName() string {
 
 // ScanResultModel represents security scan results (optimized)
 type ScanResultModel struct {
-	ScannedAt time.Time  `gorm:"not null;index:idx_scan_scanned_at"`
+	ScannedAt time.Time  `gorm:"not null;index:idx_scan_scanned_at;index:idx_scan_package_scanned_at,priority:2"`
 	Details   JSONBField // Scanner-specific details
 	BaseModel
 
@@ -123,7 +123,7 @@ type ScanResultModel struct {
 
 	Package       PackageModel `gorm:"foreignKey:PackageID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	ID            int64        `gorm:"primaryKey;autoIncrement"`
-	PackageID     int64        `gorm:"not null;index:idx_scan_package_scanner,priority:1"` // Foreign key
+	PackageID     int64        `gorm:"not null;index:idx_scan_package_scanner,priority:1;index:idx_scan_package_scanned_at,priority:1"` // Foreign key
 	VulnCount     int          `gorm:"not null;default:0;index:idx_scan_vuln_count"`
 	CriticalCount int          `gorm:"not null;default:0"`
 	HighCount     int          `gorm:"not null;default:0"`

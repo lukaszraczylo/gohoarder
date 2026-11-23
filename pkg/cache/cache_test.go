@@ -145,6 +145,30 @@ func (m *MockMetadataStore) ListPackages(ctx context.Context, opts *metadata.Lis
 	return args.Get(0).([]*metadata.Package), args.Error(1)
 }
 
+func (m *MockMetadataStore) ListPackageGroups(ctx context.Context, opts metadata.GroupListOptions) (*metadata.GroupPage, error) {
+	args := m.Called(ctx, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*metadata.GroupPage), args.Error(1)
+}
+
+func (m *MockMetadataStore) GetScanSummaries(ctx context.Context, packageIDs []string, withDetails bool) ([]*metadata.ScanSummary, error) {
+	args := m.Called(ctx, packageIDs, withDetails)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*metadata.ScanSummary), args.Error(1)
+}
+
+func (m *MockMetadataStore) GetRegistryStats(ctx context.Context) ([]metadata.RegistryStat, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]metadata.RegistryStat), args.Error(1)
+}
+
 func (m *MockMetadataStore) UpdateDownloadCount(ctx context.Context, registry, name, version string) error {
 	args := m.Called(ctx, registry, name, version)
 	return args.Error(0)

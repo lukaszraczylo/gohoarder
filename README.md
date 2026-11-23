@@ -887,9 +887,28 @@ Access the web dashboard at **http://localhost:8080**
 **List Packages:**
 ```bash
 GET /api/packages
-GET /api/packages?registry=npm
-GET /api/packages?status=vulnerable
+GET /api/packages?page=1&page_size=25
+GET /api/packages?registry=npm&q=axios&page_size=25
+GET /api/packages?sort=cached_at&order=desc&page_size=10
 ```
+
+The dashboard groups versions under a package, so paging counts packages (a
+registry and name pair), not rows. Without `page` and `page_size` the call
+returns every package in one response, with no row cap.
+
+| Parameter | Meaning |
+|---|---|
+| `page` | 1-based page of groups. Default 1. |
+| `page_size` | Groups per page. Default 25 when `page` is set, at most 200. |
+| `registry` | Only this registry, for example `npm`, `pypi` or `go`. |
+| `q` | Case-insensitive search in name, version and release version. |
+| `sort` | `name` (default, ascending), `cached_at`, `downloads` or `size` (both descending). |
+| `order` | `asc` or `desc`, to override the default direction of `sort`. |
+
+`packages` holds every version row of each group on the page, in group order
+and newest first within a group. `total` is the number of rows returned.
+`total_groups` is the number of groups that match the filters across all pages.
+A paged response also echoes `page` and `page_size`.
 
 **Package Details:**
 ```bash
@@ -920,7 +939,10 @@ GET /api/packages/:registry/:name/:version
       }
     }
   ],
-  "total": 42
+  "total": 1,
+  "total_groups": 42,
+  "page": 1,
+  "page_size": 25
 }
 ```
 

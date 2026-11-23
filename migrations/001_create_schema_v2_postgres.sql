@@ -190,6 +190,7 @@ CREATE TABLE IF NOT EXISTS scan_results (
 );
 
 CREATE INDEX idx_scan_package_scanner ON scan_results(package_id, scanner) WHERE deleted_at IS NULL;
+CREATE INDEX idx_scan_package_scanned_at ON scan_results(package_id, scanned_at) WHERE deleted_at IS NULL;
 CREATE INDEX idx_scan_scanned_at ON scan_results(scanned_at DESC);
 CREATE INDEX idx_scan_status ON scan_results(status);
 CREATE INDEX idx_scan_vuln_count ON scan_results(vuln_count) WHERE vuln_count > 0;

@@ -88,7 +88,28 @@ func GetMigrations() []*gormigrate.Migration {
 			},
 			Rollback: func(tx *gorm.DB) error { return nil },
 		},
+		{
+			// Serves the latest-scan-per-package lookup behind the dashboard lists.
+			ID: "202611240001",
+			Migrate: func(tx *gorm.DB) error {
+				return createIndexIfMissing(tx, &ScanResultModel{}, scanPackageScannedAtIndex)
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropIndex(&ScanResultModel{}, scanPackageScannedAtIndex)
+			},
+		},
 	}
+}
+
+// scanPackageScannedAtIndex is scan_results (package_id, scanned_at).
+const scanPackageScannedAtIndex = "idx_scan_package_scanned_at"
+
+// createIndexIfMissing creates a tag-declared index; MySQL has no CREATE INDEX IF NOT EXISTS.
+func createIndexIfMissing(db *gorm.DB, model interface{}, name string) error {
+	if db.Migrator().HasIndex(model, name) {
+		return nil
+	}
+	return db.Migrator().CreateIndex(model, name)
 }
 
 // legacyDownloadEventsTable is what the partition manager renames the plain

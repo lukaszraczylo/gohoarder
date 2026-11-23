@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS scan_results (
     FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE ON UPDATE CASCADE,
 
     INDEX idx_scan_package_scanner (package_id, scanner, deleted_at),
+    INDEX idx_scan_package_scanned_at (package_id, scanned_at),
     INDEX idx_scan_scanned_at (scanned_at DESC),
     INDEX idx_scan_status (status),
     INDEX idx_scan_vuln_count (vuln_count)

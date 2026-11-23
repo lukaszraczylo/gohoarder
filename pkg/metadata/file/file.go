@@ -147,9 +147,9 @@ func (s *Store) ListPackages(ctx context.Context, opts *metadata.ListOptions) ([
 			return []*metadata.Package{}, nil
 		}
 
-		end := opts.Offset + opts.Limit
-		if end > len(packages) {
-			end = len(packages)
+		end := len(packages)
+		if opts.Limit > 0 && opts.Offset+opts.Limit < end {
+			end = opts.Offset + opts.Limit
 		}
 
 		return packages[opts.Offset:end], nil

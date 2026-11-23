@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/internal/version"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -56,156 +58,141 @@ func packageSummary(pkg *metadata.Package) map[string]interface{} {
 	return summary
 }
 
-// handleListPackages returns list of cached packages
+// Pagination limits of GET /api/packages.
+const (
+	defaultPageSize = 25
+	maxPageSize     = 200
+)
+
+// listParams are the parsed query parameters of GET /api/packages.
+type listParams struct {
+	opts  metadata.GroupListOptions
+	paged bool
+}
+
+// parseListParams reads page, page_size, registry, q, sort and order. Without
+// page or page_size the list is unpaginated, as it was before paging existed.
+func parseListParams(c fiber.Ctx) listParams {
+	p := listParams{opts: metadata.GroupListOptions{
+		Registry: c.Query("registry"),
+		Query:    c.Query("q"),
+		SortBy:   metadata.GroupSortName,
+	}}
+	switch sortBy := c.Query("sort"); sortBy {
+	case metadata.GroupSortName, metadata.GroupSortCachedAt, metadata.GroupSortDownloads, metadata.GroupSortSize:
+		p.opts.SortBy = sortBy
+		p.opts.SortDesc = sortBy != metadata.GroupSortName
+	}
+	switch c.Query("order") {
+	case "asc":
+		p.opts.SortDesc = false
+	case "desc":
+		p.opts.SortDesc = true
+	}
+	if c.Query("page") != "" || c.Query("page_size") != "" {
+		p.paged = true
+		p.opts.Page = max(fiber.Query[int](c, "page", 1), 1)
+		p.opts.PageSize = fiber.Query[int](c, "page_size", defaultPageSize)
+		if p.opts.PageSize < 1 {
+			p.opts.PageSize = defaultPageSize
+		}
+		p.opts.PageSize = min(p.opts.PageSize, maxPageSize)
+	}
+	return p
+}
+
+// scanDecisions judges scanned packages, falling back to plain summaries without a scan manager.
+func (a *App) scanDecisions(ctx context.Context, ids []string) ([]scanner.ScanDecision, error) {
+	if a.scanManager != nil {
+		return a.scanManager.ScanDecisions(ctx, ids)
+	}
+	summaries, err := a.metadata.GetScanSummaries(ctx, ids, false)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]scanner.ScanDecision, len(summaries))
+	for i, s := range summaries {
+		out[i] = scanner.ScanDecision{Summary: s}
+	}
+	return out, nil
+}
+
+// vulnerabilityInfo is the per-row scan block of the list payload.
+func vulnerabilityInfo(pkg *metadata.Package, decisions map[string]scanner.ScanDecision) map[string]interface{} {
+	if !pkg.SecurityScanned {
+		return map[string]interface{}{"scanned": false, "status": "not_scanned", "isBlocked": false}
+	}
+	d, ok := decisions[pkg.ID]
+	if !ok || !d.Summary.HasScan {
+		return map[string]interface{}{"scanned": false, "status": "pending", "isBlocked": false}
+	}
+	sum := d.Summary
+	return map[string]interface{}{
+		"scanned":   true,
+		"status":    sum.Status,
+		"scannedAt": sum.ScannedAt.Format(time.RFC3339),
+		"counts": map[string]int{
+			"critical": sum.Critical,
+			"high":     sum.High,
+			"moderate": sum.Moderate,
+			"low":      sum.Low,
+		},
+		"total":     sum.Total,
+		"isBlocked": d.Blocked,
+	}
+}
+
+// handleListPackages returns cached packages, one page of groups when page or
+// page_size is given and every group otherwise.
 func (a *App) handleListPackages(c fiber.Ctx) error {
 	ctx := c.Context()
+	params := parseListParams(c)
 
-	// Get packages from metadata store
-	allPackages, err := a.metadata.ListPackages(ctx, &metadata.ListOptions{
-		Limit:  1000, // Get more to account for duplicates
-		Offset: 0,
-	})
+	page, err := a.metadata.ListPackageGroups(ctx, params.opts)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list packages")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list packages"})
 	}
 
-	log.Debug().Int("total_packages_from_db", len(allPackages)).Msg("Retrieved packages from database")
-
-	// Filter, clean, and deduplicate packages
-	// Map stores both cleaned package and original name for scan lookups
-	type packageEntry struct {
-		pkg          *metadata.Package
-		originalName string
+	response := fiber.Map{
+		"total":        len(page.Packages),
+		"total_groups": page.TotalGroups,
 	}
-	seen := make(map[string]*packageEntry)
-	skippedCount := 0
-	for _, pkg := range allPackages {
-		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
-		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
-			skippedCount++
-			log.Debug().
-				Str("name", pkg.Name).
-				Str("version", pkg.Version).
-				Str("registry", pkg.Registry).
-				Msg("Skipping metadata entry")
-			continue
+	if params.paged {
+		response["page"] = params.opts.Page
+		response["page_size"] = params.opts.PageSize
+	}
+
+	if !a.config.Security.Enabled {
+		response["packages"] = page.Packages
+		return c.Status(fiber.StatusOK).JSON(response)
+	}
+
+	var scannedIDs []string
+	for _, pkg := range page.Packages {
+		if pkg.SecurityScanned {
+			scannedIDs = append(scannedIDs, pkg.ID)
 		}
-
-		// Clean the package name (remove /@v/version.ext suffix)
-		originalName := pkg.Name
-		cleanName := pkg.Name
-		if idx := strings.Index(cleanName, "/@v/"); idx != -1 {
-			cleanName = cleanName[:idx]
+	}
+	decisions := map[string]scanner.ScanDecision{}
+	if len(scannedIDs) > 0 {
+		list, err := a.scanDecisions(ctx, scannedIDs)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to load scan summaries")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list packages"})
 		}
-
-		// Create deduplication key
-		key := cleanName + "@" + pkg.Version
-
-		// Keep the entry with the largest size (typically .zip files)
-		if existing, ok := seen[key]; !ok || pkg.Size > existing.pkg.Size {
-			// Create a copy with cleaned name
-			cleanPkg := *pkg
-			cleanPkg.Name = cleanName
-			seen[key] = &packageEntry{
-				pkg:          &cleanPkg,
-				originalName: originalName,
-			}
+		for _, d := range list {
+			decisions[d.Summary.PackageID] = d
 		}
 	}
 
-	log.Debug().
-		Int("skipped_metadata", skippedCount).
-		Int("unique_packages", len(seen)).
-		Msg("Filtered and deduplicated packages")
-
-	// Convert map to slice, keeping track of original names
-	type packageWithOriginalName struct {
-		pkg          *metadata.Package
-		originalName string
+	enhanced := make([]map[string]interface{}, 0, len(page.Packages))
+	for _, pkg := range page.Packages {
+		pkgMap := packageSummary(pkg)
+		pkgMap["vulnerabilities"] = vulnerabilityInfo(pkg, decisions)
+		enhanced = append(enhanced, pkgMap)
 	}
-	packagesWithNames := make([]packageWithOriginalName, 0, len(seen))
-	for _, entry := range seen {
-		packagesWithNames = append(packagesWithNames, packageWithOriginalName{
-			pkg:          entry.pkg,
-			originalName: entry.originalName,
-		})
-	}
-
-	// Enhance packages with vulnerability information if security scanning is enabled
-	var response map[string]interface{}
-	if a.config.Security.Enabled {
-		enhancedPackages := make([]map[string]interface{}, 0, len(packagesWithNames))
-		for _, entry := range packagesWithNames {
-			pkg := entry.pkg
-			pkgMap := packageSummary(pkg)
-
-			// Add vulnerability info if scanned
-			if pkg.SecurityScanned {
-				// Use original name for scan result lookup (handles Go packages with /@v/ suffix)
-				scanResult, err := a.metadata.GetScanResult(ctx, pkg.Registry, entry.originalName, pkg.Version)
-				if err == nil && scanResult != nil {
-					// Count vulnerabilities by severity
-					severityCounts := make(map[string]int)
-					for _, vuln := range scanResult.Vulnerabilities {
-						severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
-					}
-
-					// Check if package should be blocked based on thresholds
-					isBlocked := false
-					if a.scanManager != nil {
-						blocked, _, _ := a.scanManager.CheckVulnerabilities(ctx, pkg.Registry, entry.originalName, pkg.Version)
-						isBlocked = blocked
-					}
-
-					pkgMap["vulnerabilities"] = map[string]interface{}{
-						"scanned":   true,
-						"status":    scanResult.Status,
-						"scannedAt": scanResult.ScannedAt.Format(time.RFC3339),
-						"counts": map[string]int{
-							"critical": severityCounts["CRITICAL"],
-							"high":     severityCounts["HIGH"],
-							"moderate": severityCounts["MODERATE"],
-							"low":      severityCounts["LOW"],
-						},
-						"total":     scanResult.VulnerabilityCount,
-						"isBlocked": isBlocked,
-					}
-				} else {
-					pkgMap["vulnerabilities"] = map[string]interface{}{
-						"scanned":   false,
-						"status":    "pending",
-						"isBlocked": false,
-					}
-				}
-			} else {
-				pkgMap["vulnerabilities"] = map[string]interface{}{
-					"scanned":   false,
-					"status":    "not_scanned",
-					"isBlocked": false,
-				}
-			}
-
-			enhancedPackages = append(enhancedPackages, pkgMap)
-		}
-
-		response = map[string]interface{}{
-			"packages": enhancedPackages,
-			"total":    len(enhancedPackages),
-		}
-	} else {
-		// Non-enhanced mode - just return the packages
-		packages := make([]*metadata.Package, 0, len(packagesWithNames))
-		for _, entry := range packagesWithNames {
-			packages = append(packages, entry.pkg)
-		}
-		response = map[string]interface{}{
-			"packages": packages,
-			"total":    len(packages),
-		}
-	}
-
-	// Success response
+	response["packages"] = enhanced
 	return c.Status(fiber.StatusOK).JSON(response)
 }
 
@@ -236,7 +223,8 @@ func (a *App) handleDeletePackage(c fiber.Ctx) error {
 	if registry == "go" {
 		// List all packages matching the base name and version
 		allPackages, err := a.metadata.ListPackages(ctx, &metadata.ListOptions{
-			Limit: 1000,
+			Registry:   registry,
+			NamePrefix: name,
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to list packages for deletion")
@@ -363,39 +351,28 @@ func (a *App) handleStats(c fiber.Ctx) error {
 		cacheStats = &metadata.Stats{}
 	}
 
-	// Get all packages to calculate per-registry breakdown
-	packages, err := a.metadata.ListPackages(ctx, nil)
+	registryStats := make(map[string]map[string]interface{})
+	byRegistry, err := a.metadata.GetRegistryStats(ctx)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to list packages")
-		packages = []*metadata.Package{}
+		log.Error().Err(err).Msg("Failed to get registry stats")
+	}
+	for _, rs := range byRegistry {
+		registryStats[rs.Registry] = map[string]interface{}{
+			"count":     int(rs.Count),
+			"size":      rs.Size,
+			"downloads": rs.Downloads,
+		}
 	}
 
-	// Calculate per-registry breakdown and blocked packages count
-	registryStats := make(map[string]map[string]interface{})
+	// Blocked packages need the blocking policy, so judge every scanned package in one batch.
 	blockedCount := int64(0)
-
-	for _, pkg := range packages {
-		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
-		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
-			continue
+	if a.config.Security.Enabled && a.scanManager != nil {
+		decisions, err := a.scanManager.ScanDecisions(ctx, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to judge scanned packages")
 		}
-
-		// Track per-registry stats
-		if _, ok := registryStats[pkg.Registry]; !ok {
-			registryStats[pkg.Registry] = map[string]interface{}{
-				"count":     0,
-				"size":      int64(0),
-				"downloads": int64(0),
-			}
-		}
-		registryStats[pkg.Registry]["count"] = registryStats[pkg.Registry]["count"].(int) + 1
-		registryStats[pkg.Registry]["size"] = registryStats[pkg.Registry]["size"].(int64) + pkg.Size
-		registryStats[pkg.Registry]["downloads"] = registryStats[pkg.Registry]["downloads"].(int64) + int64(pkg.DownloadCount)
-
-		// Check if package is blocked (only if security scanning is enabled and package is scanned)
-		if a.config.Security.Enabled && a.scanManager != nil && pkg.SecurityScanned {
-			blocked, _, _ := a.scanManager.CheckVulnerabilities(ctx, pkg.Registry, pkg.Name, pkg.Version)
-			if blocked {
+		for _, d := range decisions {
+			if d.Blocked && !metadata.IsMetadataVersion(d.Summary.Version) {
 				blockedCount++
 			}
 		}

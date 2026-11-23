@@ -116,6 +116,15 @@ func (f *fakeStore) DeletePackage(context.Context, string, string, string) error
 func (f *fakeStore) ListPackages(context.Context, *metadata.ListOptions) ([]*metadata.Package, error) {
 	return nil, metadata.ErrNotImplemented
 }
+func (f *fakeStore) ListPackageGroups(context.Context, metadata.GroupListOptions) (*metadata.GroupPage, error) {
+	return nil, metadata.ErrNotImplemented
+}
+func (f *fakeStore) GetScanSummaries(context.Context, []string, bool) ([]*metadata.ScanSummary, error) {
+	return nil, metadata.ErrNotImplemented
+}
+func (f *fakeStore) GetRegistryStats(context.Context) ([]metadata.RegistryStat, error) {
+	return nil, metadata.ErrNotImplemented
+}
 func (f *fakeStore) UpdateDownloadCount(context.Context, string, string, string) error {
 	return metadata.ErrNotImplemented
 }

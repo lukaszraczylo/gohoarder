@@ -673,6 +673,12 @@ func (s *GORMStoreV2) GetStats(ctx context.Context, registry string) (*metadata.
 	return stats, nil
 }
 
+// DB exposes the GORM handle for tests.
+func (s *GORMStoreV2) DB() *gorm.DB { return s.db }
+
+// WrapDB replaces the handle with wrap(handle). Tests use it to count statements; call it before concurrent use.
+func (s *GORMStoreV2) WrapDB(wrap func(*gorm.DB) *gorm.DB) { s.db = wrap(s.db) }
+
 // Health checks database connectivity
 func (s *GORMStoreV2) Health(ctx context.Context) error {
 	sqlDB, err := s.db.DB()
@@ -969,41 +975,7 @@ func (s *GORMStoreV2) GetScanResult(ctx context.Context, registry, name, version
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to retrieve scan result")
 	}
 
-	// Extract vulnerabilities from Details
-	var vulnerabilities []metadata.Vulnerability
-	if vulnData, ok := scanModel.Details["vulnerabilities"]; ok {
-		// The vulnerabilities are stored as []interface{} after JSON unmarshaling
-		if vulnArray, ok := vulnData.([]interface{}); ok {
-			for _, v := range vulnArray {
-				if vulnMap, ok := v.(map[string]interface{}); ok {
-					vuln := metadata.Vulnerability{
-						ID:          getStringFromMap(vulnMap, "id"),
-						Severity:    getStringFromMap(vulnMap, "severity"),
-						Title:       getStringFromMap(vulnMap, "title"),
-						Description: getStringFromMap(vulnMap, "description"),
-						FixedIn:     getStringFromMap(vulnMap, "fixed_in"),
-					}
-					// Extract references array
-					if refs, ok := vulnMap["references"].([]interface{}); ok {
-						for _, ref := range refs {
-							if refStr, ok := ref.(string); ok {
-								vuln.References = append(vuln.References, refStr)
-							}
-						}
-					}
-					// Extract detected_by array
-					if detectedBy, ok := vulnMap["detected_by"].([]interface{}); ok {
-						for _, db := range detectedBy {
-							if dbStr, ok := db.(string); ok {
-								vuln.DetectedBy = append(vuln.DetectedBy, dbStr)
-							}
-						}
-					}
-					vulnerabilities = append(vulnerabilities, vuln)
-				}
-			}
-		}
-	}
+	vulnerabilities := vulnerabilitiesFromDetails(scanModel.Details)
 
 	// Convert to metadata.ScanResult
 	result := &metadata.ScanResult{

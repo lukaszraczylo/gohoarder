@@ -564,24 +564,10 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 		bypasses = []*metadata.CVEBypass{} // Continue without bypasses
 	}
 
-	// Check if entire package is bypassed
 	bypassName := normalizeBypassPackageName(registry, packageName)
-	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
-	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
 	releaseKey := m.releaseVersionKey(ctx, registry, packageName, version, bypassName)
-
-	for _, bypass := range bypasses {
-		if bypass.Type == metadata.BypassTypePackage && bypass.Active {
-			if bypass.Target == packageKey || bypass.Target == packageKeyNoVersion || (releaseKey != "" && bypass.Target == releaseKey) {
-				log.Info().
-					Str("package", packageKey).
-					Str("bypass_id", bypass.ID).
-					Str("reason", bypass.Reason).
-					Time("expires_at", bypass.ExpiresAt).
-					Msg("Package bypassed by admin")
-				return false, "", nil
-			}
-		}
+	if packageBypassed(registry, bypassName, version, releaseKey, bypasses) {
+		return false, "", nil
 	}
 
 	// Get latest scan result.
@@ -596,10 +582,7 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	if err != nil {
 		var hErr *hoardererrors.Error
 		if stderrors.As(err, &hErr) && hErr.Code == hoardererrors.ErrCodeNotFound {
-			if !m.config.FailClosed && m.isInflight(scanKey(registry, packageName, version)) {
-				return false, "", nil
-			}
-			return true, "no scan available - fail closed", nil
+			return m.missingScanDecision(registry, packageName, version)
 		}
 		// Real backend error (DB transient, etc.) — also block.
 		log.Warn().
@@ -613,16 +596,69 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 		return true, "no scan available - fail closed", nil
 	}
 
+	infra, _ := result.Details[DetailInfrastructureError].(bool)
+	return m.evaluateScan(registry, packageName, version, releaseKey, bypasses, scanFacts{
+		status:  result.Status,
+		infra:   infra,
+		vulns:   result.Vulnerabilities,
+		hasList: true,
+	})
+}
+
+// missingScanDecision is the verdict for a package flagged scanned that has no scan record.
+func (m *Manager) missingScanDecision(registry, packageName, version string) (bool, string, error) {
+	if !m.config.FailClosed && m.isInflight(scanKey(registry, packageName, version)) {
+		return false, "", nil
+	}
+	return true, "no scan available - fail closed", nil
+}
+
+// packageBypassed reports whether an active admin bypass covers the whole package.
+func packageBypassed(registry, bypassName, version, releaseKey string, bypasses []*metadata.CVEBypass) bool {
+	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
+	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
+	for _, bypass := range bypasses {
+		if bypass.Type == metadata.BypassTypePackage && bypass.Active {
+			if bypass.Target == packageKey || bypass.Target == packageKeyNoVersion || (releaseKey != "" && bypass.Target == releaseKey) {
+				log.Info().
+					Str("package", packageKey).
+					Str("bypass_id", bypass.ID).
+					Str("reason", bypass.Reason).
+					Time("expires_at", bypass.ExpiresAt).
+					Msg("Package bypassed by admin")
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scanFacts is what the blocking policy needs to know about one scan.
+type scanFacts struct {
+	counts  map[string]int // per-severity counts, used when hasList is false
+	status  metadata.ScanStatus
+	vulns   []metadata.Vulnerability
+	total   int  // findings when the list is not loaded
+	infra   bool // the scan failed on infrastructure, not on the package
+	hasList bool // vulns is the full list, so CVE bypasses can be applied
+}
+
+// evaluateScan applies bypasses and thresholds to one scan.
+func (m *Manager) evaluateScan(registry, packageName, version, releaseKey string, bypasses []*metadata.CVEBypass, f scanFacts) (bool, string, error) {
 	// If the scan itself errored (all scanners failed for this package),
 	// block. A scan-error record means we don't actually know whether the
 	// package is safe.
-	if result.Status == metadata.ScanStatusError {
-		if infra, _ := result.Details[DetailInfrastructureError].(bool); infra && !m.config.FailClosed {
+	if f.status == metadata.ScanStatusError {
+		if f.infra && !m.config.FailClosed {
 			log.Warn().Str("package", packageName).Msg("Scan failed on infrastructure, serving package; scan will be retried")
 			return false, "", nil
 		}
 		return true, "scan failed - fail closed", nil
 	}
+
+	bypassName := normalizeBypassPackageName(registry, packageName)
+	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
+	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
 
 	// Build set of bypassed CVEs for fast lookup
 	bypassedCVEs := make(map[string]*metadata.CVEBypass)
@@ -637,22 +673,26 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	}
 
 	// Count vulnerabilities by severity, excluding bypassed CVEs
-	severityCounts := make(map[string]int)
-	remaining := 0
-	for _, vuln := range result.Vulnerabilities {
-		// Check if this CVE is bypassed
-		if bypass, ok := bypassedCVEs[strings.ToUpper(vuln.ID)]; ok {
-			log.Debug().
-				Str("cve", vuln.ID).
-				Str("package", packageName).
-				Str("bypass_id", bypass.ID).
-				Str("reason", bypass.Reason).
-				Time("expires_at", bypass.ExpiresAt).
-				Msg("CVE bypassed by admin")
-			continue
+	severityCounts := f.counts
+	remaining := f.total
+	if f.hasList {
+		severityCounts = make(map[string]int)
+		remaining = 0
+		for _, vuln := range f.vulns {
+			// Check if this CVE is bypassed
+			if bypass, ok := bypassedCVEs[strings.ToUpper(vuln.ID)]; ok {
+				log.Debug().
+					Str("cve", vuln.ID).
+					Str("package", packageName).
+					Str("bypass_id", bypass.ID).
+					Str("reason", bypass.Reason).
+					Time("expires_at", bypass.ExpiresAt).
+					Msg("CVE bypassed by admin")
+				continue
+			}
+			severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
+			remaining++
 		}
-		severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
-		remaining++
 	}
 
 	// Check against thresholds
@@ -710,6 +750,72 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	}
 
 	return false, "", nil
+}
+
+// ScanDecision pairs a package's latest scan with the blocking verdict.
+type ScanDecision struct {
+	Summary *metadata.ScanSummary
+	Reason  string
+	Blocked bool
+}
+
+// ScanDecisions judges scanned packages in a constant number of statements. A nil
+// packageIDs judges every scanned package. The verdicts equal CheckVulnerabilities.
+func (m *Manager) ScanDecisions(ctx context.Context, packageIDs []string) ([]ScanDecision, error) {
+	var bypasses []*metadata.CVEBypass
+	if m.enabled {
+		var err error
+		if bypasses, err = m.metadataStore.GetActiveCVEBypasses(ctx); err != nil {
+			log.Warn().Err(err).Msg("Failed to get CVE bypasses, continuing without bypasses")
+			bypasses = nil
+		}
+	}
+	// Per-CVE bypasses need the vulnerability ids; counts alone decide otherwise.
+	withList := false
+	for _, b := range bypasses {
+		if b.Type == metadata.BypassTypeCVE && b.Active {
+			withList = true
+			break
+		}
+	}
+
+	summaries, err := m.metadataStore.GetScanSummaries(ctx, packageIDs, withList)
+	if err != nil {
+		return nil, err
+	}
+	decisions := make([]ScanDecision, 0, len(summaries))
+	for _, sum := range summaries {
+		d := ScanDecision{Summary: sum}
+		if m.enabled {
+			d.Blocked, d.Reason = m.judgeSummary(sum, bypasses, withList)
+		}
+		decisions = append(decisions, d)
+	}
+	return decisions, nil
+}
+
+func (m *Manager) judgeSummary(sum *metadata.ScanSummary, bypasses []*metadata.CVEBypass, withList bool) (bool, string) {
+	bypassName := normalizeBypassPackageName(sum.Registry, sum.Name)
+	releaseKey := ""
+	if sum.ReleaseVersion != "" {
+		releaseKey = fmt.Sprintf("%s/%s@%s", sum.Registry, bypassName, sum.ReleaseVersion)
+	}
+	if packageBypassed(sum.Registry, bypassName, sum.Version, releaseKey, bypasses) {
+		return false, ""
+	}
+	if !sum.HasScan {
+		blocked, reason, _ := m.missingScanDecision(sum.Registry, sum.Name, sum.Version)
+		return blocked, reason
+	}
+	infra, _ := sum.Details[DetailInfrastructureError].(bool)
+	facts := scanFacts{status: sum.Status, infra: infra, total: sum.Total, hasList: withList, vulns: sum.Vulnerabilities}
+	if !withList {
+		facts.counts = map[string]int{
+			"CRITICAL": sum.Critical, "HIGH": sum.High, "MODERATE": sum.Moderate, "LOW": sum.Low,
+		}
+	}
+	blocked, reason, _ := m.evaluateScan(sum.Registry, sum.Name, sum.Version, releaseKey, bypasses, facts)
+	return blocked, reason
 }
 
 // UpdateDatabases updates vulnerability databases for all scanners

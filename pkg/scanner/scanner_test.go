@@ -89,6 +89,15 @@ func (m *stubMetadataStore) DeletePackage(context.Context, string, string, strin
 func (m *stubMetadataStore) ListPackages(context.Context, *metadata.ListOptions) ([]*metadata.Package, error) {
 	return nil, nil
 }
+func (m *stubMetadataStore) ListPackageGroups(context.Context, metadata.GroupListOptions) (*metadata.GroupPage, error) {
+	return nil, nil
+}
+func (m *stubMetadataStore) GetScanSummaries(context.Context, []string, bool) ([]*metadata.ScanSummary, error) {
+	return nil, nil
+}
+func (m *stubMetadataStore) GetRegistryStats(context.Context) ([]metadata.RegistryStat, error) {
+	return nil, nil
+}
 func (m *stubMetadataStore) UpdateDownloadCount(context.Context, string, string, string) error {
 	return nil
 }

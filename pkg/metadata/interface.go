@@ -63,6 +63,18 @@ type MetadataStore interface {
 	// ListPackages lists packages with optional filtering
 	ListPackages(ctx context.Context, opts *ListOptions) ([]*Package, error)
 
+	// ListPackageGroups returns one page of (registry, name) groups with every
+	// version row of each group. It costs a constant number of statements.
+	ListPackageGroups(ctx context.Context, opts GroupListOptions) (*GroupPage, error)
+
+	// GetScanSummaries returns the latest scan of each scanned package in one
+	// round trip. A nil packageIDs means every scanned package. Vulnerability
+	// lists are loaded only when withDetails is set.
+	GetScanSummaries(ctx context.Context, packageIDs []string, withDetails bool) ([]*ScanSummary, error)
+
+	// GetRegistryStats returns per-registry totals over cache artifacts.
+	GetRegistryStats(ctx context.Context) ([]RegistryStat, error)
+
 	// UpdateDownloadCount increments download counter and stamps last_accessed
 	UpdateDownloadCount(ctx context.Context, registry, name, version string) error
 
@@ -304,4 +316,89 @@ type ListOptions struct {
 	Offset      int
 	ScannedOnly bool
 	SortDesc    bool
+}
+
+// Group sort keys for GroupListOptions.SortBy.
+const (
+	GroupSortName      = "name"
+	GroupSortCachedAt  = "cached_at"
+	GroupSortDownloads = "downloads"
+	GroupSortSize      = "size"
+)
+
+// GroupListOptions selects one page of package groups. A group is one
+// (registry, cleaned name) pair; metadata pages never form a group.
+type GroupListOptions struct {
+	Registry string // empty = every registry
+	Query    string // case-insensitive substring of name, version or release version
+	SortBy   string // one of the GroupSort* keys; empty = name
+	SortDesc bool
+	Page     int // 1-based
+	PageSize int // 0 = every group, unpaginated
+}
+
+// GroupPage is one page of groups, flattened to rows.
+type GroupPage struct {
+	// Packages holds every version row of each group on the page, in group
+	// order and newest first within a group. Name is the cleaned group name.
+	Packages []*Package
+	// TotalGroups counts the groups matching the filters, across all pages.
+	TotalGroups int64
+}
+
+// ScanSummary is the latest scan of one package, without the heavy details.
+type ScanSummary struct {
+	ScannedAt       time.Time
+	Details         map[string]interface{} // set only for failed scans
+	Registry        string
+	PackageID       string
+	Name            string // the cache row name, including any Go /@v/ suffix
+	Version         string
+	ReleaseVersion  string
+	Status          ScanStatus
+	Vulnerabilities []Vulnerability // set only when requested
+	Total           int
+	Critical        int
+	High            int
+	Moderate        int
+	Low             int
+	HasScan         bool // false when the package is flagged scanned but has no scan row
+}
+
+// RegistryStat holds the totals of one registry.
+type RegistryStat struct {
+	Registry  string
+	Count     int64
+	Size      int64
+	Downloads int64
+}
+
+// CleanName strips the Go "/@v/<file>" suffix so every file of a module version shares one name.
+func CleanName(name string) string {
+	if idx := strings.Index(name, "/@v/"); idx != -1 {
+		return name[:idx]
+	}
+	return name
+}
+
+// DedupeVersions keeps one row per (cleaned name, version), preferring the largest
+// (the Go .zip over its .mod and .info), and renames the rows to the cleaned name.
+// Output order follows the first appearance of each key.
+func DedupeVersions(rows []*Package) []*Package {
+	index := make(map[string]int, len(rows))
+	out := make([]*Package, 0, len(rows))
+	for _, row := range rows {
+		clean := *row
+		clean.Name = CleanName(row.Name)
+		key := clean.Registry + "\x00" + clean.Name + "\x00" + clean.Version
+		if i, ok := index[key]; ok {
+			if clean.Size > out[i].Size {
+				out[i] = &clean
+			}
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, &clean)
+	}
+	return out
 }

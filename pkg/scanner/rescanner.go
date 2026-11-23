@@ -86,8 +86,8 @@ func (w *RescanWorker) rescanPackages(ctx context.Context) {
 	failed := 0
 
 	for _, pkg := range packages {
-		// Skip metadata entries (npm metadata pages, pypi pages, etc.)
-		if pkg.Version == "list" || pkg.Version == "latest" || pkg.Version == "metadata" || pkg.Version == "page" {
+		// Metadata pages and Go .mod/.info rows are not scannable artifacts.
+		if metadata.IsMetadataEntry(pkg.Registry, pkg.Name, pkg.Version) {
 			skipped++
 			continue
 		}

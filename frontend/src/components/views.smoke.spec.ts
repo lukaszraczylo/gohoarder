@@ -168,13 +168,17 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
   it('App renders one banner, one main, a skip link first and the five sections', async () => {
     const { wrapper, problems } = await smoke(App, '/')
     expect(problems).toEqual([])
-    expect(document.body.querySelectorAll('header').length).toBe(1)
+    // A page's own <header> inside <main> is not a banner landmark.
+    expect(document.body.querySelectorAll('header:not(main header)').length).toBe(1)
     expect(document.body.querySelectorAll('main').length).toBe(1)
     const first = document.body.querySelector<HTMLElement>('a[href], button')
     expect(first?.getAttribute('href')).toBe('#main-content')
     const nav = wrapper.find('nav[aria-label="Sections"]')
     expect(nav.findAll('a').map((a) => a.text())).toEqual(['Dashboard', 'Packages', 'Vulnerable', 'Bypasses', 'Stats'])
     expect(document.documentElement.getAttribute('data-style')).toBe('workbench')
+    // Brand column and sidebar items share one left edge: 6 spacing units each.
+    expect(document.body.querySelector('header')?.className).toContain('[&>div]:px-6')
+    expect(nav.classes()).toContain('p-3')
   })
 
   it('PackageList still fetches through the store on mount', async () => {

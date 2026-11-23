@@ -2,15 +2,15 @@
   <div class="flex flex-col gap-6">
     <PageHeader title="Statistics" description="Storage, traffic and scan results across every registry." />
 
+    <LoadingState v-if="loading" variant="kpi-grid" :columns="3" label="Loading statistics..." />
+
     <ErrorState
-      v-if="error"
+      v-else-if="error"
       variant="card"
       title="Could not load statistics"
       :message="error"
       @retry="refresh"
     />
-
-    <LoadingState v-if="loading" variant="kpi-grid" :columns="3" label="Loading statistics..." />
 
     <template v-else>
       <Card>

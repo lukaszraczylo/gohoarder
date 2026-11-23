@@ -21,8 +21,9 @@ onMounted(() => {
       class="sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2 focus:z-(--z-toast) focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-primary-foreground"
       >Skip to main content</a
     >
+    <!-- px-6 on the bar equals the sidebar nav's p-3 plus the link's px-3, so the brand icon sits over the nav icons. -->
     <!-- AppShell wraps its #header slot in its own <header> and AppHeader renders one too; outside the shell there is one banner. -->
-    <AppHeader sticky mobile-variant="sheet" class="[&>div]:h-(--header-h)">
+    <AppHeader sticky mobile-variant="sheet" class="[&>div]:h-(--header-h) [&>div]:px-6">
       <template #brand>
         <Icon :icon="faBoxOpen" size="lg" class="text-primary" />
         <p class="m-0 text-lg font-semibold">GoHoarder</p>

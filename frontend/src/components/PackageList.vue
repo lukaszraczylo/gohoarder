@@ -16,15 +16,15 @@
       <SearchInput v-model="searchTerm" aria-label="Search packages" placeholder="Search packages..." class="w-full sm:ms-auto sm:w-64" />
     </div>
 
+    <LoadingState v-if="loading" variant="table" label="Loading packages..." />
+
     <ErrorState
-      v-if="error"
+      v-else-if="error"
       variant="card"
       title="Could not load packages"
       :message="error"
       @retry="store.fetchPackages()"
     />
-
-    <LoadingState v-if="loading" variant="table" label="Loading packages..." />
 
     <Card v-else>
       <CardContent>
@@ -282,8 +282,11 @@ async function deletePackage() {
   showDeleteModal.value = false
   packageToDelete.value = null
   const label = `${target.name}@${target.version}`
-  if (store.error) toasts.error('Could not delete package', `${label}: ${store.error}`)
-  else toasts.success('Package deleted', label)
+  if (store.error) {
+    toasts.error('Could not delete package', `${label}: ${store.error}`)
+    // The toast reports it; the list loaded fine, so it must not be replaced by a load error.
+    store.error = null
+  } else toasts.success('Package deleted', label)
 }
 
 function showVulnerabilityDetails(registry: string, name: string, version: string) {

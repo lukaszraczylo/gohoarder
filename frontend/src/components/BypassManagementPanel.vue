@@ -17,15 +17,15 @@
       </Button>
     </div>
 
+    <LoadingState v-if="loading" variant="table" label="Loading bypasses..." />
+
     <ErrorState
-      v-if="error"
+      v-else-if="error"
       variant="card"
       title="Could not load bypasses"
       :message="error"
       @retry="fetchBypasses"
     />
-
-    <LoadingState v-if="loading" variant="table" label="Loading bypasses..." />
 
     <Card v-else>
       <CardContent>

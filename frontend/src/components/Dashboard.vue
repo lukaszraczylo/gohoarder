@@ -3,26 +3,27 @@
     <PageHeader title="Dashboard" description="What the cache holds and what is moving through it.">
       <template #actions>
         <StatusBadge
-          :status="rt.connected ? 'live' : 'offline'"
-          :label="rt.connected ? 'Live' : 'Offline'"
-          :tones="{ live: 'success', offline: 'neutral' }"
+          :status="rt.connected ? 'live' : 'paused'"
+          :label="rt.connected ? 'Live' : 'Live updates paused'"
+          :tones="{ live: 'success', paused: 'neutral' }"
           :pulse="rt.connected"
           data-testid="ws-live-indicator"
         />
       </template>
     </PageHeader>
 
+    <LoadingState v-if="loading" variant="kpi-grid" :columns="4" label="Loading statistics..." />
+
     <ErrorState
-      v-if="error"
+      v-else-if="error"
       variant="card"
       title="Could not load statistics"
       :message="error"
       @retry="refresh"
     />
 
-    <LoadingState v-if="loading" variant="kpi-grid" :columns="4" label="Loading statistics..." />
-
-    <StatGroup v-else :columns="4" aria-label="Cache totals">
+    <template v-else>
+    <StatGroup :columns="4" aria-label="Cache totals">
       <KpiTile label="Total packages" :value="displayStats?.total_packages || 0" :icon="faBoxesStacked" />
       <KpiTile label="Total size" :value="formatBytes(displayStats?.total_size || 0)" :icon="faHardDrive" />
       <KpiTile label="Total downloads" :value="displayStats?.total_downloads || 0" :icon="faDownload" />
@@ -50,6 +51,13 @@
           v-if="chartLoading && chartData.length === 0"
           layout="inline"
           label="Loading chart data..."
+        />
+        <ErrorState
+          v-else-if="chartError"
+          variant="inline"
+          title="Could not load download activity"
+          :message="chartError"
+          @retry="fetchTimeSeriesData"
         />
         <BarChart
           v-else
@@ -86,6 +94,7 @@
         </DataTable>
       </CardContent>
     </Card>
+    </template>
   </div>
 </template>
 
@@ -211,16 +220,19 @@ interface TimeSeriesStats {
 
 const timeSeriesData = ref<TimeSeriesStats | null>(null)
 const chartLoading = ref(false)
+const chartError = ref<string | null>(null)
 
 // Fetch time-series data from API
 async function fetchTimeSeriesData() {
   chartLoading.value = true
+  chartError.value = null
   try {
     const response = await axios.get(`/api/stats/timeseries?period=${selectedPeriod.value}`)
     timeSeriesData.value = response.data
   } catch (err) {
     console.error('Failed to fetch time-series data:', err)
     timeSeriesData.value = null
+    chartError.value = err instanceof Error ? err.message : 'Failed to load download activity'
   } finally {
     chartLoading.value = false
   }

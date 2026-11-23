@@ -244,4 +244,21 @@ describe('Dashboard.vue', () => {
     expect(wrapper.text()).toContain('999')
     expect(wrapper.text()).toContain('777')
   })
+
+  it('shows a neutral "Live updates paused" badge while the socket is down', async () => {
+    const wrapper = mount(Dashboard)
+    const badge = wrapper.find('[data-testid="ws-live-indicator"]')
+    expect(badge.text()).toBe('Live updates paused')
+    expect(badge.text()).not.toMatch(/offline/i)
+    expect(badge.attributes('data-tone')).toBe('neutral')
+  })
+
+  it('shows a "Live" badge once the socket is connected', async () => {
+    const wrapper = mount(Dashboard)
+    useRealtimeStore().connected = true
+    await wrapper.vm.$nextTick()
+    const badge = wrapper.find('[data-testid="ws-live-indicator"]')
+    expect(badge.text()).toBe('Live')
+    expect(badge.attributes('data-tone')).toBe('success')
+  })
 })

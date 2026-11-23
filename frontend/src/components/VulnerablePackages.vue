@@ -151,6 +151,11 @@ async function fetchVulnerablePackages() {
 
   try {
     await store.fetchPackages()
+    // The store records a failed request in store.error and resolves; surface it instead of an empty list.
+    if (store.error) {
+      error.value = store.error
+      return
+    }
     vulnerablePackages.value = store.packages.filter(pkg => {
       const isVulnerable = pkg.vulnerabilities?.status === 'vulnerable'
       if (showOnlyBlocked.value) {

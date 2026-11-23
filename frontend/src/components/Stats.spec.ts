@@ -30,9 +30,11 @@ describe('Stats.vue', () => {
   })
 
   it('displays error message when error occurs', async () => {
-    const wrapper = mount(Stats)
     const store = usePackageStore()
+    vi.spyOn(store, 'fetchStats').mockResolvedValue()
+    const wrapper = mount(Stats)
 
+    store.loading = false
     store.error = 'Failed to fetch statistics'
     await wrapper.vm.$nextTick()
 

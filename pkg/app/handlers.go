@@ -407,6 +407,7 @@ func (a *App) handleStats(c fiber.Ctx) error {
 		"total_downloads":     cacheStats.TotalDownloads,
 		"total_size":          cacheStats.TotalSize,
 		"max_cache_size":      a.config.Cache.MaxSizeBytes,
+		"idle_ttl":            int64(a.config.Cache.IdleTTL / time.Second), // seconds, 0 = idle eviction off
 		"cache_hits":          cacheStats.TotalDownloads,
 		"cache_misses":        0, // TODO: Track cache misses
 		"cache_evictions":     0, // TODO: Track evictions

@@ -118,6 +118,13 @@ func (m *stubMetadataStore) GetTimeSeriesStats(context.Context, string, string) 
 	return nil, nil
 }
 func (m *stubMetadataStore) AggregateDownloadData(context.Context) error { return nil }
+func (m *stubMetadataStore) ListIdlePackages(context.Context, time.Time, int) ([]*metadata.Package, error) {
+	return nil, nil
+}
+func (m *stubMetadataStore) ListExpiredPackages(context.Context, time.Time, int) ([]*metadata.Package, error) {
+	return nil, nil
+}
+func (m *stubMetadataStore) ClearArtifactExpiry(context.Context) (int64, error) { return 0, nil }
 func (m *stubMetadataStore) SaveAPIKey(context.Context, *metadata.APIKey) error {
 	return metadata.ErrNotImplemented
 }

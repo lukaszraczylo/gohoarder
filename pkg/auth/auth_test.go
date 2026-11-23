@@ -147,7 +147,16 @@ func (f *fakeStore) GetTimeSeriesStats(context.Context, string, string) (*metada
 	return nil, metadata.ErrNotImplemented
 }
 func (f *fakeStore) AggregateDownloadData(context.Context) error { return metadata.ErrNotImplemented }
-func (f *fakeStore) Close() error                                { return nil }
+func (f *fakeStore) ListIdlePackages(context.Context, time.Time, int) ([]*metadata.Package, error) {
+	return nil, metadata.ErrNotImplemented
+}
+func (f *fakeStore) ListExpiredPackages(context.Context, time.Time, int) ([]*metadata.Package, error) {
+	return nil, metadata.ErrNotImplemented
+}
+func (f *fakeStore) ClearArtifactExpiry(context.Context) (int64, error) {
+	return 0, metadata.ErrNotImplemented
+}
+func (f *fakeStore) Close() error { return nil }
 
 // fastCfg uses bcrypt.MinCost so tests that hash multiple keys stay snappy.
 func fastCfg() Config { return Config{BcryptCost: bcrypt.MinCost} }

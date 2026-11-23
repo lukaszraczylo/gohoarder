@@ -14,6 +14,31 @@ import (
 // Callers should treat it as a non-fatal capability check.
 var ErrNotImplemented = errors.New("metadata: operation not implemented by this backend")
 
+// DefaultBatchSize bounds the rows a list query returns when the caller passes no limit.
+const DefaultBatchSize = 500
+
+// MetadataVersions are the cache-key versions of metadata pages (index, list, latest).
+var MetadataVersions = []string{"list", "page", "latest", "metadata"}
+
+// MetadataNameSuffixes mark Go module metadata files (.mod, .info).
+var MetadataNameSuffixes = []string{".mod", ".info"}
+
+// IsMetadataEntry reports whether a cache entry is a metadata page that must
+// refresh, as opposed to an immutable artifact.
+func IsMetadataEntry(name, version string) bool {
+	for _, v := range MetadataVersions {
+		if version == v {
+			return true
+		}
+	}
+	for _, suffix := range MetadataNameSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // Store is an alias for MetadataStore for convenience
 type Store = MetadataStore
 
@@ -31,8 +56,20 @@ type MetadataStore interface {
 	// ListPackages lists packages with optional filtering
 	ListPackages(ctx context.Context, opts *ListOptions) ([]*Package, error)
 
-	// UpdateDownloadCount increments download counter
+	// UpdateDownloadCount increments download counter and stamps last_accessed
 	UpdateDownloadCount(ctx context.Context, registry, name, version string) error
+
+	// ListIdlePackages returns up to limit packages last accessed before
+	// idleBefore, oldest first. A limit <= 0 means DefaultBatchSize.
+	ListIdlePackages(ctx context.Context, idleBefore time.Time, limit int) ([]*Package, error)
+
+	// ListExpiredPackages returns up to limit packages whose ExpiresAt is before
+	// the given time, oldest first. A limit <= 0 means DefaultBatchSize.
+	ListExpiredPackages(ctx context.Context, expiredBefore time.Time, limit int) ([]*Package, error)
+
+	// ClearArtifactExpiry removes ExpiresAt from every non-metadata entry and
+	// returns the number of rows changed. It is idempotent.
+	ClearArtifactExpiry(ctx context.Context) (int64, error)
 
 	// GetStats returns statistics
 	GetStats(ctx context.Context, registry string) (*Stats, error)

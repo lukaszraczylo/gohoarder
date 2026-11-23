@@ -233,6 +233,7 @@ func (a *App) initializeComponents() error {
 	a.cache, err = cache.New(a.storage, a.metadata, a.scanManager, a.analyticsEngine, cache.Config{
 		DefaultTTL:      a.config.Cache.DefaultTTL,
 		CleanupInterval: cleanupInterval,
+		IdleTTL:         a.config.Cache.IdleTTL,
 		MaxPackageSize:  a.config.Security.Scanners.Static.MaxPackageSize,
 		FailClosed:      a.config.Security.FailClosed,
 	})

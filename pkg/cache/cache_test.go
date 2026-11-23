@@ -230,6 +230,17 @@ func (m *MockMetadataStore) AggregateDownloadData(ctx context.Context) error {
 	return args.Error(0)
 }
 
+// The idle-eviction queries are not mocked per test: no expiry, no idle rows.
+func (m *MockMetadataStore) ListIdlePackages(context.Context, time.Time, int) ([]*metadata.Package, error) {
+	return nil, nil
+}
+
+func (m *MockMetadataStore) ListExpiredPackages(context.Context, time.Time, int) ([]*metadata.Package, error) {
+	return nil, nil
+}
+
+func (m *MockMetadataStore) ClearArtifactExpiry(context.Context) (int64, error) { return 0, nil }
+
 // API key methods are not used by the cache package; stub them out so the
 // mock continues to satisfy metadata.MetadataStore after the interface gained
 // API key persistence methods.

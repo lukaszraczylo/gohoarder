@@ -133,11 +133,15 @@ type MySQLConfig struct {
 	ParseTime bool   `mapstructure:"parse_time" json:"parse_time"`
 }
 
+// DefaultIdleTTL is how long a cached item can go unrequested before cleanup removes it.
+const DefaultIdleTTL = 7 * 24 * time.Hour
+
 // CacheConfig contains cache management configuration
 type CacheConfig struct {
 	TTLOverrides    map[string]time.Duration `mapstructure:"ttl_overrides" json:"ttl_overrides"`
 	DefaultTTL      time.Duration            `mapstructure:"default_ttl" json:"default_ttl"`
 	CleanupInterval time.Duration            `mapstructure:"cleanup_interval" json:"cleanup_interval"`
+	IdleTTL         time.Duration            `mapstructure:"idle_ttl" json:"idle_ttl"` // 0 disables idle eviction
 	MaxSizeBytes    int64                    `mapstructure:"max_size_bytes" json:"max_size_bytes"`
 	PerProjectQuota int64                    `mapstructure:"per_project_quota" json:"per_project_quota"`
 }
@@ -353,6 +357,7 @@ func Default() *Config {
 		Cache: CacheConfig{
 			DefaultTTL:      7 * 24 * time.Hour,
 			CleanupInterval: 1 * time.Hour,
+			IdleTTL:         DefaultIdleTTL,
 			MaxSizeBytes:    500 * 1024 * 1024 * 1024, // 500GB
 			PerProjectQuota: 50 * 1024 * 1024 * 1024,  // 50GB
 			TTLOverrides: map[string]time.Duration{
@@ -504,6 +509,9 @@ func (c *Config) Validate() error {
 	// Validate cache
 	if c.Cache.DefaultTTL < 0 {
 		return fmt.Errorf("cache.default_ttl cannot be negative")
+	}
+	if c.Cache.IdleTTL < 0 {
+		return fmt.Errorf("cache.idle_ttl cannot be negative")
 	}
 	if c.Cache.MaxSizeBytes < 0 {
 		return fmt.Errorf("cache.max_size_bytes cannot be negative")

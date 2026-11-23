@@ -81,16 +81,27 @@ func (m *Manager) emit(eventType string, payload map[string]interface{}) {
 
 // Config holds cache manager configuration
 type Config struct {
-	DefaultTTL        time.Duration // Default TTL for cached packages
-	CleanupInterval   time.Duration // How often to run cleanup
-	EvictionThreshold float64       // Trigger eviction when usage > threshold (0.0-1.0)
-	MaxConcurrent     int           // Max concurrent upstream fetches
-	MaxPackageSize    int64         // Maximum package size in bytes (0 = default 2GB)
-	ScanWaitTimeout   time.Duration // How long the first download waits for its scan (0 = 30s)
-	FailClosed        bool          // Refuse a package whose scan did not finish in time
+	Now               func() time.Time // Clock; nil means time.Now
+	DefaultTTL        time.Duration    // Freshness TTL for metadata entries
+	CleanupInterval   time.Duration    // How often to run cleanup
+	IdleTTL           time.Duration    // Remove entries not requested for this long (0 = off)
+	EvictionThreshold float64          // Trigger eviction when usage > threshold (0.0-1.0)
+	MaxConcurrent     int              // Max concurrent upstream fetches
+	MaxPackageSize    int64            // Maximum package size in bytes (0 = default 2GB)
+	ScanWaitTimeout   time.Duration    // How long the first download waits for its scan (0 = 30s)
+	FailClosed        bool             // Refuse a package whose scan did not finish in time
 }
 
 const defaultScanWaitTimeout = 30 * time.Second
+
+// cleanupBatchSize bounds how many rows one cleanup query reads.
+const cleanupBatchSize = metadata.DefaultBatchSize
+
+// Eviction metric reasons.
+const (
+	evictReasonTTL  = "ttl"
+	evictReasonIdle = "idle"
+)
 
 // scannerToggle is implemented by scanners that can be switched off.
 type scannerToggle interface {
@@ -155,6 +166,10 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 		log.Info().Msg("Cache manager initialized with analytics tracking enabled")
 	}
 
+	if config.Now == nil {
+		config.Now = time.Now
+	}
+
 	if config.DefaultTTL == 0 {
 		config.DefaultTTL = 7 * 24 * time.Hour // 7 days default
 	}
@@ -190,6 +205,9 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 		config:    config,
 		stopCh:    make(chan struct{}),
 	}
+
+	// Rows cached before idle eviction existed carry an age-based expiry.
+	manager.clearArtifactExpiry(bgCtx)
 
 	// Start background cleanup worker
 	manager.cleanupWG.Add(1)
@@ -241,9 +259,9 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 	pkg, err := m.metadata.GetPackage(ctx, registry, name, version)
 	if err == nil {
 		// Package found in metadata, check if expired
-		if pkg.ExpiresAt != nil && time.Now().After(*pkg.ExpiresAt) {
+		if pkg.ExpiresAt != nil && m.now().After(*pkg.ExpiresAt) {
 			log.Debug().Str("package", name).Str("version", version).Msg("Package expired, re-fetching")
-			metrics.RecordCacheEviction("ttl")
+			metrics.RecordCacheEviction(evictReasonTTL)
 			// Delete expired package
 			_ = m.deletePackage(ctx, pkg) // #nosec G104 -- Async cleanup
 		} else {
@@ -297,8 +315,7 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 				// entries (index pages, lists, .mod/.info) are not scannable
 				// packages, so skip them to avoid a bogus "clean" verdict and
 				// the extra database round-trip.
-				isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
-					strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
+				isMetadataEntry := metadata.IsMetadataEntry(name, version)
 				if m.scanner != nil && !isMetadataEntry {
 					blocked, reason, vulnErr := m.scanner.CheckVulnerabilities(ctx, registry, name, version)
 					if vulnErr != nil {
@@ -553,8 +570,16 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 	_ = tempFile.Close() // #nosec G104 -- cleanup; scan may still read the file
 
 	// Create metadata entry
-	now := time.Now()
-	expiresAt := now.Add(m.config.DefaultTTL)
+	now := m.now()
+	isMetadataEntry := metadata.IsMetadataEntry(name, version)
+
+	// Artifacts are immutable, so only idle eviction removes them; metadata
+	// entries must refresh and keep a freshness expiry.
+	var expiresAt *time.Time
+	if isMetadataEntry {
+		exp := now.Add(m.config.DefaultTTL)
+		expiresAt = &exp
+	}
 
 	pkg := &metadata.Package{
 		ID:             uuid.New().String(),
@@ -570,7 +595,7 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 		AuthProvider:   authProvider,
 		CachedAt:       now,
 		LastAccessed:   now,
-		ExpiresAt:      &expiresAt,
+		ExpiresAt:      expiresAt,
 		DownloadCount:  0,
 		Metadata:       make(map[string]string),
 	}
@@ -583,8 +608,6 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 	// TRADEOFF: metadata pages share the cache's DefaultTTL and are not refreshed
 	// based on upstream Cache-Control. Plumbing per-response TTL from registry handlers
 	// is out of scope here and tracked separately.
-	isMetadataEntry := version == "list" || version == "page" || version == "latest" || version == "metadata" ||
-		strings.HasSuffix(name, ".mod") || strings.HasSuffix(name, ".info")
 	if err := m.metadata.SavePackage(ctx, pkg); err != nil {
 		// Clean up storage if metadata save fails
 		_ = m.storage.Delete(ctx, storageKey) // #nosec G104 -- Cleanup, error logged
@@ -738,7 +761,7 @@ func (m *Manager) evict(ctx context.Context, needed int64) error {
 	return nil
 }
 
-// cleanupWorker runs periodic cleanup of expired packages.
+// cleanupWorker runs periodic cleanup of expired and idle packages.
 // Exits when stopCh is closed (via Close()).
 func (m *Manager) cleanupWorker() {
 	defer m.cleanupWG.Done()
@@ -751,39 +774,113 @@ func (m *Manager) cleanupWorker() {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			ctx := context.Background()
-			m.cleanup(ctx)
+			m.cleanup(m.bgCtx)
 		}
 	}
 }
 
-// cleanup removes expired packages
-func (m *Manager) cleanup(ctx context.Context) {
-	log.Debug().Msg("Starting cleanup worker")
+func (m *Manager) now() time.Time {
+	return m.config.Now()
+}
 
-	// List all packages
-	packages, err := m.metadata.ListPackages(ctx, &metadata.ListOptions{})
+// clearArtifactExpiry drops the age-based expiry that older versions set on artifacts.
+func (m *Manager) clearArtifactExpiry(ctx context.Context) {
+	cleared, err := m.metadata.ClearArtifactExpiry(ctx)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to list packages for cleanup")
+		log.Error().Err(err).Msg("Failed to clear artifact expiry")
 		return
 	}
+	if cleared > 0 {
+		log.Info().Int64("count", cleared).Msg("Cleared age-based expiry from cached artifacts")
+	}
+}
 
-	now := time.Now()
-	var cleaned int
+// purgeResult totals the packages one purge pass removed.
+type purgeResult struct {
+	bytes int64
+	count int
+}
 
-	for _, pkg := range packages {
-		if pkg.ExpiresAt != nil && now.After(*pkg.ExpiresAt) {
-			if err := m.deletePackage(ctx, pkg); err != nil {
-				log.Warn().Err(err).Str("package", pkg.Name).Msg("Failed to clean up expired package")
+// purge deletes packages in bounded batches until the list query runs dry.
+// stillDue re-checks each package just before deletion so one requested after
+// the batch was read is kept.
+func (m *Manager) purge(
+	ctx context.Context,
+	reason string,
+	list func(limit int) ([]*metadata.Package, error),
+	stillDue func(*metadata.Package) bool,
+) purgeResult {
+	var res purgeResult
+	seen := make(map[string]struct{})
+
+	for ctx.Err() == nil {
+		batch, err := list(cleanupBatchSize)
+		if err != nil {
+			log.Error().Err(err).Str("reason", reason).Msg("Failed to list packages for cleanup")
+			return res
+		}
+
+		unseen := 0
+		for _, pkg := range batch {
+			key := m.generateStorageKey(pkg.Registry, pkg.Name, pkg.Version)
+			if _, dup := seen[key]; dup {
 				continue
 			}
-			cleaned++
+			seen[key] = struct{}{}
+			unseen++
+
+			current, err := m.metadata.GetPackage(ctx, pkg.Registry, pkg.Name, pkg.Version)
+			if err != nil || current == nil || !stillDue(current) {
+				continue
+			}
+			if err := m.deletePackage(ctx, current); err != nil {
+				log.Warn().Err(err).Str("package", pkg.Name).Str("reason", reason).Msg("Failed to clean up package")
+				continue
+			}
+			res.count++
+			res.bytes += current.Size
+			metrics.RecordCacheEviction(reason)
+		}
+
+		// A short batch is the last one; a batch of only repeats means every
+		// remaining row failed to delete.
+		if len(batch) < cleanupBatchSize || unseen == 0 {
+			return res
 		}
 	}
+	return res
+}
 
-	if cleaned > 0 {
-		log.Info().Int("count", cleaned).Msg("Cleanup completed")
+// cleanup removes metadata entries past their freshness expiry and, when
+// IdleTTL is set, every package not requested within IdleTTL.
+func (m *Manager) cleanup(ctx context.Context) {
+	start := m.now()
+	log.Debug().Msg("Starting cleanup worker")
+
+	m.clearArtifactExpiry(ctx)
+
+	expired := m.purge(ctx, evictReasonTTL,
+		func(limit int) ([]*metadata.Package, error) {
+			return m.metadata.ListExpiredPackages(ctx, start, limit)
+		},
+		func(p *metadata.Package) bool { return p.ExpiresAt != nil && p.ExpiresAt.Before(start) })
+
+	var idle purgeResult
+	if m.config.IdleTTL > 0 {
+		cutoff := start.Add(-m.config.IdleTTL)
+		idle = m.purge(ctx, evictReasonIdle,
+			func(limit int) ([]*metadata.Package, error) {
+				return m.metadata.ListIdlePackages(ctx, cutoff, limit)
+			},
+			func(p *metadata.Package) bool { return p.LastAccessed.Before(cutoff) })
 	}
+
+	log.Info().
+		Int("expired", expired.count).
+		Int("idle", idle.count).
+		Int64("bytes_freed", expired.bytes+idle.bytes).
+		Dur("idle_ttl", m.config.IdleTTL).
+		Msg("Cleanup completed")
 }
 
 // generateStorageKey generates a storage key for a package

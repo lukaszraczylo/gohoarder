@@ -490,7 +490,11 @@ func (s *GORMStoreV2) ListPackages(ctx context.Context, opts *metadata.ListOptio
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to list packages")
 	}
 
-	// Convert to metadata.Package
+	return s.modelsToPackages(models), nil
+}
+
+// modelsToPackages converts rows to metadata packages, resolving registry names once.
+func (s *GORMStoreV2) modelsToPackages(models []PackageModel) []*metadata.Package {
 	packages := make([]*metadata.Package, len(models))
 	// Snapshot id->name mapping under read lock once to avoid repeated locking
 	s.registryCacheMu.RLock()
@@ -502,8 +506,48 @@ func (s *GORMStoreV2) ListPackages(ctx context.Context, opts *metadata.ListOptio
 	for i, model := range models {
 		packages[i] = s.modelToPackage(&model, idToName[model.RegistryID])
 	}
+	return packages
+}
 
-	return packages, nil
+// listBatch runs a bounded, index-ordered query over live packages.
+func (s *GORMStoreV2) listBatch(ctx context.Context, where, order string, arg time.Time, limit int) ([]*metadata.Package, error) {
+	if limit <= 0 {
+		limit = metadata.DefaultBatchSize
+	}
+	var models []PackageModel
+	if err := s.db.WithContext(ctx).
+		Where(where, arg).
+		Order(order).
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to list packages")
+	}
+	return s.modelsToPackages(models), nil
+}
+
+// ListIdlePackages returns live packages last accessed before idleBefore, oldest first.
+func (s *GORMStoreV2) ListIdlePackages(ctx context.Context, idleBefore time.Time, limit int) ([]*metadata.Package, error) {
+	return s.listBatch(ctx, "last_accessed < ?", "last_accessed ASC", idleBefore, limit)
+}
+
+// ListExpiredPackages returns live packages whose expires_at is before the given time, oldest first.
+func (s *GORMStoreV2) ListExpiredPackages(ctx context.Context, expiredBefore time.Time, limit int) ([]*metadata.Package, error) {
+	return s.listBatch(ctx, "expires_at < ?", "expires_at ASC", expiredBefore, limit)
+}
+
+// ClearArtifactExpiry nulls expires_at on every row that is not a metadata entry.
+func (s *GORMStoreV2) ClearArtifactExpiry(ctx context.Context) (int64, error) {
+	query := s.db.WithContext(ctx).Model(&PackageModel{}).
+		Where("expires_at IS NOT NULL").
+		Where("version NOT IN ?", metadata.MetadataVersions)
+	for _, suffix := range metadata.MetadataNameSuffixes {
+		query = query.Where("name NOT LIKE ?", "%"+suffix)
+	}
+	result := query.UpdateColumn("expires_at", nil)
+	if result.Error != nil {
+		return 0, errors.Wrap(result.Error, errors.ErrCodeStorageFailure, "failed to clear artifact expiry")
+	}
+	return result.RowsAffected, nil
 }
 
 // UpdateDownloadCount increments download count and records event

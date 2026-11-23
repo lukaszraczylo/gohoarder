@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -155,6 +156,63 @@ func (s *Store) ListPackages(ctx context.Context, opts *metadata.ListOptions) ([
 	}
 
 	return packages, nil
+}
+
+// filterPackages returns package records (not scan results) matching keep,
+// ordered by key ascending and capped at limit.
+func (s *Store) filterPackages(ctx context.Context, limit int, keep func(*metadata.Package) bool, key func(*metadata.Package) time.Time) ([]*metadata.Package, error) {
+	all, err := s.ListPackages(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []*metadata.Package
+	for _, p := range all {
+		if p.Registry != "" && p.Name != "" && keep(p) {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return key(out[i]).Before(key(out[j])) })
+	if limit <= 0 {
+		limit = metadata.DefaultBatchSize
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// ListIdlePackages returns packages last accessed before idleBefore, oldest first.
+func (s *Store) ListIdlePackages(ctx context.Context, idleBefore time.Time, limit int) ([]*metadata.Package, error) {
+	return s.filterPackages(ctx, limit,
+		func(p *metadata.Package) bool { return p.LastAccessed.Before(idleBefore) },
+		func(p *metadata.Package) time.Time { return p.LastAccessed })
+}
+
+// ListExpiredPackages returns packages whose ExpiresAt is before the given time, oldest first.
+func (s *Store) ListExpiredPackages(ctx context.Context, expiredBefore time.Time, limit int) ([]*metadata.Package, error) {
+	return s.filterPackages(ctx, limit,
+		func(p *metadata.Package) bool { return p.ExpiresAt != nil && p.ExpiresAt.Before(expiredBefore) },
+		func(p *metadata.Package) time.Time { return *p.ExpiresAt })
+}
+
+// ClearArtifactExpiry removes ExpiresAt from every non-metadata package.
+func (s *Store) ClearArtifactExpiry(ctx context.Context) (int64, error) {
+	all, err := s.ListPackages(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	var cleared int64
+	for _, p := range all {
+		if p.Registry == "" || p.Name == "" || p.ExpiresAt == nil || metadata.IsMetadataEntry(p.Name, p.Version) {
+			continue
+		}
+		p.ExpiresAt = nil
+		if err := s.SavePackage(ctx, p); err != nil {
+			return cleared, err
+		}
+		cleared++
+	}
+	return cleared, nil
 }
 
 // DeletePackage deletes package metadata

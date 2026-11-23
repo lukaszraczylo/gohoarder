@@ -68,13 +68,20 @@ func BuildMySQLDSN(host string, port int, user, password, database, charset stri
 		user, password, host, port, database, charset)
 }
 
-// BuildSQLiteDSN builds SQLite DSN with pragmas
+// sqliteBusyTimeoutMs is how long a writer waits for the write lock before
+// SQLite reports "database is locked".
+const sqliteBusyTimeoutMs = 15000
+
+// BuildSQLiteDSN builds SQLite DSN with pragmas.
+// _txlock=immediate takes the write lock when a transaction begins. A deferred
+// transaction that reads and then writes cannot wait for the lock (SQLite
+// returns SQLITE_BUSY at once, ignoring busy_timeout), so it must not be used.
 func BuildSQLiteDSN(path string, walMode bool) string {
 	if path == "" {
 		path = "gohoarder.db"
 	}
 	if walMode {
-		return fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=2000", path)
+		return fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%d&_txlock=immediate&_synchronous=NORMAL&_cache_size=2000", path, sqliteBusyTimeoutMs)
 	}
-	return fmt.Sprintf("%s?_journal_mode=DELETE&_busy_timeout=5000&_synchronous=NORMAL", path)
+	return fmt.Sprintf("%s?_journal_mode=DELETE&_busy_timeout=%d&_txlock=immediate&_synchronous=NORMAL", path, sqliteBusyTimeoutMs)
 }

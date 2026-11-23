@@ -37,7 +37,37 @@ func (s *Store) ListPackageGroups(ctx context.Context, opts metadata.GroupListOp
 			p.ID = packageKey(p)
 		}
 	}
+	if len(opts.Severities) > 0 {
+		if all, err = s.withSeverity(ctx, all, opts.Severities); err != nil {
+			return nil, err
+		}
+	}
 	return metadata.PageGroups(all, opts), nil
+}
+
+// withSeverity keeps the packages whose scan holds a vulnerability of one of the severities.
+func (s *Store) withSeverity(ctx context.Context, all []*metadata.Package, severities []string) ([]*metadata.Package, error) {
+	sums, err := s.GetScanSummaries(ctx, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	hit := make(map[string]struct{}, len(sums))
+	for _, sum := range sums {
+		for _, sev := range severities {
+			if (sev == metadata.SeverityCritical && sum.Critical > 0) || (sev == metadata.SeverityHigh && sum.High > 0) ||
+				(sev == metadata.SeverityModerate && sum.Moderate > 0) || (sev == metadata.SeverityLow && sum.Low > 0) {
+				hit[sum.PackageID] = struct{}{}
+				break
+			}
+		}
+	}
+	out := all[:0]
+	for _, p := range all {
+		if _, ok := hit[p.ID]; ok {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // GetScanSummaries reads each scanned package's latest scan file.

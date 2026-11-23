@@ -23,7 +23,7 @@
       @retry="fetchVulnerablePackages"
     />
 
-    <Card v-else-if="sortedVulnerablePackages.length === 0">
+    <Card v-else-if="vulnerablePackages.length === 0">
       <CardContent>
         <EmptyState
           tone="success"
@@ -35,9 +35,34 @@
     </Card>
 
     <template v-else>
-      <SeveritySummary :counts="totalCounts" label="Vulnerabilities by severity" />
+      <SeveritySummary
+        v-model="selectedSeverities"
+        selectable
+        :counts="totalCounts"
+        :package-counts="packageCounts"
+        label="Vulnerabilities by severity. Select a severity to filter the packages."
+      />
 
-      <Card>
+      <div v-if="hasFilter" class="flex flex-wrap items-center justify-between gap-3" data-testid="filter-bar">
+        <p class="text-sm text-muted-foreground" role="status">Showing packages with {{ filterSummary }} vulnerabilities.</p>
+        <Button variant="outline" size="sm" @click="clearFilters">Clear filters</Button>
+      </div>
+
+      <Card v-if="sortedVulnerablePackages.length === 0">
+        <CardContent>
+          <EmptyState
+            :icon="faCircleCheck"
+            title="No packages match the filter"
+            :description="`No ${showOnlyBlocked ? 'blocked' : 'vulnerable'} package has a ${filterSummary} vulnerability.`"
+          >
+            <template #action>
+              <Button variant="outline" @click="clearFilters">Clear filters</Button>
+            </template>
+          </EmptyState>
+        </CardContent>
+      </Card>
+
+      <Card v-else>
         <CardHeader>
           <CardTitle as="h2">
             {{ showOnlyBlocked ? 'Blocked' : 'Vulnerable' }} packages ({{ sortedVulnerablePackages.length }})
@@ -104,7 +129,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { usePackageStore, type Package } from '../stores/packages'
+import { usePackageStore, type Package, type VulnerabilityCounts } from '../stores/packages'
 import {
   Accordion,
   AccordionContent,
@@ -128,11 +153,37 @@ import VulnerabilityBadge from './VulnerabilityBadge.vue'
 import SeveritySummary from './SeveritySummary.vue'
 import { formatBytes, formatDate, formatNumber, displayVersion, withVersionPrefix } from '@/lib/format'
 import { faArrowLeft, faCircleCheck } from '@/lib/icons'
-import { NO_VULNERABILITIES } from '@/lib/severity'
+import { NO_VULNERABILITIES, SEVERITY_LEVELS, formatSeverityName, type SeverityLevel } from '@/lib/severity'
 
 const store = usePackageStore()
 const router = useRouter()
 const route = useRoute()
+
+const SEVERITY_QUERY = 'severity'
+
+/** Reads `?severity=critical,high`: known levels only, in severity order, each once. */
+function parseSeverityQuery(raw: unknown): SeverityLevel[] {
+  const text = Array.isArray(raw) ? raw.join(',') : typeof raw === 'string' ? raw : ''
+  const wanted = text.split(',').map((part) => part.trim().toLowerCase())
+  return SEVERITY_LEVELS.filter((level) => wanted.includes(level))
+}
+
+// The URL is the source of truth, so a reload or a shared link restores the filter.
+const selectedSeverities = computed<SeverityLevel[]>({
+  get: () => parseSeverityQuery(route.query[SEVERITY_QUERY]),
+  set: (levels) => {
+    const { [SEVERITY_QUERY]: _previous, ...rest } = route.query
+    void router.replace({ query: levels.length > 0 ? { ...rest, [SEVERITY_QUERY]: levels.join(',') } : rest })
+  },
+})
+const hasFilter = computed(() => selectedSeverities.value.length > 0)
+const filterSummary = computed(() =>
+  selectedSeverities.value.map((level) => formatSeverityName(level).toLowerCase()).join(' or '),
+)
+
+function clearFilters() {
+  selectedSeverities.value = []
+}
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -150,7 +201,8 @@ async function fetchVulnerablePackages() {
   error.value = null
 
   try {
-    await store.fetchPackages()
+    // The server drops clean packages; the toggles below narrow the rest without another request.
+    await store.fetchPackages({ severity: SEVERITY_LEVELS })
     // The store records a failed request in store.error and resolves; surface it instead of an empty list.
     if (store.error) {
       error.value = store.error
@@ -171,9 +223,17 @@ async function fetchVulnerablePackages() {
   }
 }
 
+// A package passes when it has at least one vulnerability of any selected severity.
+const filteredPackages = computed(() => {
+  if (!hasFilter.value) return vulnerablePackages.value
+  return vulnerablePackages.value.filter((pkg) =>
+    selectedSeverities.value.some((level) => (pkg.vulnerabilities?.counts?.[level] ?? 0) > 0),
+  )
+})
+
 // Sort packages by risk: Critical count DESC, High count DESC, Moderate count DESC, Low count DESC
 const sortedVulnerablePackages = computed(() => {
-  return [...vulnerablePackages.value].sort((a, b) => {
+  return [...filteredPackages.value].sort((a, b) => {
     const aVulns = a.vulnerabilities?.counts || { critical: 0, high: 0, moderate: 0, low: 0 }
     const bVulns = b.vulnerabilities?.counts || { critical: 0, high: 0, moderate: 0, low: 0 }
 
@@ -227,7 +287,18 @@ const groupedPackages = computed(() => {
   return Array.from(groups.values())
 })
 
-// Calculate total counts across all packages
+// Packages holding at least one vulnerability of each severity, before any filter.
+const packageCounts = computed<VulnerabilityCounts>(() => {
+  const counts = { ...NO_VULNERABILITIES }
+  for (const pkg of vulnerablePackages.value) {
+    for (const level of SEVERITY_LEVELS) {
+      if ((pkg.vulnerabilities?.counts?.[level] ?? 0) > 0) counts[level]++
+    }
+  }
+  return counts
+})
+
+// Calculate total counts across all packages, before any filter
 const totalCounts = computed(() =>
   vulnerablePackages.value.reduce(
     (sum, pkg) => {

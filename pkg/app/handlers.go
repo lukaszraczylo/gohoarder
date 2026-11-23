@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,9 +71,25 @@ type listParams struct {
 	paged bool
 }
 
-// parseListParams reads page, page_size, registry, q, sort and order. Without
-// page or page_size the list is unpaginated, as it was before paging existed.
-func parseListParams(c fiber.Ctx) listParams {
+// parseSeverities reads a comma-separated severity filter such as "critical,high".
+func parseSeverities(raw string) ([]string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		sev := strings.ToLower(strings.TrimSpace(part))
+		if sev == "" || slices.Contains(out, sev) {
+			continue
+		}
+		if !slices.Contains(metadata.Severities, sev) {
+			return nil, fmt.Errorf("invalid severity %q, must be one of: %s", sev, strings.Join(metadata.Severities, ", "))
+		}
+		out = append(out, sev)
+	}
+	return out, nil
+}
+
+// parseListParams reads page, page_size, registry, q, sort, order and severity.
+// Without page or page_size the list is unpaginated, as it was before paging existed.
+func parseListParams(c fiber.Ctx) (listParams, error) {
 	p := listParams{opts: metadata.GroupListOptions{
 		Registry: c.Query("registry"),
 		Query:    c.Query("q"),
@@ -88,6 +106,11 @@ func parseListParams(c fiber.Ctx) listParams {
 	case "desc":
 		p.opts.SortDesc = true
 	}
+	severities, err := parseSeverities(c.Query("severity"))
+	if err != nil {
+		return p, err
+	}
+	p.opts.Severities = severities
 	if c.Query("page") != "" || c.Query("page_size") != "" {
 		p.paged = true
 		p.opts.Page = max(fiber.Query[int](c, "page", 1), 1)
@@ -97,7 +120,7 @@ func parseListParams(c fiber.Ctx) listParams {
 		}
 		p.opts.PageSize = min(p.opts.PageSize, maxPageSize)
 	}
-	return p
+	return p, nil
 }
 
 // scanDecisions judges scanned packages, falling back to plain summaries without a scan manager.
@@ -145,7 +168,10 @@ func vulnerabilityInfo(pkg *metadata.Package, decisions map[string]scanner.ScanD
 // page_size is given and every group otherwise.
 func (a *App) handleListPackages(c fiber.Ctx) error {
 	ctx := c.Context()
-	params := parseListParams(c)
+	params, err := parseListParams(c)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	page, err := a.metadata.ListPackageGroups(ctx, params.opts)
 	if err != nil {
@@ -377,6 +403,7 @@ func (a *App) handleStats(c fiber.Ctx) error {
 			}
 		}
 	}
+
 
 	// Combine statistics using database stats for accuracy
 	stats := map[string]interface{}{

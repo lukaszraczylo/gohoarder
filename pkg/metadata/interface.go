@@ -332,10 +332,24 @@ type GroupListOptions struct {
 	Registry string // empty = every registry
 	Query    string // case-insensitive substring of name, version or release version
 	SortBy   string // one of the GroupSort* keys; empty = name
-	SortDesc bool
-	Page     int // 1-based
-	PageSize int // 0 = every group, unpaginated
+	// Severities keeps rows whose latest scan holds a vulnerability of any listed
+	// severity (SeverityCritical and the like); empty = no severity filter.
+	Severities []string
+	Page       int // 1-based
+	PageSize   int // 0 = every group, unpaginated
+	SortDesc   bool
 }
+
+// Severity filter values of GroupListOptions.
+const (
+	SeverityCritical = "critical"
+	SeverityHigh     = "high"
+	SeverityModerate = "moderate"
+	SeverityLow      = "low"
+)
+
+// Severities lists the severity filter values, most severe first.
+var Severities = []string{SeverityCritical, SeverityHigh, SeverityModerate, SeverityLow}
 
 // GroupPage is one page of groups, flattened to rows.
 type GroupPage struct {

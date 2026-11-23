@@ -39,6 +39,21 @@ describe('package store paging', () => {
     ])
   })
 
+  it('fetchPackages asks for the listed severities only, and for everything without them', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [] } })
+    const store = usePackageStore()
+
+    await store.fetchPackages()
+    await store.fetchPackages({ severity: [] })
+    await store.fetchPackages({ severity: ['critical', 'high'] })
+
+    expect(vi.mocked(axios.get).mock.calls.map((c) => c[0])).toEqual([
+      '/api/packages',
+      '/api/packages',
+      '/api/packages?severity=critical,high',
+    ])
+  })
+
   it('keeps the server group count, and counts groups itself when the server sends none', async () => {
     const store = usePackageStore()
     vi.mocked(axios.get).mockResolvedValueOnce({ data: { packages: [pkg(1, '2026-01-01T00:00:00Z')], total_groups: 80 } })

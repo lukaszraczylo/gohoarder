@@ -95,11 +95,15 @@ export const usePackageStore = defineStore('packages', () => {
   }
   let pageRequest = 0
 
-  /** Every package, unpaginated. Only views that filter on scan results need it. */
-  async function fetchPackages() {
+  /**
+   * Every package, unpaginated. Only views that filter on scan results need it.
+   * `severity` keeps the packages whose latest scan has a vulnerability of any listed severity.
+   */
+  async function fetchPackages(options: { severity?: readonly string[] } = {}) {
     begin()
     try {
-      const response = await axios.get('/api/packages')
+      const query = options.severity?.length ? `?severity=${options.severity.join(',')}` : ''
+      const response = await axios.get(`/api/packages${query}`)
       // Only update packages if we got valid data
       if (response.data && Array.isArray(response.data.packages)) {
         packages.value = response.data.packages

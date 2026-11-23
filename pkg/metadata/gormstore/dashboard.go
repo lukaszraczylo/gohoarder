@@ -63,6 +63,10 @@ func (s *GORMStoreV2) groupFilter(opts metadata.GroupListOptions) (clause string
 		clause += " AND registry_id = ?"
 		args = append(args, id)
 	}
+	if sev := severityFilter(opts.Severities); sev != "" {
+		clause += " AND security_scanned = ? AND id IN (" + latestScanWith(sev) + ")"
+		args = append(args, true)
+	}
 	if q := strings.TrimSpace(opts.Query); q != "" {
 		like := escapeLike(q)
 		clause += " AND (LOWER(name) LIKE ? ESCAPE '" + likeEscape + "'" +
@@ -71,6 +75,38 @@ func (s *GORMStoreV2) groupFilter(opts metadata.GroupListOptions) (clause string
 		args = append(args, like, like, like)
 	}
 	return clause, args, false, nil
+}
+
+// severityColumns maps a severity filter value to its scan_results count column.
+var severityColumns = map[string]string{
+	metadata.SeverityCritical: "critical_count",
+	metadata.SeverityHigh:     "high_count",
+	metadata.SeverityModerate: "medium_count",
+	metadata.SeverityLow:      "low_count",
+}
+
+// severityFilter ORs the count columns of the known severities; unknown values are ignored.
+func severityFilter(severities []string) string {
+	var conds []string
+	seen := map[string]bool{}
+	for _, sev := range severities {
+		col, ok := severityColumns[sev]
+		if !ok || seen[sev] {
+			continue
+		}
+		seen[sev] = true
+		conds = append(conds, col+" > 0")
+	}
+	return strings.Join(conds, " OR ")
+}
+
+// latestScanWith selects the packages whose newest scan satisfies cond. A tie on
+// scanned_at goes to the higher id, as GetScanSummaries decides it.
+func latestScanWith(cond string) string {
+	return `SELECT package_id FROM scan_results WHERE deleted_at IS NULL AND (` + cond + `)
+		AND scanned_at = (SELECT MAX(x.scanned_at) FROM scan_results x WHERE x.package_id = scan_results.package_id AND x.deleted_at IS NULL)
+		AND NOT EXISTS (SELECT 1 FROM scan_results y WHERE y.package_id = scan_results.package_id AND y.deleted_at IS NULL
+			AND y.scanned_at = scan_results.scanned_at AND y.id > scan_results.id)`
 }
 
 // groupOrder is the ORDER BY of the group page query.

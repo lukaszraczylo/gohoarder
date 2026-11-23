@@ -2,7 +2,7 @@
 # Combines frontend serving and backend proxy (previously separate gateway)
 # EXPECTS: Pre-built frontend files in frontend/dist/ directory
 
-FROM nginx:alpine
+FROM mirror.gcr.io/library/nginx:1.31.9-alpine@sha256:fb4658584bd9a916ffb6f6e365f97c25cfdb2923801f551ea08356e695f14ff7
 
 # Install envsubst for runtime configuration
 RUN apk add --no-cache gettext

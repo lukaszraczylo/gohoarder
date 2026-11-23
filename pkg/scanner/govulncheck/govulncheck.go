@@ -126,7 +126,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	cmd.Stderr = &stderr
 	output, _ := cmd.Output() // govulncheck -json exits 0 whether or not it finds anything
 
-	vulns, err := parseFindings(output)
+	vulns, err := parseFindings(output, module)
 	if err != nil {
 		return s.errorResult(ctx, registry, packageName, version,
 			fmt.Sprintf("govulncheck failed: %v: %s", err, strings.TrimSpace(stderr.String())), stderr.String()), nil
@@ -175,8 +175,10 @@ func hasPathElement(importPath, element string) bool {
 }
 
 // parseFindings reads govulncheck's stream of JSON messages. An output without the config
-// message did not come from a completed run.
-func parseFindings(output []byte) ([]GovulncheckVuln, error) {
+// message did not come from a completed run. Only findings in the scanned module count:
+// dependency findings come from the minimum versions in its go.mod, which a consuming build
+// replaces with its own, and stdlib findings describe the scanner's toolchain.
+func parseFindings(output []byte, module string) ([]GovulncheckVuln, error) {
 	summaries := make(map[string]string)
 	var vulns []GovulncheckVuln
 	seen := make(map[string]bool)
@@ -194,14 +196,15 @@ func parseFindings(output []byte) ([]GovulncheckVuln, error) {
 			sawConfig = true
 		case msg.OSV != nil:
 			summaries[msg.OSV.ID] = msg.OSV.Summary
-		case msg.Finding != nil && msg.Finding.OSV != "" && !seen[msg.Finding.OSV]:
+		case msg.Finding != nil && msg.Finding.OSV != "" && !seen[msg.Finding.OSV] &&
+			len(msg.Finding.Trace) > 0 && msg.Finding.Trace[0].Module == module:
 			seen[msg.Finding.OSV] = true
-			v := GovulncheckVuln{OSV: msg.Finding.OSV, FixedVersion: msg.Finding.FixedVersion}
-			if len(msg.Finding.Trace) > 0 {
-				v.Module = msg.Finding.Trace[0].Module
-				v.ModuleVersion = msg.Finding.Trace[0].Version
-			}
-			vulns = append(vulns, v)
+			vulns = append(vulns, GovulncheckVuln{
+				OSV:           msg.Finding.OSV,
+				FixedVersion:  msg.Finding.FixedVersion,
+				Module:        msg.Finding.Trace[0].Module,
+				ModuleVersion: msg.Finding.Trace[0].Version,
+			})
 		}
 	}
 	if !sawConfig {

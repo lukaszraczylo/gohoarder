@@ -86,16 +86,28 @@ func ids(res *metadata.ScanResult) map[string]string {
 func TestScanReadsPrettyPrintedFindings(t *testing.T) {
 	// govulncheck -json prints indented objects, not one object per line.
 	fakeGo(t, abs(t, "golist-gin-v1.6.0.txt"), 0, "")
-	fakeGovulncheck(t, abs(t, "gin-v1.6.0-source-scan.stream"), 0, "")
+	fakeGovulncheck(t, abs(t, "gin-v1.6.0.stream"), 0, "")
 
 	res, err := New(config.GovulncheckConfig{}).Scan(context.Background(), "go", "github.com/gin-gonic/gin/@v/v1.6.0.zip", "v1.6.0", module(t))
 
 	require.NoError(t, err)
 	assert.Equal(t, metadata.ScanStatusVulnerable, res.Status)
 	assert.Equal(t, map[string]string{
-		"GO-2022-0493": "v0.0.0-20220412211240-33da011f77ad",
-		"GO-2026-5024": "v0.44.0",
-	}, ids(res), "one entry per advisory, with the fixed version")
+		"GO-2021-0052": "v1.7.7",
+		"GO-2023-1737": "v1.9.1",
+	}, ids(res), "one entry per advisory against gin, with the fixed version; the x/sys findings belong to a dependency")
+}
+
+func TestScanIgnoresFindingsInDependencies(t *testing.T) {
+	// gin's go.mod requires an old x/sys; a build that uses gin resolves its own x/sys version.
+	fakeGo(t, abs(t, "golist-gin-v1.6.0.txt"), 0, "")
+	fakeGovulncheck(t, abs(t, "gin-v1.6.0-source-scan.stream"), 0, "")
+
+	res, err := New(config.GovulncheckConfig{}).Scan(context.Background(), "go", "github.com/gin-gonic/gin/@v/v1.6.0.zip", "v1.6.0", module(t))
+
+	require.NoError(t, err)
+	assert.Equal(t, metadata.ScanStatusClean, res.Status)
+	assert.Empty(t, res.Vulnerabilities)
 }
 
 func TestScanAuditsTheModuleItself(t *testing.T) {

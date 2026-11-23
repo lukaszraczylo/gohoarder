@@ -5,7 +5,7 @@ import Mathlib
 
 Models `pkg/app/app.go` `buildCheckOrigin` / `normalizeOriginHost`, `pkg/app/handlers_admin.go`
 `requireAdmin`, `pkg/auth/auth.go` (`getPermissionsForRole`, `ValidateAPIKey` expiry),
-`pkg/proxy/pypi/pypi.go` (`isAllowedPyPIHost`, the `original_url` guards), `Dockerfile.frontend`.
+`pkg/proxy/pypi/pypi.go` (`isAllowedPyPIHost`, the `original_url` guards, `get`), `pkg/network/client.go` (`send`), `pkg/auth/auth.go` (`ValidateAPIKey` cost), `pkg/app/cors.go` (`apiOriginGuard`), `Dockerfile.frontend`.
 Omits: the TLS layer, bcrypt internals, DNS.
 -/
 
@@ -125,14 +125,63 @@ theorem internal_hosts_rejected :
     hostAllowed "169.254.169.254" = false ∧ hostAllowed "localhost" = false ∧
     hostAllowed "metadata.google.internal" = false := by decide
 
-/-- The allowlist is checked once, on the first hop. `network.Client` follows redirects without
-re-checking, so an allowed host that answers 302 reaches any target. Acceptable only while no
-allowed host redirects (pypi.org and files.pythonhosted.org do not). -/
-def hopAllowed (hops : List String) : Bool := hops.head?.any hostAllowed
+/-- Before the fix the allowlist was checked once, on the first hop. `network.Client` followed
+redirects without re-checking, so an allowed host that answers 302 reached any target. -/
+def hopAllowedOld (hops : List String) : Bool := hops.head?.any hostAllowed
+
+/-- After the fix (`network.Client.send`, `pypi.Handler.get`) every hop must pass the allowlist. -/
+def hopAllowed (hops : List String) : Bool := hops.all hostAllowed
 
 theorem redirect_escapes_allowlist :
-    hopAllowed ["files.pythonhosted.org", "169.254.169.254"] = true ∧
+    hopAllowedOld ["files.pythonhosted.org", "169.254.169.254"] = true ∧
     hostAllowed "169.254.169.254" = false := by decide
+
+theorem fixed_redirect_stays_allowlisted :
+    hopAllowed ["pypi.org", "files.pythonhosted.org"] = true ∧
+    hopAllowed ["files.pythonhosted.org", "169.254.169.254"] = false := by decide
+
+/-- A hop is accepted only if every hop is on the allowlist. -/
+theorem hopAllowed_implies_each (hops : List String) (h : hopAllowed hops = true) :
+    ∀ x ∈ hops, hostAllowed x = true := by
+  simpa [hopAllowed] using h
+
+/-! ### API key validation cost (`pkg/auth/auth.go` `ValidateAPIKey`) -/
+
+/-- bcrypt compares for one request when every stored key is a candidate (before the fix). -/
+def compareCostOld (storedKeys : ℕ) : ℕ := storedKeys
+
+/-- A key carrying its id selects one stored key: one compare, hit or miss (a miss compares a dummy hash). -/
+def compareCostNew (_storedKeys : ℕ) : ℕ := 1
+
+theorem old_cost_grows_with_keys : compareCostOld 1000 = 1000 := rfl
+
+theorem new_cost_independent_of_keys (n m : ℕ) : compareCostNew n = compareCostNew m := rfl
+
+/-! ### Cross-origin writes on `/api` (`pkg/app/cors.go` `apiOriginGuard`) -/
+
+/-- Before the fix every handler answered `Access-Control-Allow-Origin: *`, so any page could call them. -/
+def corsOld (_ : Origin) : Bool := true
+
+/-- After the fix a state-changing request passes iff it names no origin (non-browser client) or an
+allowed one; the same rule as the WebSocket origin check. -/
+def writeAllowed (rules : List Origin) : Option Origin → Bool
+  | none => true
+  | some o => rules.any (fun r => matchesExact r o)
+
+def dashboard : Origin := ⟨Scheme.https, "gohoarder.example.com".toList, none⟩
+def attacker : Origin := ⟨Scheme.https, "evil.example.net".toList, none⟩
+
+theorem old_cors_admits_any_page : corsOld attacker = true := rfl
+
+theorem fixed_refuses_foreign_origin : writeAllowed [dashboard] (some attacker) = false := by decide
+
+theorem fixed_admits_dashboard_and_cli :
+    writeAllowed [dashboard] (some dashboard) = true ∧ writeAllowed [dashboard] none = true := by decide
+
+/-- With nothing configured only a request with no origin passes the allowlist step; browsers fall to the
+same-origin host comparison in the handler. -/
+theorem empty_allowlist_refuses_any_origin (o : Origin) : writeAllowed [] (some o) = false := by
+  simp [writeAllowed]
 
 /-! ### Frontend blocklist (`Dockerfile.frontend`) -/
 

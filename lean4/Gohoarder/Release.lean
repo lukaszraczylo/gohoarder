@@ -47,12 +47,12 @@ theorem stale_hides_only_gated (gate ttl now s t : ℤ) (hstale : now - s ≤ tt
     (hnew : s < t) : ¬ gateAccepts gate now t := by
   unfold gateAccepts; omega
 
-/-- Production: `default_ttl: 24h` against a 72h gate. -/
-theorem prod_ttl_within_gate : (24 : ℤ) ≤ 72 := by decide
+/-- Production and, since the fix, the compiled default (`config.DefaultMetadataTTL`): 24h against a 72h gate. -/
+theorem compiled_ttl_within_gate : (24 : ℤ) ≤ 72 := by decide
 
-/-- The compiled default is 7 days. Against a 72h gate a version aged 84h is eligible but absent
-from a 7-day-old snapshot: the proxy withholds it, which is stricter than the gate, never looser. -/
-theorem default_ttl_exceeds_gate :
+/-- The compiled default used to be 7 days. Against a 72h gate a version aged 84h is eligible but
+absent from a 7-day-old snapshot: the proxy withheld it, stricter than the gate, never looser. -/
+theorem old_default_ttl_exceeded_gate :
     ∃ gate ttl now s t : ℤ, now - s ≤ ttl ∧ s < t ∧ gateAccepts gate now t ∧ ttl = 168 ∧ gate = 72 := by
   exact ⟨72, 168, 200, 100, 116, by decide, by decide, by unfold gateAccepts; decide, rfl, rfl⟩
 

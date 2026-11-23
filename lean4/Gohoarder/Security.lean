@@ -137,6 +137,20 @@ theorem infra_error_served_forever (policy : Option ℕ) (now : ℤ) (bs : List 
 /-- Scanner disabled: `CheckVulnerabilities` returns `(false, "", nil)` and `cache.New` drops the scanner. -/
 def servesDisabled : Bool := true
 
+/-! ### Retry input (`pkg/cache/cache.go` `store`, `ScanFile`; `scheduleRetry`) -/
+
+/-- Before the fix a retry reused the first scan's path. Remote storage scans a temp file removed
+after the first attempt, so only local backends kept it. -/
+def retryReadableOld (localBackend : Bool) : Bool := localBackend
+
+/-- After the fix a retry whose file is gone re-reads the blob through the file source. -/
+def retryReadableNew (localBackend fileSourceSet : Bool) : Bool := localBackend || fileSourceSet
+
+theorem old_remote_retry_unreadable : retryReadableOld false = false := rfl
+
+theorem fixed_retry_always_readable : retryReadableNew false true = true ∧ retryReadableNew true false = true := by
+  decide
+
 /-! ### Retry budget -/
 
 def maxRetries : ℕ := 6

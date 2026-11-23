@@ -87,4 +87,24 @@ theorem chartNew_never_drops (rollup live : ℕ) : chartOld rollup live ≤ char
 /-- A download aggregated after the rollup ran: the old chart shows 1 of 2. -/
 theorem chartOld_drops_late_download : chartOld 1 2 < chartNew 1 2 := by decide
 
+/-! ### SQLite upsert (`aggregation_worker.go`, `sqlite_stats.go`) -/
+
+/-- A bucket is a list of stored rows; the chart sums them. Before the fix SQLite had no unique index,
+so `INSERT OR REPLACE` appended a row per pass. -/
+def chartTotal (rows : List ℕ) : ℕ := rows.sum
+
+/-- Three passes over a bucket whose registry total is 3: three copies. -/
+theorem old_sqlite_duplicates_rows : chartTotal [3, 3, 3] ≠ 3 := by decide
+
+/-- `ON CONFLICT ... DO UPDATE` over the unique index keeps one row per bucket: a derived row is set,
+a package row adds the new events, as on PostgreSQL. -/
+def upsertDerived (_old new : ℕ) : List ℕ := [new]
+def upsertAdditive (old new : ℕ) : List ℕ := [old + new]
+
+theorem fixed_sqlite_registry_row_idempotent (old new : ℕ) :
+    chartTotal (upsertDerived old new) = new := by simp [chartTotal, upsertDerived]
+
+theorem fixed_sqlite_package_row_keeps_late_events (old new : ℕ) :
+    chartTotal (upsertAdditive old new) = old + new := by simp [chartTotal, upsertAdditive]
+
 end Gohoarder.Stats

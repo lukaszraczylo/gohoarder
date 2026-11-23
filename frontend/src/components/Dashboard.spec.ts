@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount as mountWith } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import Dashboard from './Dashboard.vue'
 import { usePackageStore } from '../stores/packages'
 import { useRealtimeStore, __resetRealtimeSingleton } from '../stores/realtime'
+import { createTestRouter } from '@/test/router'
 
 describe('Dashboard.vue', () => {
-  beforeEach(() => {
+  let router: Awaited<ReturnType<typeof createTestRouter>>
+  const mount = (component: typeof Dashboard) => mountWith(component, { global: { plugins: [router] } })
+
+  beforeEach(async () => {
+    router = await createTestRouter('/')
     setActivePinia(createPinia())
     __resetRealtimeSingleton()
     // Mock the fetch functions to prevent actual API calls

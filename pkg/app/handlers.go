@@ -391,19 +391,10 @@ func (a *App) handleStats(c fiber.Ctx) error {
 	}
 
 	// Blocked packages need the blocking policy, so judge every scanned package in one batch.
-	blockedCount := int64(0)
-	if a.config.Security.Enabled && a.scanManager != nil {
-		decisions, err := a.scanManager.ScanDecisions(ctx, nil)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to judge scanned packages")
-		}
-		for _, d := range decisions {
-			if d.Blocked && !metadata.IsMetadataVersion(d.Summary.Version) {
-				blockedCount++
-			}
-		}
+	blockedCount, err := a.countBlocked(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to judge scanned packages")
 	}
-
 
 	// Combine statistics using database stats for accuracy
 	stats := map[string]interface{}{

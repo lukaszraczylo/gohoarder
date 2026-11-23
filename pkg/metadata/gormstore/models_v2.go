@@ -351,6 +351,27 @@ func (a *PostgresArray) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, a)
 }
 
+// StatsSnapshotModel is the cache state at the end of one UTC day. It has no
+// foreign key to packages, so purging package rows never touches history. A nil
+// count is unknown, not zero.
+type StatsSnapshotModel struct {
+	CreatedAt          time.Time `gorm:"not null"`
+	UpdatedAt          time.Time `gorm:"not null"`
+	VulnerablePackages *int64
+	Critical           *int64 // packages whose highest severity is critical
+	High               *int64
+	Moderate           *int64
+	Low                *int64
+	Blocked            *int64
+	Day                string `gorm:"primaryKey;size:10"` // YYYY-MM-DD, UTC
+	TotalPackages      int64  `gorm:"not null;default:0"`
+	TotalSize          int64  `gorm:"not null;default:0"`
+}
+
+func (StatsSnapshotModel) TableName() string {
+	return "stats_snapshots"
+}
+
 // GetAllModels returns all models for GORM auto-migration
 func GetAllModels() []interface{} {
 	return []interface{}{
@@ -366,5 +387,6 @@ func GetAllModels() []interface{} {
 		&DownloadStatsDailyModel{},
 		&AuditLogModel{},
 		&APIKeyModel{},
+		&StatsSnapshotModel{},
 	}
 }

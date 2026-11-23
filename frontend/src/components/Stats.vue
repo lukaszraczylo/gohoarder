@@ -70,6 +70,8 @@
         </CardContent>
       </Card>
 
+      <TrendChart />
+
       <Card>
         <CardHeader>
           <CardTitle as="h2">Registry breakdown</CardTitle>
@@ -109,6 +111,7 @@ import {
   StatGroup,
   type DataTableColumn,
 } from '@perfect-design/ui'
+import TrendChart from './TrendChart.vue'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { faBan, faDownload, faHardDrive, faBoxesStacked, faCircleCheck, faTriangleExclamation } from '@/lib/icons'
 

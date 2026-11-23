@@ -215,6 +215,10 @@ func (a *App) initializeComponents() error {
 		return fmt.Errorf("failed to initialize scanner: %w", err)
 	}
 
+	if setter, ok := a.metadata.(blockedCounterSetter); ok {
+		setter.SetBlockedCounter(a.countBlocked)
+	}
+
 	// Initialize analytics engine first (needed by cache)
 	log.Info().Msg("Initializing analytics engine")
 	a.analyticsEngine = analytics.NewEngine(analytics.Config{
@@ -231,12 +235,12 @@ func (a *App) initializeComponents() error {
 		cleanupInterval = 5 * time.Minute
 	}
 	a.cache, err = cache.New(a.storage, a.metadata, a.scanManager, a.analyticsEngine, cache.Config{
-		DefaultTTL:      a.config.Cache.DefaultTTL,
-		TTLOverrides:    a.config.Cache.MetadataTTLOverrides(),
-		CleanupInterval: cleanupInterval,
-		IdleTTL:         a.config.Cache.IdleTTL,
-		MaxPackageSize:  a.config.Security.Scanners.Static.MaxPackageSize,
-		FailClosed:      a.config.Security.FailClosed,
+		DefaultTTL:       a.config.Cache.DefaultTTL,
+		TTLOverrides:     a.config.Cache.MetadataTTLOverrides(),
+		CleanupInterval:  cleanupInterval,
+		IdleTTL:          a.config.Cache.IdleTTL,
+		MaxPackageSize:   a.config.Security.Scanners.Static.MaxPackageSize,
+		FailClosed:       a.config.Security.FailClosed,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize cache: %w", err)
@@ -446,6 +450,7 @@ func (a *App) setupServer() error {
 		a.app.All("/api/packages/*", mwAuth, a.handlePackages) // OPTIONS, preflight, vulnerabilities
 		a.app.Get("/api/stats", mwAuth, a.handleStats)
 		a.app.Get("/api/stats/timeseries", mwAuth, a.handleTimeSeriesStats)
+		a.app.Get("/api/stats/trend", mwAuth, a.handleStatsTrend)
 		a.app.Get("/api/info", mwAuth, a.handleInfo)
 
 		a.app.Get("/api/analytics/top", mwAuth, a.handleAnalyticsTopPackages)
@@ -460,6 +465,7 @@ func (a *App) setupServer() error {
 		a.app.All("/api/packages/*", a.handlePackages)
 		a.app.Get("/api/stats", a.handleStats)
 		a.app.Get("/api/stats/timeseries", a.handleTimeSeriesStats)
+		a.app.Get("/api/stats/trend", a.handleStatsTrend)
 		a.app.Get("/api/info", a.handleInfo)
 
 		a.app.Get("/api/analytics/top", a.handleAnalyticsTopPackages)

@@ -125,6 +125,13 @@ func NewV2(cfg Config) (*GORMStoreV2, error) {
 		}
 	}
 
+	// History must exist before the worker writes today's snapshot.
+	if days, err := BackfillStatsSnapshots(context.Background(), db, time.Now()); err != nil {
+		log.Warn().Err(err).Msg("Failed to backfill stats snapshots")
+	} else if days > 0 {
+		log.Info().Int("days", days).Msg("Backfilled stats snapshots")
+	}
+
 	// Start aggregation worker (skip for in-memory databases used in tests)
 	if !strings.Contains(cfg.DSN, ":memory:") {
 		store.aggregationWorker = NewAggregationWorker(db)

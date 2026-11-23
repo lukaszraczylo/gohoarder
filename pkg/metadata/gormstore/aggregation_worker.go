@@ -1,6 +1,7 @@
 package gormstore
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -18,8 +19,10 @@ type AggregationWorker struct {
 	stopChan chan struct{}
 	ticker   *time.Ticker
 	now      func() time.Time // nil means time.Now
+	blocked  func(context.Context) (int64, error)
 	wg       sync.WaitGroup
 	stopOnce sync.Once
+	mu       sync.Mutex // guards blocked
 }
 
 // NewAggregationWorker creates a new aggregation worker
@@ -289,7 +292,7 @@ func (w *AggregationWorker) AggregateDaily() error {
 	dayEnd := w.clock().UTC().Truncate(24 * time.Hour)
 	firstDay := dayEnd.Add(-rollupDays * 24 * time.Hour)
 
-	return w.db.Transaction(func(tx *gorm.DB) error {
+	err := w.db.Transaction(func(tx *gorm.DB) error {
 		var aggregateSQL string
 
 		switch dialectName {
@@ -384,6 +387,15 @@ func (w *AggregationWorker) AggregateDaily() error {
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// The snapshot is not part of the rollup: a failure here must not undo it.
+	if err := w.SnapshotStats(context.Background()); err != nil {
+		log.Error().Err(err).Msg("Failed to record stats snapshot")
+	}
+	return nil
 }
 
 // UpdatePackageAccessCounts synchronizes package access_count from download stats

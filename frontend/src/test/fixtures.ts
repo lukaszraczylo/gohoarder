@@ -158,3 +158,19 @@ export const BYPASSES = [
     active: false,
   },
 ]
+
+function trendDay(offset: number): string {
+  return new Date(Date.UTC(2026, 0, 4 + offset)).toISOString().slice(0, 10)
+}
+
+export const TREND = {
+  period: '30day',
+  from: trendDay(-2),
+  to: trendDay(0),
+  vulnerability_history_start: trendDay(-1),
+  points: [
+    { date: trendDay(-2), total_packages: 3, total_size: 3072, vulnerable_packages: null, critical: null, high: null, moderate: null, low: null, blocked: null },
+    { date: trendDay(-1), total_packages: 4, total_size: 7168, vulnerable_packages: 1, critical: 0, high: 1, moderate: 0, low: 0, blocked: null },
+    { date: trendDay(0), total_packages: 4, total_size: 7168, vulnerable_packages: 2, critical: 1, high: 1, moderate: 0, low: 0, blocked: 1 },
+  ],
+}

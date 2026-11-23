@@ -39,35 +39,38 @@
       </CardContent>
     </Card>
 
-    <Card>
-      <CardHeader>
-        <CardTitle as="h2">Download activity</CardTitle>
-        <CardAction>
-          <SegmentedControl v-model="selectedPeriod" :options="chartPeriods" aria-label="Period" />
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        <LoadingState
-          v-if="chartLoading && chartData.length === 0"
-          layout="inline"
-          label="Loading chart data..."
-        />
-        <ErrorState
-          v-else-if="chartError"
-          variant="inline"
-          title="Could not load download activity"
-          :message="chartError"
-          @retry="fetchTimeSeriesData"
-        />
-        <BarChart
-          v-else
-          :labels="chartLabels"
-          :series="[{ name: 'Downloads', data: chartData }]"
-          label="Downloads over the selected period"
-          empty-text="No download activity in this period"
-        />
-      </CardContent>
-    </Card>
+    <div class="grid gap-6 lg:grid-cols-2">
+      <Card class="min-w-0">
+        <CardHeader>
+          <CardTitle as="h2">Download activity</CardTitle>
+          <CardAction>
+            <SegmentedControl v-model="selectedPeriod" :options="chartPeriods" aria-label="Period" />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <LoadingState
+            v-if="chartLoading && chartData.length === 0"
+            layout="inline"
+            label="Loading chart data..."
+          />
+          <ErrorState
+            v-else-if="chartError"
+            variant="inline"
+            title="Could not load download activity"
+            :message="chartError"
+            @retry="fetchTimeSeriesData"
+          />
+          <BarChart
+            v-else
+            :labels="chartLabels"
+            :series="[{ name: 'Downloads', data: chartData }]"
+            label="Downloads over the selected period"
+            empty-text="No download activity in this period"
+          />
+        </CardContent>
+      </Card>
+      <TrendChart compact class="min-w-0" />
+    </div>
 
     <Card>
       <CardHeader>
@@ -124,6 +127,7 @@ import {
   type DataTableColumn,
 } from '@perfect-design/ui'
 import type { IconDefinition } from '@perfect-design/ui/lib/icons-tools'
+import TrendChart from './TrendChart.vue'
 import { usePackageStore, type Package } from '../stores/packages'
 import { useRealtimeStore } from '../stores/realtime'
 import type { EventType, RealtimeEvent } from '@/lib/ws'

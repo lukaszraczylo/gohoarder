@@ -195,6 +195,16 @@ func (s *Store) ListExpiredPackages(ctx context.Context, expiredBefore time.Time
 		func(p *metadata.Package) time.Time { return *p.ExpiresAt })
 }
 
+// PurgeDeletedPackages is a no-op: the file store deletes packages outright.
+func (s *Store) PurgeDeletedPackages(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+// GetStatsTrend returns no history: the file store keeps no daily snapshots.
+func (s *Store) GetStatsTrend(context.Context, time.Time) ([]*metadata.StatsSnapshot, error) {
+	return nil, nil
+}
+
 // ClearArtifactExpiry removes ExpiresAt from every non-metadata package.
 func (s *Store) ClearArtifactExpiry(ctx context.Context) (int64, error) {
 	all, err := s.ListPackages(ctx, nil)

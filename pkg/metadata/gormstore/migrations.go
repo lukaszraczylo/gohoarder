@@ -1,6 +1,7 @@
 package gormstore
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -96,6 +97,20 @@ func GetMigrations() []*gormigrate.Migration {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().DropIndex(&ScanResultModel{}, scanPackageScannedAtIndex)
+			},
+		},
+		{
+			// Daily stats snapshots for the trend chart, seeded from package and scan history.
+			ID: "202611250001",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&StatsSnapshotModel{}); err != nil {
+					return err
+				}
+				_, err := BackfillStatsSnapshots(context.Background(), tx, time.Now())
+				return err
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable(&StatsSnapshotModel{})
 			},
 		},
 	}
@@ -292,6 +307,7 @@ func createMySQLOptimizations(tx *gorm.DB) error {
 func rollbackFromV2(tx *gorm.DB) error {
 	// Drop in reverse order to respect foreign keys
 	tables := []string{
+		"stats_snapshots",
 		"api_keys",
 		"audit_log",
 		"download_stats_daily",

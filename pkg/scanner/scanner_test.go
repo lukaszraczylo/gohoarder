@@ -134,6 +134,12 @@ func (m *stubMetadataStore) ListExpiredPackages(context.Context, time.Time, int)
 	return nil, nil
 }
 func (m *stubMetadataStore) ClearArtifactExpiry(context.Context) (int64, error) { return 0, nil }
+func (m *stubMetadataStore) PurgeDeletedPackages(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+func (m *stubMetadataStore) GetStatsTrend(context.Context, time.Time) ([]*metadata.StatsSnapshot, error) {
+	return nil, nil
+}
 func (m *stubMetadataStore) SaveAPIKey(context.Context, *metadata.APIKey) error {
 	return metadata.ErrNotImplemented
 }

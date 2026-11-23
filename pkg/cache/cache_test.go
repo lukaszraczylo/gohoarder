@@ -265,6 +265,14 @@ func (m *MockMetadataStore) ListExpiredPackages(context.Context, time.Time, int)
 
 func (m *MockMetadataStore) ClearArtifactExpiry(context.Context) (int64, error) { return 0, nil }
 
+func (m *MockMetadataStore) PurgeDeletedPackages(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockMetadataStore) GetStatsTrend(context.Context, time.Time) ([]*metadata.StatsSnapshot, error) {
+	return nil, nil
+}
+
 // API key methods are not used by the cache package; stub them out so the
 // mock continues to satisfy metadata.MetadataStore after the interface gained
 // API key persistence methods.

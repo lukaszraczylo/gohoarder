@@ -165,6 +165,12 @@ func (f *fakeStore) ListExpiredPackages(context.Context, time.Time, int) ([]*met
 func (f *fakeStore) ClearArtifactExpiry(context.Context) (int64, error) {
 	return 0, metadata.ErrNotImplemented
 }
+func (f *fakeStore) PurgeDeletedPackages(context.Context, time.Time, int) (int64, error) {
+	return 0, metadata.ErrNotImplemented
+}
+func (f *fakeStore) GetStatsTrend(context.Context, time.Time) ([]*metadata.StatsSnapshot, error) {
+	return nil, metadata.ErrNotImplemented
+}
 func (f *fakeStore) Close() error { return nil }
 
 // fastCfg uses bcrypt.MinCost so tests that hash multiple keys stay snappy.

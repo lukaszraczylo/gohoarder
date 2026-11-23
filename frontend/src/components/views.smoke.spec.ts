@@ -12,7 +12,7 @@ import Stats from './Stats.vue'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
 import { __resetRealtimeSingleton, useRealtimeStore } from '@/stores/realtime'
 import { usePackageStore } from '@/stores/packages'
-import { BYPASSES, PACKAGES, REGISTRIES, STATS, TIMESERIES, VULNERABILITY_REPORT } from '@/test/fixtures'
+import { BYPASSES, PACKAGES, REGISTRIES, STATS, TIMESERIES, TREND, VULNERABILITY_REPORT } from '@/test/fixtures'
 import { mountStrict } from '@/test/mountStrict'
 import { createTestRouter } from '@/test/router'
 
@@ -22,6 +22,7 @@ const API_KEY_STORAGE = 'admin_api_key'
 
 function respond(url: string) {
   if (url.startsWith('/api/stats/timeseries')) return { data: TIMESERIES }
+  if (url.startsWith('/api/stats/trend')) return { data: TREND }
   if (url.startsWith('/api/stats')) return { data: { stats: STATS, registries: REGISTRIES } }
   if (url.endsWith('/vulnerabilities')) return { data: VULNERABILITY_REPORT }
   if (url.startsWith('/api/admin/bypasses')) return { data: { bypasses: BYPASSES } }

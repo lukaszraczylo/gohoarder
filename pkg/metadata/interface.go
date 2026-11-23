@@ -86,6 +86,10 @@ type MetadataStore interface {
 	// the given time, oldest first. A limit <= 0 means DefaultBatchSize.
 	ListExpiredPackages(ctx context.Context, expiredBefore time.Time, limit int) ([]*Package, error)
 
+	// GetStatsTrend returns the daily stats snapshots from the UTC day of since
+	// on, oldest first. Backends without history return none.
+	GetStatsTrend(ctx context.Context, since time.Time) ([]*StatsSnapshot, error)
+
 	// ClearArtifactExpiry removes ExpiresAt from every non-metadata entry and
 	// returns the number of rows changed. It is idempotent.
 	ClearArtifactExpiry(ctx context.Context) (int64, error)
@@ -350,6 +354,23 @@ const (
 
 // Severities lists the severity filter values, most severe first.
 var Severities = []string{SeverityCritical, SeverityHigh, SeverityModerate, SeverityLow}
+
+// StatsSnapshot is the cache state at the end of one UTC day. The pointer
+// fields are nil for days whose value cannot be reconstructed.
+type StatsSnapshot struct {
+	VulnerablePackages *int64 `json:"vulnerable_packages"`
+	Critical           *int64 `json:"critical"`
+	High               *int64 `json:"high"`
+	Moderate           *int64 `json:"moderate"`
+	Low                *int64 `json:"low"`
+	Blocked            *int64 `json:"blocked"`
+	Date               string `json:"date"` // YYYY-MM-DD, UTC
+	TotalPackages      int64  `json:"total_packages"`
+	TotalSize          int64  `json:"total_size"`
+}
+
+// StatsSnapshotDateLayout is the layout of StatsSnapshot.Date.
+const StatsSnapshotDateLayout = "2006-01-02"
 
 // GroupPage is one page of groups, flattened to rows.
 type GroupPage struct {

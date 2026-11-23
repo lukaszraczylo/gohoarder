@@ -10,6 +10,7 @@
 @source "../../node_modules/@perfect-design/ui/dist/components/data-display/DataTable/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/data-display/DescriptionList/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/data-display/KpiTile/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/data-display/LineChart/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/data-display/Sparkline/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/data-display/StatGroup/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/data-display/Table/*.js";
@@ -59,6 +60,8 @@
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/Spinner/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/StatusBadge/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/StatusDot/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Toggle/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/ToggleGroup/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/typography/Markdown/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/typography/Markdown/parse/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/typography/RelativeTime/*.js";

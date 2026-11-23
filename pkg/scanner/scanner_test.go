@@ -453,3 +453,41 @@ func TestScanner_DisabledReportsNotEnabled(t *testing.T) {
 	assert.False(t, mgr.Enabled())
 	assert.True(t, newTestManager(t, &stubMetadataStore{}).Enabled())
 }
+
+// releasePackageStore returns a PyPI-style package whose cache key is a file name.
+type releasePackageStore struct {
+	*stubBypassStore
+}
+
+func (m *releasePackageStore) GetPackage(_ context.Context, _, _, version string) (*metadata.Package, error) {
+	return &metadata.Package{Name: "six", Version: version, ReleaseVersion: "1.17.0"}, nil
+}
+
+func TestCheckVulnerabilities_PackageBypassMatchesReleaseVersion(t *testing.T) {
+	const file = "six-1.17.0-py2.py3-none-any.whl"
+	cases := []struct {
+		name    string
+		target  string
+		blocked bool
+	}{
+		{"release version target", "pypi/six@1.17.0", false},
+		{"file name target", "pypi/six@" + file, false},
+		{"other release", "pypi/six@1.16.0", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &releasePackageStore{&stubBypassStore{
+				stubMetadataStore: &stubMetadataStore{},
+				bypasses:          []*metadata.CVEBypass{{ID: "b1", Type: metadata.BypassTypePackage, Target: tc.target, Active: true}},
+				scan: &metadata.ScanResult{
+					ID: "r", Scanner: "stub", ScannedAt: time.Now(), Status: metadata.ScanStatusVulnerable,
+					Vulnerabilities: []metadata.Vulnerability{{ID: "CVE-1", Severity: "HIGH"}},
+				},
+			}}
+			mgr := newTestManager(t, store)
+			blocked, _, err := mgr.CheckVulnerabilities(context.Background(), "pypi", "six", file)
+			require.NoError(t, err)
+			assert.Equal(t, tc.blocked, blocked)
+		})
+	}
+}

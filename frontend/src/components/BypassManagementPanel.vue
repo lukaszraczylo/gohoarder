@@ -85,7 +85,7 @@
             :hint="
               bypassForm.type === 'cve'
                 ? 'Enter the CVE ID, for example CVE-2021-23337.'
-                : 'Enter a package, for example npm/lodash@4.17.20, or npm/lodash for all versions.'
+                : 'Enter a package, for example npm/lodash@4.17.20, or npm/lodash for all versions. PyPI packages use the release version, for example pypi/six@1.17.0.'
             "
             required
           >

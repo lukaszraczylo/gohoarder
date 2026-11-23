@@ -127,7 +127,7 @@ import type { IconDefinition } from '@perfect-design/ui/lib/icons-tools'
 import { usePackageStore, type Package } from '../stores/packages'
 import { useRealtimeStore } from '../stores/realtime'
 import type { EventType, RealtimeEvent } from '@/lib/ws'
-import { formatBytes, formatNumber } from '@/lib/format'
+import { displayVersion, formatBytes, formatNumber, withVersionPrefix } from '@/lib/format'
 import {
   faBox,
   faBoxOpen,
@@ -190,7 +190,8 @@ function labelForEvent(type: EventType): string {
 function describeEvent(evt: RealtimeEvent): string {
   const p = evt.payload
   const name = typeof p.name === 'string' ? p.name : ''
-  const version = typeof p.version === 'string' ? `@${p.version}` : ''
+  const shown = typeof p.release_version === 'string' && p.release_version ? p.release_version : p.version
+  const version = typeof shown === 'string' ? `@${shown}` : ''
   const registry = typeof p.registry === 'string' ? `[${p.registry}] ` : ''
   if (evt.type === 'stats_update') return ''
   if (name) return `${registry}${name}${version}`
@@ -250,7 +251,7 @@ const chartLabels = computed(() => chartData.value.map((_, index) => getChartLab
 
 const packageColumns: DataTableColumn<Package>[] = [
   { key: 'name', header: 'Package', rowHeader: true },
-  { key: 'version', header: 'Version' },
+  { key: 'version', header: 'Version', accessor: (pkg) => withVersionPrefix(displayVersion(pkg)) },
   { key: 'registry', header: 'Registry' },
   { key: 'size', header: 'Size', numeric: true, accessor: (pkg) => formatBytes(pkg.size) },
   { key: 'download_count', header: 'Downloads', numeric: true, accessor: (pkg) => formatNumber(pkg.download_count) },

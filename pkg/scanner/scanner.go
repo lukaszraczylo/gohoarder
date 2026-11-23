@@ -528,6 +528,15 @@ func normalizeBypassPackageName(registry, name string) string {
 	return name
 }
 
+// releaseVersionKey returns "registry/name@release_version" for packages keyed by file name (PyPI), else "".
+func (m *Manager) releaseVersionKey(ctx context.Context, registry, packageName, version, bypassName string) string {
+	pkg, err := m.metadataStore.GetPackage(ctx, registry, packageName, version)
+	if err != nil || pkg == nil || pkg.ReleaseVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s@%s", registry, bypassName, pkg.ReleaseVersion)
+}
+
 // CheckVulnerabilities checks if a package exceeds vulnerability thresholds
 func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageName, version string) (bool, string, error) {
 	if !m.enabled {
@@ -545,10 +554,11 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	bypassName := normalizeBypassPackageName(registry, packageName)
 	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
 	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
+	releaseKey := m.releaseVersionKey(ctx, registry, packageName, version, bypassName)
 
 	for _, bypass := range bypasses {
 		if bypass.Type == metadata.BypassTypePackage && bypass.Active {
-			if bypass.Target == packageKey || bypass.Target == packageKeyNoVersion {
+			if bypass.Target == packageKey || bypass.Target == packageKeyNoVersion || (releaseKey != "" && bypass.Target == releaseKey) {
 				log.Info().
 					Str("package", packageKey).
 					Str("bypass_id", bypass.ID).
@@ -605,7 +615,7 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 	for _, bypass := range bypasses {
 		if bypass.Type == metadata.BypassTypeCVE && bypass.Active {
 			// Check if bypass applies to this package (if AppliesTo is set)
-			if bypass.AppliesTo != "" && bypass.AppliesTo != packageKey && bypass.AppliesTo != packageKeyNoVersion {
+			if bypass.AppliesTo != "" && bypass.AppliesTo != packageKey && bypass.AppliesTo != packageKeyNoVersion && (releaseKey == "" || bypass.AppliesTo != releaseKey) {
 				continue // This bypass doesn't apply to this package
 			}
 			bypassedCVEs[strings.ToUpper(bypass.Target)] = bypass

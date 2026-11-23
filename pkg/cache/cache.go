@@ -313,12 +313,12 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 				// underlying transport is non-blocking. Only emitted on
 				// the cache-hit path — the miss-then-fetch path is
 				// covered by EventPackageCached emitted from store().
-				m.emit(string(websocket.EventPackageDownloaded), map[string]interface{}{
+				m.emit(string(websocket.EventPackageDownloaded), withReleaseVersion(map[string]interface{}{
 					"registry":  registry,
 					"name":      name,
 					"version":   version,
 					"cache_hit": true,
-				})
+				}, pkg.ReleaseVersion))
 
 				// Data is intentionally nil; Get() opens a fresh reader per caller.
 				return &CacheEntry{
@@ -602,13 +602,13 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 			scanStatus = "pending"
 		}
 	}
-	m.emit(string(websocket.EventPackageCached), map[string]interface{}{
+	m.emit(string(websocket.EventPackageCached), withReleaseVersion(map[string]interface{}{
 		"registry":    registry,
 		"name":        name,
 		"version":     version,
 		"size":        size,
 		"scan_status": scanStatus,
-	})
+	}, releaseVersion))
 
 	// Scan package if scanner is enabled (run in background to not block cache operations)
 	// Skip scanning metadata entries (index pages, lists, etc.)
@@ -852,4 +852,12 @@ func (m *Manager) Close() error {
 	}
 
 	return err
+}
+
+// withReleaseVersion adds release_version to an event payload when the cache key is not a release version.
+func withReleaseVersion(payload map[string]interface{}, releaseVersion string) map[string]interface{} {
+	if releaseVersion != "" {
+		payload["release_version"] = releaseVersion
+	}
+	return payload
 }

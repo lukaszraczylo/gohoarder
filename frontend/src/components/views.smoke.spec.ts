@@ -186,3 +186,95 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(usePackageStore().packages.length).toBe(PACKAGES.length)
   })
 })
+
+describe('PyPI rows show the release version, not the file name', () => {
+  const FILE = 'six-1.17.0-py2.py3-none-any.whl'
+  const SIX = {
+    id: 'pypi-six',
+    registry: 'pypi',
+    name: 'six',
+    version: FILE,
+    release_version: '1.17.0',
+    size: 1,
+    cached_at: '2026-02-01T10:00:00Z',
+    last_accessed: '2026-02-01T10:00:00Z',
+    download_count: 1,
+    vulnerabilities: {
+      scanned: true,
+      status: 'vulnerable',
+      counts: { critical: 1, high: 0, moderate: 0, low: 0 },
+      total: 1,
+      scannedAt: '2026-02-01T10:05:00Z',
+      isBlocked: false,
+    },
+  }
+
+  beforeEach(() => {
+    vi.mocked(axios.get).mockImplementation(async (url: string) => {
+      if (url.endsWith('/vulnerabilities')) {
+        return { data: { ...VULNERABILITY_REPORT, package: { release_version: '1.17.0' } } } as never
+      }
+      if (url.startsWith('/api/packages')) return { data: { packages: [SIX] } } as never
+      return respond(url) as never
+    })
+  })
+
+  it('Dashboard recent packages', async () => {
+    const { wrapper } = await smoke(Dashboard, '/')
+    await flushPromises()
+    expect(wrapper.text()).toContain('v1.17.0')
+    expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')
+  })
+
+  it('Dashboard activity feed', async () => {
+    const router = await createTestRouter('/')
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const rt = useRealtimeStore()
+    vi.spyOn(rt, 'connect').mockImplementation(() => {})
+    rt.events = [{ type: 'package_cached', payload: { name: 'six', version: FILE, release_version: '1.17.0', registry: 'pypi' }, timestamp: Date.now() }]
+    const { wrapper, restore: r } = await mountStrict(Dashboard, { global: { plugins: [pinia, router] } })
+    restore = r
+    await flushPromises()
+    const feed = wrapper.find('[data-testid="ws-event-feed"]').text()
+    expect(feed).toContain('six@1.17.0')
+    expect(feed).not.toContain('whl')
+  })
+
+  it('VulnerablePackages version column', async () => {
+    const { wrapper } = await smoke(VulnerablePackages, '/vulnerable-packages')
+    await flushPromises()
+    await wrapper.find('button[aria-expanded]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('v1.17.0')
+    expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')
+  })
+
+  it('PackageDetails header badge', async () => {
+    const { wrapper } = await smoke(PackageDetails, `/package/pypi/six/${FILE}`)
+    const router = (wrapper.vm as unknown as { $router: Awaited<ReturnType<typeof createTestRouter>> }).$router
+    await router.push(`/package/pypi/six/${FILE}`)
+    await flushPromises()
+    expect(wrapper.text()).toContain('v1.17.0')
+    expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')
+  })
+
+  it('PackageDetails falls back to the route version without a release version', async () => {
+    vi.mocked(axios.get).mockImplementation(async (url: string) => respond(url) as never)
+    const { wrapper } = await smoke(PackageDetails, '/package/npm/left-pad/1.3.0')
+    const router = (wrapper.vm as unknown as { $router: Awaited<ReturnType<typeof createTestRouter>> }).$router
+    await router.push('/package/npm/left-pad/1.3.0')
+    await flushPromises()
+    expect(wrapper.text()).toContain('v1.3.0')
+  })
+
+  it('bypass form tells PyPI users to use the release version', async () => {
+    const { wrapper } = await smoke(BypassManagementPanel, '/admin/bypasses')
+    await wrapper.findAll('button').find((b) => b.text() === 'Create bypass')!.trigger('click')
+    await flushPromises()
+    const pkg = Array.from(document.body.querySelectorAll<HTMLElement>('button, [role="radio"]')).find((e) => e.textContent?.trim() === 'Package bypass')
+    pkg!.click()
+    await flushPromises()
+    expect(document.body.textContent).toContain('pypi/six@1.17.0')
+  })
+})

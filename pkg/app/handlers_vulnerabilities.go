@@ -45,11 +45,15 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 		Str("version", version).
 		Msg("Getting vulnerabilities for package")
 
+	pkg, pkgErr := a.metadata.GetPackage(ctx, registry, name, version)
+	releaseVersion := ""
+	if pkgErr == nil && pkg != nil {
+		releaseVersion = pkg.ReleaseVersion
+	}
+
 	// Get scan result from metadata store
 	scanResult, err := a.metadata.GetScanResult(ctx, registry, name, version)
 	if err != nil {
-		// Check if package exists
-		pkg, pkgErr := a.metadata.GetPackage(ctx, registry, name, version)
 		if pkgErr != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "package not found"})
 		}
@@ -57,9 +61,10 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 		// Package exists but not scanned yet
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"package": fiber.Map{
-				"registry": registry,
-				"name":     name,
-				"version":  version,
+				"registry":        registry,
+				"name":            name,
+				"version":         version,
+				"release_version": releaseVersion,
 			},
 			"scanned":             false,
 			"status":              "pending",
@@ -89,11 +94,15 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 	}
 	packageKey := registry + "/" + bypassName + "@" + version
 	packageKeyNoVersion := registry + "/" + bypassName
+	releaseKey := ""
+	if releaseVersion != "" {
+		releaseKey = registry + "/" + bypassName + "@" + releaseVersion
+	}
 	bypassedCVEs := make(map[string]*metadata.CVEBypass)
 	for _, bypass := range bypasses {
 		if bypass.Type == metadata.BypassTypeCVE && bypass.Active {
 			// Check if bypass applies to this package
-			if bypass.AppliesTo == "" || bypass.AppliesTo == packageKey || bypass.AppliesTo == packageKeyNoVersion {
+			if bypass.AppliesTo == "" || bypass.AppliesTo == packageKey || bypass.AppliesTo == packageKeyNoVersion || (releaseKey != "" && bypass.AppliesTo == releaseKey) {
 				bypassedCVEs[strings.ToUpper(bypass.Target)] = bypass
 			}
 		}
@@ -141,9 +150,10 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 	// Build response
 	response := fiber.Map{
 		"package": fiber.Map{
-			"registry": registry,
-			"name":     name,
-			"version":  version,
+			"registry":        registry,
+			"name":            name,
+			"version":         version,
+			"release_version": releaseVersion,
 		},
 		"scanned":             true,
 		"scanner":             scanResult.Scanner,

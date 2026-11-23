@@ -7,7 +7,7 @@
       <template #description>
         <span class="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{{ registry }}</Badge>
-          <Badge variant="outline" class="font-mono">v{{ version }}</Badge>
+          <Badge variant="outline" class="font-mono">{{ withVersionPrefix(shownVersion) }}</Badge>
         </span>
       </template>
     </PageHeader>
@@ -184,7 +184,7 @@ import {
   TableRow,
 } from '@perfect-design/ui'
 import SeveritySummary from './SeveritySummary.vue'
-import { formatDate } from '@/lib/format'
+import { formatDate, withVersionPrefix } from '@/lib/format'
 import { faArrowLeft, faChevronDown, faChevronUp, faCircleCheck } from '@/lib/icons'
 import { NO_VULNERABILITIES, SEVERITY_TONES, formatSeverityName, severityRank } from '@/lib/severity'
 
@@ -201,6 +201,7 @@ const packageName = computed(() => {
   return nameParam as string
 })
 const version = computed(() => route.params.version as string)
+const shownVersion = computed(() => vulnerabilities.value?.package?.release_version || version.value)
 
 interface BypassInfo {
   id: string
@@ -221,6 +222,7 @@ interface Vulnerability {
 }
 
 interface VulnerabilityResponse {
+  package?: { release_version?: string }
   scanned: boolean
   scanner: string
   scanned_at: string

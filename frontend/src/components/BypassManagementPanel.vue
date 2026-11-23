@@ -1,347 +1,186 @@
 <template>
-  <div>
-    <div class="flex justify-between items-center mb-8">
-      <div>
-        <h2 class="text-3xl font-bold text-gray-900">CVE Bypass Management</h2>
-        <p class="text-gray-600 mt-1">Manage temporary security bypasses for packages and CVEs</p>
-      </div>
-      <Button @click="showCreateModal = true" class="bg-green-600 hover:bg-green-700">
-        <i class="fas fa-plus mr-2"></i>Create Bypass
+  <div class="flex flex-col gap-6">
+    <PageHeader
+      title="CVE bypass management"
+      description="Manage temporary security bypasses for packages and CVEs."
+    >
+      <template #actions>
+        <Button :icon-start="faPlus" @click="showCreateModal = true">Create bypass</Button>
+      </template>
+    </PageHeader>
+
+    <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
+      <SegmentedControl v-model="activeFilter" :options="FILTER_OPTIONS" aria-label="Filter by status" />
+      <SegmentedControl v-model="typeFilter" :options="TYPE_OPTIONS" aria-label="Filter by type" />
+      <Button variant="outline" size="sm" :icon-start="faRotateRight" class="sm:ms-auto" @click="fetchBypasses">
+        Refresh
       </Button>
     </div>
 
-    <!-- Filter Section -->
-    <div class="mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-medium text-gray-700">Filter:</span>
-        <div class="flex gap-2">
-          <Button
-            @click="activeFilter = 'all'"
-            :variant="activeFilter === 'all' ? 'default' : 'outline'"
-            size="sm"
-          >
-            All
-          </Button>
-          <Button
-            @click="activeFilter = 'active'"
-            :variant="activeFilter === 'active' ? 'default' : 'outline'"
-            size="sm"
-          >
-            <i class="fas fa-check-circle mr-1"></i>Active
-          </Button>
-          <Button
-            @click="activeFilter === 'expired'"
-            :variant="activeFilter === 'expired' ? 'default' : 'outline'"
-            size="sm"
-          >
-            <i class="fas fa-clock mr-1"></i>Expired
-          </Button>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-medium text-gray-700">Type:</span>
-        <div class="flex gap-2">
-          <Button
-            @click="typeFilter = ''"
-            :variant="typeFilter === '' ? 'default' : 'outline'"
-            size="sm"
-          >
-            All
-          </Button>
-          <Button
-            @click="typeFilter = 'cve'"
-            :variant="typeFilter === 'cve' ? 'default' : 'outline'"
-            size="sm"
-          >
-            CVE
-          </Button>
-          <Button
-            @click="typeFilter = 'package'"
-            :variant="typeFilter === 'package' ? 'default' : 'outline'"
-            size="sm"
-          >
-            Package
-          </Button>
-        </div>
-      </div>
-      <Button @click="fetchBypasses" variant="outline" size="sm" class="sm:ml-auto">
-        <i class="fas fa-sync-alt mr-2"></i>Refresh
-      </Button>
-    </div>
+    <ErrorState
+      v-if="error"
+      variant="card"
+      title="Could not load bypasses"
+      :message="error"
+      @retry="fetchBypasses"
+    />
 
-    <!-- Error Alert -->
-    <Alert v-if="error" variant="destructive" class="mb-4">
-      <i class="fas fa-exclamation-circle mr-2"></i>
-      <AlertDescription>{{ error }}</AlertDescription>
-    </Alert>
+    <LoadingState v-if="loading" variant="table" label="Loading bypasses..." />
 
-    <!-- Success Alert -->
-    <Alert v-if="successMessage" class="mb-4 bg-green-50 border-green-200">
-      <i class="fas fa-check-circle mr-2 text-green-600"></i>
-      <AlertDescription class="text-green-800">{{ successMessage }}</AlertDescription>
-    </Alert>
-
-    <!-- Loading State -->
-    <div v-if="loading" class="text-center py-12">
-      <i class="fas fa-spinner fa-spin text-4xl text-primary-600"></i>
-      <p class="mt-4 text-gray-600">Loading bypasses...</p>
-    </div>
-
-    <!-- Bypass List -->
     <Card v-else>
-      <CardContent class="p-6">
-        <div v-if="filteredBypasses.length === 0" class="text-center py-12 text-gray-500">
-          <i class="fas fa-shield-alt text-6xl mb-4"></i>
-          <p class="text-xl">No bypasses found</p>
-          <p class="mt-2">Create a bypass to allow packages with known vulnerabilities</p>
-        </div>
-        <div v-else class="space-y-4">
-          <div
-            v-for="bypass in filteredBypasses"
-            :key="bypass.id"
-            class="border rounded-lg p-4 hover:bg-gray-50"
-            :class="bypass.active ? 'border-gray-200' : 'border-gray-300 bg-gray-50'"
-          >
-            <div class="flex items-start justify-between">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-2">
-                  <Badge :variant="bypass.type === 'cve' ? 'default' : 'outline'">
-                    {{ bypass.type.toUpperCase() }}
-                  </Badge>
-                  <Badge
-                    :class="bypass.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'"
-                  >
-                    {{ bypass.active ? 'ACTIVE' : 'INACTIVE' }}
-                  </Badge>
-                  <Badge
-                    v-if="isExpired(bypass.expires_at)"
-                    class="bg-red-100 text-red-800"
-                  >
-                    EXPIRED
-                  </Badge>
-                </div>
-                <h4 class="font-semibold text-lg text-gray-900">{{ bypass.target }}</h4>
-                <p class="text-sm text-gray-600 mt-1">{{ bypass.reason }}</p>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm text-gray-500">
-                  <div>
-                    <i class="fas fa-user mr-1"></i>
-                    <strong>Created by:</strong> {{ bypass.created_by }}
-                  </div>
-                  <div>
-                    <i class="fas fa-calendar mr-1"></i>
-                    <strong>Created:</strong> {{ formatDate(bypass.created_at) }}
-                  </div>
-                  <div>
-                    <i class="fas fa-clock mr-1"></i>
-                    <strong>Expires:</strong> {{ formatDate(bypass.expires_at) }}
-                  </div>
-                  <div v-if="bypass.applies_to">
-                    <i class="fas fa-box mr-1"></i>
-                    <strong>Applies to:</strong> {{ bypass.applies_to }}
-                  </div>
-                </div>
-              </div>
-              <div class="flex items-center gap-2 ml-4">
-                <Button
-                  @click="editBypass(bypass)"
-                  variant="outline"
-                  size="sm"
-                  title="Edit bypass"
-                >
-                  <i class="fas fa-edit"></i>
-                </Button>
-                <Button
-                  @click="confirmDeleteBypass(bypass)"
-                  variant="destructive"
-                  size="sm"
-                  title="Delete bypass"
-                >
-                  <i class="fas fa-trash"></i>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+      <CardContent>
+        <EmptyState
+          v-if="filteredBypasses.length === 0"
+          :icon="faShieldHalved"
+          title="No bypasses found"
+          description="Create a bypass to allow packages with known vulnerabilities."
+        />
+        <DataTable
+          v-else
+          label="Bypasses"
+          layout="cards"
+          row-key="id"
+          :columns="bypassColumns"
+          :rows="filteredBypasses"
+        >
+          <template #cell-type="{ row }">
+            <Badge :variant="row.type === 'cve' ? 'default' : 'outline'">{{ row.type === 'cve' ? 'CVE' : 'Package' }}</Badge>
+          </template>
+          <template #cell-status="{ row }">
+            <span class="flex flex-wrap gap-1">
+              <StatusBadge
+                :status="row.active ? 'active' : 'inactive'"
+                :tones="{ active: 'success', inactive: 'neutral' }"
+              />
+              <StatusBadge v-if="isExpired(row.expires_at)" status="expired" :tones="{ expired: 'danger' }" />
+            </span>
+          </template>
+          <template #cell-actions="{ row }">
+            <span class="flex gap-1">
+              <IconButton :icon="faPen" :label="`Edit bypass for ${row.target}`" @click="editBypass(row)" />
+              <IconButton :icon="faTrash" :label="`Delete bypass for ${row.target}`" @click="confirmDeleteBypass(row)" />
+            </span>
+          </template>
+        </DataTable>
       </CardContent>
     </Card>
 
-    <!-- Create/Edit Bypass Modal -->
     <Dialog v-model:open="showCreateModal">
-      <DialogContent class="max-w-2xl">
+      <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>{{ editingBypass ? 'Edit' : 'Create' }} Bypass</DialogTitle>
+          <DialogTitle>{{ editingBypass ? 'Edit' : 'Create' }} bypass</DialogTitle>
           <DialogDescription>
-            {{ editingBypass ? 'Update bypass settings' : 'Create a temporary bypass for a CVE or package' }}
+            {{ editingBypass ? 'Update the bypass settings.' : 'Create a temporary bypass for a CVE or package.' }}
           </DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-4 py-4">
-          <!-- Type Selection -->
-          <div v-if="!editingBypass">
-            <label class="text-sm font-medium text-gray-700 mb-2 block">Bypass Type</label>
-            <div class="flex gap-4">
-              <Button
-                @click="bypassForm.type = 'cve'"
-                :variant="bypassForm.type === 'cve' ? 'default' : 'outline'"
-                class="flex-1"
-              >
-                <i class="fas fa-bug mr-2"></i>CVE Bypass
-              </Button>
-              <Button
-                @click="bypassForm.type = 'package'"
-                :variant="bypassForm.type === 'package' ? 'default' : 'outline'"
-                class="flex-1"
-              >
-                <i class="fas fa-box mr-2"></i>Package Bypass
-              </Button>
-            </div>
-          </div>
+        <form class="flex flex-col gap-4" @submit.prevent="submitBypass">
+          <Field v-if="!editingBypass" label="Bypass type">
+            <SegmentedControl v-model="bypassForm.type" :options="BYPASS_TYPE_OPTIONS" full-width />
+          </Field>
 
-          <!-- Target -->
-          <div v-if="!editingBypass">
-            <label class="text-sm font-medium text-gray-700 mb-2 block">
-              {{ bypassForm.type === 'cve' ? 'CVE ID' : 'Package' }}
-            </label>
+          <Field
+            v-if="!editingBypass"
+            :label="bypassForm.type === 'cve' ? 'CVE ID' : 'Package'"
+            :hint="
+              bypassForm.type === 'cve'
+                ? 'Enter the CVE ID, for example CVE-2021-23337.'
+                : 'Enter a package, for example npm/lodash@4.17.20, or npm/lodash for all versions.'
+            "
+            required
+          >
             <Input
               v-model="bypassForm.target"
               :placeholder="bypassForm.type === 'cve' ? 'CVE-2021-23337' : 'npm/lodash@4.17.20'"
-              class="w-full"
             />
-            <p class="text-xs text-gray-500 mt-1">
-              {{ bypassForm.type === 'cve' ? 'Enter the CVE ID (e.g., CVE-2021-23337)' : 'Enter package (e.g., npm/lodash@4.17.20 or npm/lodash for all versions)' }}
-            </p>
-          </div>
+          </Field>
 
-          <!-- Applies To (CVE only) -->
-          <div v-if="!editingBypass && bypassForm.type === 'cve'">
-            <label class="text-sm font-medium text-gray-700 mb-2 block">
-              Applies To (Optional)
-            </label>
-            <Input
-              v-model="bypassForm.applies_to"
-              placeholder="npm/lodash@4.17.20"
-              class="w-full"
-            />
-            <p class="text-xs text-gray-500 mt-1">
-              Limit this CVE bypass to a specific package. Leave empty to apply to all packages with this CVE.
-            </p>
-          </div>
+          <Field
+            v-if="!editingBypass && bypassForm.type === 'cve'"
+            label="Applies to (optional)"
+            hint="Limit this CVE bypass to one package. Leave empty to apply it to every package with this CVE."
+          >
+            <Input v-model="bypassForm.applies_to" placeholder="npm/lodash@4.17.20" />
+          </Field>
 
-          <!-- Reason -->
-          <div>
-            <label class="text-sm font-medium text-gray-700 mb-2 block">Reason *</label>
-            <Input
-              v-model="bypassForm.reason"
-              placeholder="No fix available, business critical dependency"
-              class="w-full"
-            />
-            <p class="text-xs text-gray-500 mt-1">
-              Explain why this bypass is needed (required for audit trail)
-            </p>
-          </div>
+          <Field label="Reason" hint="Explain why this bypass is needed. It is kept for the audit trail." required>
+            <Textarea v-model="bypassForm.reason" placeholder="No fix available, business critical dependency" />
+          </Field>
 
-          <!-- Created By -->
-          <div v-if="!editingBypass">
-            <label class="text-sm font-medium text-gray-700 mb-2 block">Created By *</label>
-            <Input
-              v-model="bypassForm.created_by"
-              placeholder="admin@example.com"
-              class="w-full"
-            />
-          </div>
+          <Field v-if="!editingBypass" label="Created by" required>
+            <Input v-model="bypassForm.created_by" placeholder="admin@example.com" />
+          </Field>
 
-          <!-- Expires In -->
-          <div>
-            <label class="text-sm font-medium text-gray-700 mb-2 block">Expires In (Hours) *</label>
+          <Field
+            label="Expires in (hours)"
+            hint="Hours until this bypass expires. 168 is 7 days and 720 is 30 days."
+            required
+          >
             <Input
-              v-model.number="bypassForm.expires_in_hours"
+              :model-value="bypassForm.expires_in_hours"
               type="number"
               min="1"
               placeholder="168"
-              class="w-full"
+              @update:model-value="setExpiresInHours"
             />
-            <p class="text-xs text-gray-500 mt-1">
-              How many hours until this bypass expires (e.g., 168 = 7 days, 720 = 30 days)
-            </p>
-          </div>
+          </Field>
 
-          <!-- Active (Edit only) -->
-          <div v-if="editingBypass" class="flex items-center gap-2">
-            <input
-              type="checkbox"
-              v-model="bypassForm.active"
-              id="active-checkbox"
-              class="w-4 h-4"
-            />
-            <label for="active-checkbox" class="text-sm font-medium text-gray-700">
-              Active
-            </label>
-          </div>
+          <Checkbox v-if="editingBypass" v-model="bypassForm.active" label="Active" />
 
-          <!-- Notify on Expiry -->
-          <div class="flex items-center gap-2">
-            <input
-              type="checkbox"
-              v-model="bypassForm.notify_on_expiry"
-              id="notify-checkbox"
-              class="w-4 h-4"
-            />
-            <label for="notify-checkbox" class="text-sm font-medium text-gray-700">
-              Send notification when bypass expires
-            </label>
-          </div>
-        </div>
+          <Checkbox v-model="bypassForm.notify_on_expiry" label="Send a notification when the bypass expires" />
 
-        <DialogFooter>
-          <Button @click="closeCreateModal" variant="outline">
-            Cancel
-          </Button>
-          <Button @click="submitBypass" :disabled="!isFormValid">
-            {{ editingBypass ? 'Update' : 'Create' }} Bypass
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" @click="closeCreateModal">Cancel</Button>
+            <Button type="submit" :disabled="!isFormValid">{{ editingBypass ? 'Update' : 'Create' }} bypass</Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
 
-    <!-- Delete Confirmation Dialog -->
-    <Dialog v-model:open="showDeleteModal">
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Confirm Deletion</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete this bypass for <strong>{{ bypassToDelete?.target }}</strong>?
-            This action cannot be undone and the security check will be re-enabled immediately.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button @click="showDeleteModal = false" variant="outline">
-            Cancel
-          </Button>
-          <Button @click="deleteBypass" variant="destructive">
-            Delete
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      v-model:open="showDeleteModal"
+      title="Delete bypass?"
+      :description="`Delete the bypass for ${bypassToDelete?.target}? This cannot be undone and the security check is re-enabled immediately.`"
+      confirm-label="Delete bypass"
+      tone="danger"
+      destructive
+      @confirm="deleteBypass"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
-import { Button } from '@/components/ui/button'
 import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  Checkbox,
+  ConfirmDialog,
+  DataTable,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  Input,
+  LoadingState,
+  PageHeader,
+  SegmentedControl,
+  StatusBadge,
+  Textarea,
+  useToastStore,
+  type DataTableColumn,
+} from '@perfect-design/ui'
+import { formatDate } from '@/lib/format'
+import { faPen, faPlus, faRotateRight, faShieldHalved, faTrash } from '@/lib/icons'
 
 interface Bypass {
   id: string
@@ -358,17 +197,17 @@ interface Bypass {
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const successMessage = ref<string | null>(null)
+const toasts = useToastStore()
 const bypasses = ref<Bypass[]>([])
 const activeFilter = ref<'all' | 'active' | 'expired'>('all')
-const typeFilter = ref<'' | 'cve' | 'package'>('')
+const typeFilter = ref<'all' | 'cve' | 'package'>('all')
 
 const showCreateModal = ref(false)
 const showDeleteModal = ref(false)
 const editingBypass = ref<Bypass | null>(null)
 const bypassToDelete = ref<Bypass | null>(null)
 
-const bypassForm = ref({
+const EMPTY_FORM = {
   type: 'cve' as 'cve' | 'package',
   target: '',
   reason: '',
@@ -377,7 +216,9 @@ const bypassForm = ref({
   applies_to: '',
   notify_on_expiry: false,
   active: true,
-})
+}
+
+const bypassForm = ref({ ...EMPTY_FORM })
 
 // Get API key from localStorage or prompt user
 const apiKey = ref<string>('')
@@ -393,7 +234,7 @@ const filteredBypasses = computed(() => {
   }
 
   // Filter by type
-  if (typeFilter.value) {
+  if (typeFilter.value !== 'all') {
     filtered = filtered.filter(b => b.type === typeFilter.value)
   }
 
@@ -448,7 +289,7 @@ async function fetchBypasses() {
     } else if (activeFilter.value === 'expired') {
       params.append('include_expired', 'true')
     }
-    if (typeFilter.value) {
+    if (typeFilter.value !== 'all') {
       params.append('type', typeFilter.value)
     }
 
@@ -476,8 +317,6 @@ async function submitBypass() {
   if (!isFormValid.value) return
 
   loading.value = true
-  error.value = null
-  successMessage.value = null
 
   try {
     if (editingBypass.value) {
@@ -495,7 +334,7 @@ async function submitBypass() {
           },
         }
       )
-      successMessage.value = 'Bypass updated successfully'
+      toasts.success('Bypass updated')
     } else {
       // Create new bypass
       await axios.post(
@@ -515,19 +354,14 @@ async function submitBypass() {
           },
         }
       )
-      successMessage.value = 'Bypass created successfully'
+      toasts.success('Bypass created')
     }
 
     closeCreateModal()
     await fetchBypasses()
-
-    // Clear success message after 5 seconds
-    setTimeout(() => {
-      successMessage.value = null
-    }, 5000)
   } catch (err: any) {
     console.error('Failed to submit bypass:', err)
-    error.value = err.response?.data?.error?.message || err.message || 'Failed to save bypass'
+    toasts.error('Could not save bypass', err.response?.data?.error?.message || err.message || 'Failed to save bypass')
   } finally {
     loading.value = false
   }
@@ -550,18 +384,14 @@ function editBypass(bypass: Bypass) {
 
 function closeCreateModal() {
   showCreateModal.value = false
-  editingBypass.value = null
-  bypassForm.value = {
-    type: 'cve',
-    target: '',
-    reason: '',
-    created_by: '',
-    expires_in_hours: 168,
-    applies_to: '',
-    notify_on_expiry: false,
-    active: true,
-  }
 }
+
+// Also covers dismissal by Escape or the close button, so the next open never reuses an old edit.
+watch(showCreateModal, (open) => {
+  if (open) return
+  editingBypass.value = null
+  bypassForm.value = { ...EMPTY_FORM }
+})
 
 function confirmDeleteBypass(bypass: Bypass) {
   bypassToDelete.value = bypass
@@ -572,8 +402,6 @@ async function deleteBypass() {
   if (!bypassToDelete.value) return
 
   loading.value = true
-  error.value = null
-  successMessage.value = null
 
   try {
     await axios.delete(`/api/admin/bypasses/${bypassToDelete.value.id}`, {
@@ -582,18 +410,13 @@ async function deleteBypass() {
       },
     })
 
-    successMessage.value = 'Bypass deleted successfully'
+    toasts.success('Bypass deleted')
     showDeleteModal.value = false
     bypassToDelete.value = null
     await fetchBypasses()
-
-    // Clear success message after 5 seconds
-    setTimeout(() => {
-      successMessage.value = null
-    }, 5000)
   } catch (err: any) {
     console.error('Failed to delete bypass:', err)
-    error.value = err.response?.data?.error?.message || err.message || 'Failed to delete bypass'
+    toasts.error('Could not delete bypass', err.response?.data?.error?.message || err.message || 'Failed to delete bypass')
   } finally {
     loading.value = false
   }
@@ -603,7 +426,37 @@ function isExpired(expiresAt: string): boolean {
   return new Date(expiresAt) < new Date()
 }
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString()
+const FILTER_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
+  { value: 'expired', label: 'Expired' },
+]
+
+const TYPE_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'cve', label: 'CVE' },
+  { value: 'package', label: 'Package' },
+]
+
+const BYPASS_TYPE_OPTIONS = [
+  { value: 'cve', label: 'CVE bypass' },
+  { value: 'package', label: 'Package bypass' },
+]
+
+const bypassColumns: DataTableColumn<Bypass>[] = [
+  { key: 'target', header: 'Target', rowHeader: true },
+  { key: 'type', header: 'Type' },
+  { key: 'status', header: 'Status', accessor: (b) => (b.active ? 'active' : 'inactive') },
+  { key: 'reason', header: 'Reason' },
+  { key: 'created_by', header: 'Created by' },
+  { key: 'created_at', header: 'Created', accessor: (b) => formatDate(b.created_at) },
+  { key: 'expires_at', header: 'Expires', accessor: (b) => formatDate(b.expires_at) },
+  { key: 'applies_to', header: 'Applies to' },
+  { key: 'actions', header: 'Actions', actions: true, accessor: () => '' },
+]
+
+function setExpiresInHours(value: string | number) {
+  bypassForm.value.expires_in_hours = Number(value)
 }
+
 </script>

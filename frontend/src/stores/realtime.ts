@@ -55,7 +55,9 @@ export const useRealtimeStore = defineStore('realtime', () => {
       events.value.splice(0, events.value.length - EVENTS_CAP)
     }
     if (event.type === 'stats_update') {
-      lastStats.value = event.payload as RealtimeStats
+      // The server nests the counters under `stats`; reading the payload flat shows zeros.
+      const nested = event.payload.stats
+      lastStats.value = (nested && typeof nested === 'object' ? nested : event.payload) as RealtimeStats
     }
   }
 

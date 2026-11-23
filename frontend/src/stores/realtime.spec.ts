@@ -53,6 +53,22 @@ describe('useRealtimeStore', () => {
     expect(store.lastStats).toMatchObject({ total_packages: 42, total_size: 1024 })
   })
 
+  it('unwraps the server stats_update shape {stats, timestamp}', () => {
+    const store = useRealtimeStore()
+    store.ingest(
+      makeEvent('stats_update', {
+        stats: { total_packages: 1454, total_size: 980870617, total_downloads: 5376, scanned_packages: 1451 },
+        timestamp: '2026-11-23T16:00:00Z',
+      }),
+    )
+    expect(store.lastStats).toMatchObject({
+      total_packages: 1454,
+      total_size: 980870617,
+      total_downloads: 5376,
+      scanned_packages: 1451,
+    })
+  })
+
   it('exposes filtered computed slices', () => {
     const store = useRealtimeStore()
     store.ingest(makeEvent('package_cached'))

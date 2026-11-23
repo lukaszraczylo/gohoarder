@@ -47,8 +47,9 @@
             :value="`${group.registry}:${group.name}`"
           >
             <AccordionTrigger :heading-level="2">
-              <span class="flex w-full min-w-0 items-center justify-between gap-4">
-                <span class="min-w-0 text-start">
+              <!-- Stacked below sm: a side-by-side row leaves the name ~90px at 320px and breaks scoped names mid-word. -->
+              <span class="flex w-full min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <span class="w-full min-w-0 text-start sm:w-auto">
                   <span class="block break-words font-semibold">{{ group.name }}</span>
                   <span class="block text-sm text-muted-foreground">
                     {{ group.versions.length }} version{{ group.versions.length > 1 ? 's' : '' }}
@@ -115,6 +116,7 @@
             :page="currentPage"
             :total="allGroupedPackages.length"
             :page-size="itemsPerPage"
+            :show-edges="false"
             @update:page="changePage"
           />
         </div>

@@ -391,10 +391,11 @@ func (a *App) initializeComponents() error {
 func (a *App) setupServer() error {
 	// Create Fiber app
 	a.app = fiber.New(fiber.Config{
-		ReadTimeout:  a.config.Server.ReadTimeout,
-		WriteTimeout: a.config.Server.WriteTimeout,
-		ServerHeader: "GoHoarder",
-		AppName:      "GoHoarder v1.0",
+		ReadTimeout:    a.config.Server.ReadTimeout,
+		WriteTimeout:   a.config.Server.WriteTimeout,
+		ReadBufferSize: a.config.Server.ReadBufferSize,
+		ServerHeader:   "GoHoarder",
+		AppName:        "GoHoarder v1.0",
 	})
 
 	// Auth middleware factories. Built once, reused on every gated route.

@@ -91,6 +91,7 @@ server:
   host: "0.0.0.0"
   port: 8080
   readTimeout: "5m"
+  readBufferSize: 16384  # Bytes for the request line plus headers; larger requests get 431
   writeTimeout: "5m"
   idleTimeout: "2m"
   # Browser origins allowed to use /api and /ws; empty = same-origin only

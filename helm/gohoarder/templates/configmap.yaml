@@ -10,6 +10,7 @@ data:
       host: {{ .Values.server.host | quote }}
       port: {{ .Values.server.port }}
       read_timeout: {{ .Values.server.readTimeout | quote }}
+      read_buffer_size: {{ .Values.server.readBufferSize }}
       write_timeout: {{ .Values.server.writeTimeout | quote }}
       idle_timeout: {{ .Values.server.idleTimeout | quote }}
       allowed_origins: {{ .Values.server.allowedOrigins | default list | toJson }}

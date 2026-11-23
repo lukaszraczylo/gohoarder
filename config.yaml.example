@@ -10,6 +10,7 @@ server:
   host: "0.0.0.0"
   port: 8080  # Backend API server port
   read_timeout: "5m"
+  read_buffer_size: 16384  # Bytes for the request line plus headers; larger requests get 431
   write_timeout: "5m"
   idle_timeout: "2m"
   # Origins allowed to call /api from a browser and to open the WebSocket. Exact

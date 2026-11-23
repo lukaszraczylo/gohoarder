@@ -26,6 +26,7 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 | GH-19 | SSRF | every redirect hop passes the upstream allowlist, the scheme rule and a non-private address check | security, CWE-918 | medium | `Access.redirect_escapes_allowlist`, `fixed_redirect_stays_allowlisted` / `TestRedirectToDisallowedHostRefused`, `TestRedirectToLoopbackRefused`, `TestRedirectToPrivateLiteralRefused`, `TestRedirectAllowedToAllowedWorks`, `TestRedirectHopsCapped`, `TestSidecarRedirectOffAllowlistRefused` | 787c757 |
 | GH-20 | stats, sqlite | SQLite upserts hourly and daily rows as PostgreSQL does, one row per bucket | correctness | low (SQLite only) | `Stats.old_sqlite_duplicates_rows`, `fixed_sqlite_package_row_keeps_late_events` / `TestSQLiteHourlyTotalsMatchPostgresSemantics`, `TestPostgresHourlyTotalsMatchSQLite`, `TestSQLiteDailyRollupIsIdempotent`, `TestSQLiteStatsDedupeMigration` | f46e079 |
 | GH-21 | scan retry | a scan retry on S3 or SMB storage reads the stored blob instead of a removed temp file | correctness | low (file-based scanners on remote storage) | `Security.old_remote_retry_unreadable`, `fixed_retry_always_readable` / `TestScanRetryOnRemoteStorageReadsBlobAgain` | 31db940 |
+| GH-22 | dashboard API | an OIDC-logged-in browser can call `/api` with a long URL; the proxy hop neither forwards session cookies nor exceeds the read buffer | availability | medium (every `/api` call returned 431 for OIDC users) | not modelled (header size, no decision logic) / `TestLargeRequestHeadersAreAccepted`, `TestReadBufferSizeIsConfigurable`, `scripts/check_frontend_cookie_strip.sh` | this change |
 
 ### Exploit paths and reach
 
@@ -58,6 +59,8 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
   legacy path. Production holds none.
 - **GH-20.** SQLite startup merges old duplicate rows (package rows add up, derived rows keep one) and creates the unique indexes.
 - **GH-21.** `RescanWorker` still skips remote storage ("No local file path available"); that is a separate, unchanged behaviour.
+- **GH-22.** Frontend nginx dropped the `Cookie` header on `/api/` and `/ws` (the backend reads none; keys travel in `Authorization` / `X-API-Key`).
+  The server read buffer is `server.read_buffer_size`, default 16384 (Fiber's default is 8192): a long Referer or `Authorization` no longer gets 431.
 - **GH-17 cleanup.** The per-handler `Access-Control-Allow-Origin: *` lines in `pkg/app/handlers*.go` are now overridden by the
   guard and are dead; remove them once the API performance work lands.
 

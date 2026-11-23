@@ -35,6 +35,7 @@ type ServerConfig struct {
 	ReadTimeout    time.Duration `mapstructure:"read_timeout" json:"read_timeout"`
 	WriteTimeout   time.Duration `mapstructure:"write_timeout" json:"write_timeout"`
 	IdleTimeout    time.Duration `mapstructure:"idle_timeout" json:"idle_timeout"`
+	ReadBufferSize int           `mapstructure:"read_buffer_size" json:"read_buffer_size"` // bytes; caps the request line plus headers
 }
 
 // TLSConfig contains TLS/HTTPS configuration
@@ -136,6 +137,10 @@ type MySQLConfig struct {
 // DefaultMetadataTTL is the freshness window for metadata pages. It stays below the 72h
 // release-age gate clients apply, so a cached page never hides the entries the gate reads.
 const DefaultMetadataTTL = 24 * time.Hour
+
+// DefaultReadBufferSize is the HTTP server read buffer. Fiber's own 8192 rejects browsers
+// that send OIDC session cookies plus a long Referer or URL with 431.
+const DefaultReadBufferSize = 16384
 
 // DefaultIdleTTL is how long a cached item can go unrequested before cleanup removes it.
 const DefaultIdleTTL = 7 * 24 * time.Hour
@@ -334,11 +339,12 @@ type PyPIHandlerConfig struct {
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:         "0.0.0.0",
-			Port:         8080,
-			ReadTimeout:  5 * time.Minute,
-			WriteTimeout: 5 * time.Minute,
-			IdleTimeout:  2 * time.Minute,
+			Host:           "0.0.0.0",
+			Port:           8080,
+			ReadTimeout:    5 * time.Minute,
+			WriteTimeout:   5 * time.Minute,
+			IdleTimeout:    2 * time.Minute,
+			ReadBufferSize: DefaultReadBufferSize,
 			TLS: TLSConfig{
 				Enabled: false,
 			},
@@ -511,6 +517,9 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate cache
+	if c.Server.ReadBufferSize < 0 {
+		return fmt.Errorf("server.read_buffer_size cannot be negative")
+	}
 	if c.Cache.DefaultTTL < 0 {
 		return fmt.Errorf("cache.default_ttl cannot be negative")
 	}

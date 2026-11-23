@@ -624,6 +624,7 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 
 	// Count vulnerabilities by severity, excluding bypassed CVEs
 	severityCounts := make(map[string]int)
+	remaining := 0
 	for _, vuln := range result.Vulnerabilities {
 		// Check if this CVE is bypassed
 		if bypass, ok := bypassedCVEs[strings.ToUpper(vuln.ID)]; ok {
@@ -637,6 +638,7 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 			continue
 		}
 		severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
+		remaining++
 	}
 
 	// Check against thresholds
@@ -687,7 +689,7 @@ func (m *Manager) CheckVulnerabilities(ctx context.Context, registry, packageNam
 				return true, "Package has MODERATE, HIGH, or CRITICAL vulnerabilities", nil
 			}
 		case "LOW":
-			if len(result.Vulnerabilities) > 0 {
+			if remaining > 0 {
 				return true, "Package has vulnerabilities", nil
 			}
 		}

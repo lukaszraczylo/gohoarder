@@ -23,6 +23,7 @@ export interface Package {
   registry: string
   name: string
   version: string
+  release_version?: string
   size: number
   cached_at: string
   last_accessed: string

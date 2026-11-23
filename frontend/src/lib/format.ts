@@ -17,6 +17,11 @@ export function formatDate(date: string): string {
   return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleString()
 }
 
+/** PyPI rows key on the file name; show the release version when the API sends one. */
+export function displayVersion(pkg: { version: string; release_version?: string }): string {
+  return pkg.release_version || pkg.version
+}
+
 export function withVersionPrefix(version: string): string {
   return version.startsWith('v') ? version : 'v' + version
 }

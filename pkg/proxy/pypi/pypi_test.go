@@ -208,18 +208,18 @@ func TestCacheVersionUniquePerArtifact(t *testing.T) {
 	}
 }
 
-func TestArtifactCacheVersion(t *testing.T) {
+func TestReleaseVersion(t *testing.T) {
 	tests := []struct{ filename, want string }{
 		{"six-1.17.0.tar.gz", "1.17.0"},
-		{"six-1.17.0-py2.py3-none-any.whl", "1.17.0+py2.py3-none-any"},
-		{"numpy-1.26.0-1-cp312-cp312-manylinux.whl", "1.26.0+1-cp312-cp312-manylinux"},
-		{"foo-1.0.zip", "1.0+zip"},
-		{"foo-1.0.egg", "1.0+egg"},
+		{"six-1.17.0-py2.py3-none-any.whl", "1.17.0"},
+		{"numpy-1.26.0rc1-cp312-cp312-manylinux_2_17_x86_64.whl", "1.26.0rc1"},
+		{"2captcha-1.0.0.tar.gz", "1.0.0"},
+		{"foo-1.0.zip", "1.0"},
+		{"foo-1.0.egg", "1.0"},
 	}
 	for _, tt := range tests {
-		_, ver := extractPackageFileInfo("/x/" + tt.filename)
-		if got := artifactCacheVersion(tt.filename, ver); got != tt.want {
-			t.Errorf("artifactCacheVersion(%q) = %q, want %q", tt.filename, got, tt.want)
+		if got := ReleaseVersion(tt.filename); got != tt.want {
+			t.Errorf("ReleaseVersion(%q) = %q, want %q", tt.filename, got, tt.want)
 		}
 	}
 }

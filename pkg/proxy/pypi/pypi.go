@@ -241,7 +241,9 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 		filename = filename[i+1:]
 	}
 	isSidecar := strings.HasSuffix(filename, metadataSuffix)
-	cacheVersion := artifactCacheVersion(filename, version)
+	// The cache key must be unique per file: a release has many wheels. The
+	// real version travels separately as the package's release version.
+	cacheVersion := filename
 
 	// Extract credentials from request
 	credentials := h.credExtractor.Extract(r)
@@ -314,13 +316,13 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			return nil, err
 		}
 		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
-			return &cache.FetchResult{Data: body, UpstreamURL: originalURL, RequiresAuth: true, AuthProvider: h.credValidator.Provider()}, nil
+			return &cache.FetchResult{Data: body, UpstreamURL: originalURL, RequiresAuth: true, AuthProvider: h.credValidator.Provider(), ReleaseVersion: version}, nil
 		}
 		if statusCode != http.StatusOK {
 			_ = body.Close()
 			return nil, fmt.Errorf("upstream returned status %d", statusCode)
 		}
-		return &cache.FetchResult{Data: body, UpstreamURL: originalURL}, nil
+		return &cache.FetchResult{Data: body, UpstreamURL: originalURL, ReleaseVersion: version}, nil
 	})
 
 	if err != nil {
@@ -427,24 +429,10 @@ func isPackageFile(path string) bool {
 		strings.HasSuffix(path, ".metadata")
 }
 
-// artifactCacheVersion returns the cache key's version portion. PyPI publishes
-// several files per release, so the bare version would make distinct wheels
-// share one cache entry. A wheel's build and tags, or a non-tarball sdist's
-// extension, are appended as a local-version suffix (PEP 440, "+") to keep
-// each artifact's key unique while the package version stays readable.
-func artifactCacheVersion(filename, version string) string {
-	base := strings.TrimSuffix(filename, metadataSuffix)
-	switch {
-	case strings.HasSuffix(base, ".whl"):
-		rest := strings.TrimSuffix(base, ".whl")
-		if parts := strings.SplitN(rest, "-", 3); len(parts) == 3 && parts[2] != "" {
-			return version + "+" + parts[2]
-		}
-	case strings.HasSuffix(base, ".zip"):
-		return version + "+zip"
-	case strings.HasSuffix(base, ".egg"):
-		return version + "+egg"
-	}
+// ReleaseVersion returns the release version for a distribution file name
+// (PEP 427 wheels, PEP 625 sdists, legacy zip and egg files).
+func ReleaseVersion(filename string) string {
+	_, version := extractPackageFileInfo("/x/" + filename)
 	return version
 }
 

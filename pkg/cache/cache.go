@@ -116,6 +116,8 @@ type FetchResult struct {
 	Data io.ReadCloser
 	// UpstreamURL is the upstream URL the body came from.
 	UpstreamURL string
+	// ReleaseVersion is the user-facing version when the cache key version is not one (PyPI file names).
+	ReleaseVersion string
 	// AuthProvider identifies the auth system (e.g. github, gitlab, custom).
 	AuthProvider string
 	// RequiresAuth is true when the upstream indicated the package is behind
@@ -357,7 +359,7 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 
 	// Store in cache (this will also trigger background scan). Auth state is
 	// plumbed through so the persisted package carries RequiresAuth.
-	storedPkg, err := m.store(ctx, registry, name, version, data, fr.UpstreamURL, fr.RequiresAuth, fr.AuthProvider)
+	storedPkg, err := m.store(ctx, registry, name, version, fr.ReleaseVersion, data, fr.UpstreamURL, fr.RequiresAuth, fr.AuthProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +478,7 @@ func (m *Manager) getOrFetch(ctx context.Context, registry, name, version string
 }
 
 // store stores a package in cache
-func (m *Manager) store(ctx context.Context, registry, name, version string, data io.ReadCloser, upstreamURL string, requiresAuth bool, authProvider string) (*metadata.Package, error) {
+func (m *Manager) store(ctx context.Context, registry, name, version, releaseVersion string, data io.ReadCloser, upstreamURL string, requiresAuth bool, authProvider string) (*metadata.Package, error) {
 	// Generate storage key
 	storageKey := m.generateStorageKey(registry, name, version)
 
@@ -559,6 +561,7 @@ func (m *Manager) store(ctx context.Context, registry, name, version string, dat
 		Registry:       registry,
 		Name:           name,
 		Version:        version,
+		ReleaseVersion: releaseVersion,
 		StorageKey:     storageKey,
 		Size:           size,
 		ChecksumSHA256: checksumSHA256,

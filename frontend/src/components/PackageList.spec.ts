@@ -218,4 +218,29 @@ describe('PackageList.vue', () => {
     const badges = wrapper.findAll('[data-slot="badge"]').map((badge) => badge.text())
     expect(badges).toEqual(['go', 'npm', 'pypi'])
   })
+
+  it('shows the release version for a PyPI file row, not the file name', async () => {
+    const wrapper = await mountWithRouter()
+    const store = usePackageStore()
+
+    store.packages = [
+      {
+        id: '1',
+        registry: 'pypi',
+        name: 'six',
+        version: 'six-1.17.0-py2.py3-none-any.whl',
+        release_version: '1.17.0',
+        size: 1,
+        cached_at: '2026-11-23T00:00:00Z',
+        last_accessed: '2026-11-23T00:00:00Z',
+        download_count: 0,
+      },
+    ]
+    await wrapper.vm.$nextTick()
+    await wrapper.find('button[aria-expanded]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('v1.17.0')
+    expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')
+  })
 })

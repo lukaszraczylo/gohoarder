@@ -1,6 +1,7 @@
 package gormstore
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
@@ -70,7 +71,44 @@ func GetMigrations() []*gormigrate.Migration {
 				return tx.Migrator().DropTable("api_keys")
 			},
 		},
+		{
+			// Adds packages.release_version (PyPI rows key on the file name).
+			ID: "202611230001",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.AutoMigrate(&PackageModel{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropColumn(&PackageModel{}, "release_version")
+			},
+		},
+		{
+			ID: "202611230002",
+			Migrate: func(tx *gorm.DB) error {
+				return dropEmptyTable(tx, legacyDownloadEventsTable)
+			},
+			Rollback: func(tx *gorm.DB) error { return nil },
+		},
 	}
+}
+
+// legacyDownloadEventsTable is what the partition manager renames the plain
+// download_events table to before it creates the partitioned one.
+const legacyDownloadEventsTable = "download_events_old"
+
+// dropEmptyTable drops table only when it exists and holds no rows, so data
+// that was never copied across is never lost.
+func dropEmptyTable(db *gorm.DB, table string) error {
+	if !db.Migrator().HasTable(table) {
+		return nil
+	}
+	var rows int64
+	if err := db.Table(table).Count(&rows).Error; err != nil {
+		return fmt.Errorf("count %s: %w", table, err)
+	}
+	if rows > 0 {
+		return nil
+	}
+	return db.Migrator().DropTable(table)
 }
 
 // migrateToV2 creates the complete V2 schema

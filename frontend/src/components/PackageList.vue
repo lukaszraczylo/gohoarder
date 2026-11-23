@@ -77,7 +77,7 @@
                 </TableHeader>
                 <TableBody>
                   <TableRow v-for="version in group.versions" :key="version.id">
-                    <TableCell label="Version" class="font-medium">{{ withVersionPrefix(version.version) }}</TableCell>
+                    <TableCell label="Version" class="font-medium">{{ withVersionPrefix(displayVersion(version)) }}</TableCell>
                     <TableCell label="Downloads" numeric>{{ formatNumber(version.download_count) }}</TableCell>
                     <TableCell label="Size" numeric>{{ formatBytes(version.size) }}</TableCell>
                     <TableCell label="Cached">{{ formatDate(version.cached_at) }}</TableCell>
@@ -165,7 +165,7 @@ import {
   useToastStore,
 } from '@perfect-design/ui'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
-import { formatBytes, formatDate, formatNumber, withVersionPrefix } from '@/lib/format'
+import { formatBytes, formatDate, formatNumber, displayVersion, withVersionPrefix } from '@/lib/format'
 import { faBoxOpen, faMagnifyingGlass, faRotateRight, faTrash } from '@/lib/icons'
 
 // Props from router
@@ -207,6 +207,7 @@ const allGroupedPackages = computed(() => {
     const searchLower = searchTerm.value.toLowerCase()
     filteredPackages = filteredPackages.filter(pkg =>
       pkg.name.toLowerCase().includes(searchLower) ||
+      displayVersion(pkg).toLowerCase().includes(searchLower) ||
       pkg.version.toLowerCase().includes(searchLower)
     )
   }

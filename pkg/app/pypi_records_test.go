@@ -46,27 +46,28 @@ func TestPyPIRecordsOneRowPerArtifactAndNeverTheSidecar(t *testing.T) {
 	}
 	var resp struct {
 		Packages []struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
+			Name           string `json:"name"`
+			Version        string `json:"version"`
+			ReleaseVersion string `json:"release_version"`
 		} `json:"packages"`
 	}
 	if err := json.Unmarshal([]byte(body), &resp); err != nil {
 		t.Fatalf("decode %q: %v", body, err)
 	}
-	got := map[string]bool{}
+	// One row per file, each reporting the release version; the sidecar has none.
+	keys := map[string]string{}
 	for _, p := range resp.Packages {
-		if p.Name != "six" {
-			continue
+		if p.Name == "six" {
+			keys[p.Version] = p.ReleaseVersion
 		}
-		got[p.Version] = true
 	}
-	want := map[string]bool{"1.17.0": true, "1.17.0+py2.py3-none-any": true}
-	if len(got) != len(want) {
-		t.Fatalf("six versions = %v, want %v (body %s)", got, want, body)
+	want := map[string]string{wheel: "1.17.0", "six-1.17.0.tar.gz": "1.17.0"}
+	if len(keys) != len(want) {
+		t.Fatalf("six rows = %v, want %v", keys, want)
 	}
-	for v := range want {
-		if !got[v] {
-			t.Errorf("missing six version %q in %v", v, got)
+	for k, v := range want {
+		if keys[k] != v {
+			t.Errorf("six row %q release version = %q, want %q", k, keys[k], v)
 		}
 	}
 }

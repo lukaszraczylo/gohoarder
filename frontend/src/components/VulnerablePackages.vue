@@ -126,7 +126,7 @@ import {
 } from '@perfect-design/ui'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
 import SeveritySummary from './SeveritySummary.vue'
-import { formatBytes, formatDate, formatNumber, withVersionPrefix } from '@/lib/format'
+import { formatBytes, formatDate, formatNumber, displayVersion, withVersionPrefix } from '@/lib/format'
 import { faArrowLeft, faCircleCheck } from '@/lib/icons'
 import { NO_VULNERABILITIES } from '@/lib/severity'
 
@@ -244,7 +244,7 @@ const totalCounts = computed(() =>
 )
 
 const versionColumns: DataTableColumn<Package>[] = [
-  { key: 'version', header: 'Version', rowHeader: true, accessor: (pkg) => withVersionPrefix(pkg.version) },
+  { key: 'version', header: 'Version', rowHeader: true, accessor: (pkg) => withVersionPrefix(displayVersion(pkg)) },
   { key: 'download_count', header: 'Downloads', numeric: true, accessor: (pkg) => formatNumber(pkg.download_count) },
   { key: 'size', header: 'Size', numeric: true, accessor: (pkg) => formatBytes(pkg.size) },
   { key: 'cached_at', header: 'Cached', accessor: (pkg) => formatDate(pkg.cached_at) },

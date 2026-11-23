@@ -124,6 +124,7 @@ type Package struct {
 	ID              string            `json:"id"`
 	StorageKey      string            `json:"storage_key"`
 	Version         string            `json:"version"`
+	ReleaseVersion  string            `json:"release_version,omitempty"`
 	Name            string            `json:"name"`
 	Registry        string            `json:"registry"`
 	AuthProvider    string            `json:"auth_provider"`

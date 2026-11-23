@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -96,4 +97,62 @@ func TestPostgresDailyAggregationUpserts(t *testing.T) {
 	var count int64
 	require.NoError(t, store.db.Raw("SELECT COALESCE(SUM(download_count), 0) FROM download_stats_daily").Scan(&count).Error)
 	require.Equal(t, int64(5), count)
+}
+
+func TestPostgresDropsEmptyLegacyEventsTable(t *testing.T) {
+	store, connStr := newPostgresStore(t)
+	require.NoError(t, store.db.Exec("CREATE TABLE download_events_old (id BIGINT)").Error)
+
+	second, err := NewV2(Config{Driver: "postgres", DSN: connStr, LogLevel: "silent"})
+	require.NoError(t, err)
+	defer func() { _ = second.Close() }()
+	require.False(t, second.db.Migrator().HasTable("download_events_old"))
+
+	require.NoError(t, second.db.Exec("CREATE TABLE download_events_old (id BIGINT)").Error)
+	require.NoError(t, second.db.Exec("INSERT INTO download_events_old VALUES (1)").Error)
+	third, err := NewV2(Config{Driver: "postgres", DSN: connStr, LogLevel: "silent"})
+	require.NoError(t, err)
+	defer func() { _ = third.Close() }()
+	require.True(t, third.db.Migrator().HasTable("download_events_old"), "a table with rows must stay")
+}
+
+func TestPostgresAddsReleaseVersionToExistingPackages(t *testing.T) {
+	ctx := context.Background()
+	store, connStr := newPostgresStore(t)
+	require.NoError(t, store.db.Exec("ALTER TABLE packages DROP COLUMN release_version").Error)
+
+	second, err := NewV2(Config{Driver: "postgres", DSN: connStr, LogLevel: "silent"})
+	require.NoError(t, err, "start on a schema without the column")
+	defer func() { _ = second.Close() }()
+
+	now := time.Now()
+	const key = "six-1.17.0.tar.gz"
+	require.NoError(t, second.SavePackage(ctx, &metadata.Package{
+		Registry: "pypi", Name: "six", Version: key, ReleaseVersion: "1.17.0",
+		StorageKey: "pypi/six/" + key, Size: 1, CachedAt: now, LastAccessed: now,
+	}))
+	got, err := second.GetPackage(ctx, "pypi", "six", key)
+	require.NoError(t, err)
+	require.Equal(t, "1.17.0", got.ReleaseVersion)
+}
+
+func TestPostgresTimeSeriesMergesRawAndAggregated(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newPostgresStore(t)
+	recordDownloads(t, store, 2)
+	// Two downloads in a completed hour get aggregated; two more stay raw.
+	require.NoError(t, store.db.Exec("UPDATE download_events SET downloaded_at = ?", time.Now().UTC().Add(-3*time.Hour)).Error)
+	require.NoError(t, store.AggregateDownloadData(ctx))
+	require.NoError(t, store.UpdateDownloadCount(ctx, "npm", "left-pad", "1.3.0"))
+	require.NoError(t, store.UpdateDownloadCount(ctx, "npm", "left-pad", "1.3.0"))
+
+	for _, period := range []string{"1h", "1day", "7day", "30day"} {
+		ts, err := store.GetTimeSeriesStats(ctx, period, "npm")
+		require.NoError(t, err, period)
+		want := int64(4)
+		if period == "1h" {
+			want = 2 // the aggregated hour is outside the window
+		}
+		require.Equal(t, want, sumPoints(ts), period)
+	}
 }

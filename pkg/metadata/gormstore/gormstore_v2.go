@@ -102,6 +102,10 @@ func NewV2(cfg Config) (*GORMStoreV2, error) {
 		}
 	}
 
+	if err := dropEmptyTable(db, legacyDownloadEventsTable); err != nil {
+		log.Warn().Err(err).Str("table", legacyDownloadEventsTable).Msg("Failed to drop empty legacy table")
+	}
+
 	// Load registry cache
 	if err := store.loadRegistryCache(); err != nil {
 		return nil, err
@@ -229,6 +233,7 @@ func (s *GORMStoreV2) SavePackage(ctx context.Context, pkg *metadata.Package) er
 			RegistryID:     registryID,
 			Name:           pkg.Name,
 			Version:        pkg.Version,
+			ReleaseVersion: pkg.ReleaseVersion,
 			StorageKey:     pkg.StorageKey,
 			Size:           pkg.Size,
 			ChecksumMD5:    pkg.ChecksumMD5,
@@ -249,6 +254,7 @@ func (s *GORMStoreV2) SavePackage(ctx context.Context, pkg *metadata.Package) er
 			"registry_id":     registryID,
 			"name":            pkg.Name,
 			"version":         pkg.Version,
+			"release_version": pkg.ReleaseVersion,
 			"storage_key":     pkg.StorageKey,
 			"size":            pkg.Size,
 			"checksum_md5":    pkg.ChecksumMD5,
@@ -367,6 +373,7 @@ func (s *GORMStoreV2) modelToPackage(model *PackageModel, registryName string) *
 		Registry:        registryName,
 		Name:            model.Name,
 		Version:         model.Version,
+		ReleaseVersion:  model.ReleaseVersion,
 		StorageKey:      model.StorageKey,
 		Size:            model.Size,
 		ChecksumMD5:     model.ChecksumMD5,

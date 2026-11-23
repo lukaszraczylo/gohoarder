@@ -239,6 +239,7 @@ func (a *App) initializeComponents() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
+	a.migrateLegacyPyPIRecords(context.Background())
 
 	// Initialize network client. Pull values from cfg.Network where set;
 	// fall back to existing literals so unset fields preserve current

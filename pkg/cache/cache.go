@@ -52,7 +52,7 @@ type Manager struct {
 	mu          sync.RWMutex
 	bcMu        sync.RWMutex
 	closeOnce   sync.Once
-	evicting    bool
+	evictMu     sync.Mutex // serialises LRU eviction; a second caller waits and re-checks its quota
 }
 
 // SetBroadcaster wires an events.Broadcaster onto the manager so cache
@@ -708,19 +708,8 @@ func (m *Manager) deletePackage(ctx context.Context, pkg *metadata.Package) erro
 
 // evict implements LRU eviction
 func (m *Manager) evict(ctx context.Context, needed int64) error {
-	m.mu.Lock()
-	if m.evicting {
-		m.mu.Unlock()
-		return errors.New(errors.ErrCodeStorageFailure, "eviction already in progress")
-	}
-	m.evicting = true
-	m.mu.Unlock()
-
-	defer func() {
-		m.mu.Lock()
-		m.evicting = false
-		m.mu.Unlock()
-	}()
+	m.evictMu.Lock()
+	defer m.evictMu.Unlock()
 
 	log.Info().Int64("needed", needed).Msg("Starting LRU eviction")
 
@@ -738,12 +727,14 @@ func (m *Manager) evict(ctx context.Context, needed int64) error {
 			break
 		}
 
+		deleted := 0
 		for _, pkg := range packages {
 			if err := m.deletePackage(ctx, pkg); err != nil {
 				log.Warn().Err(err).Str("package", pkg.Name).Msg("Failed to evict package")
 				continue
 			}
 
+			deleted++
 			freed += pkg.Size
 			metrics.RecordCacheEviction("lru")
 
@@ -752,8 +743,8 @@ func (m *Manager) evict(ctx context.Context, needed int64) error {
 			}
 		}
 
-		if len(packages) < opts.Limit {
-			break // No more packages
+		if len(packages) < opts.Limit || deleted == 0 {
+			break // No more packages, or the same rows would be listed again
 		}
 	}
 

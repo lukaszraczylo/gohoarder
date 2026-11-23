@@ -91,9 +91,20 @@ func (s *MySQLV2IntegrationTestSuite) TearDownTest() {
 			"registries",
 		}
 
-		for _, table := range tables {
-			s.store.db.Exec("TRUNCATE TABLE " + table)
-		}
+		// FOREIGN_KEY_CHECKS is per connection, so truncate on one pinned connection.
+		err := s.store.db.Connection(func(tx *gorm.DB) error {
+			if err := tx.Exec("SET FOREIGN_KEY_CHECKS = 0").Error; err != nil {
+				return err
+			}
+			defer tx.Exec("SET FOREIGN_KEY_CHECKS = 1")
+			for _, table := range tables {
+				if err := tx.Exec("TRUNCATE TABLE " + table).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		s.Require().NoError(err)
 
 		// Re-seed default registries after truncate
 		defaultRegistries := []RegistryModel{
@@ -124,10 +135,11 @@ func TestMySQLV2IntegrationTestSuite(t *testing.T) {
 // Test_MySQLV2_SpecificFeatures tests MySQL-specific features
 func (s *MySQLV2IntegrationTestSuite) Test_MySQLV2_SpecificFeatures() {
 	// Test that we're actually using MySQL
-	var version string
-	err := s.store.db.Raw("SELECT VERSION()").Scan(&version).Error
+	// VERSION() is a bare number ("8.0.46"); the server flavour is in version_comment.
+	var comment string
+	err := s.store.db.Raw("SELECT @@version_comment").Scan(&comment).Error
 	s.NoError(err)
-	s.Contains(version, "MySQL")
+	s.Contains(comment, "MySQL")
 }
 
 // Test_MySQLV2_NoPartitioning tests that partition manager is nil for MySQL

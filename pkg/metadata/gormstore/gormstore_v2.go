@@ -977,11 +977,7 @@ func (s *GORMStoreV2) SaveCVEBypass(ctx context.Context, bypass *metadata.CVEByp
 	if bypass.ID != "" {
 		id, err := strconv.ParseInt(bypass.ID, 10, 64)
 		if err == nil {
-			model.ID = id
-			if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
-				return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to update CVE bypass")
-			}
-			return nil
+			return s.updateCVEBypass(ctx, id, model)
 		}
 	}
 
@@ -994,6 +990,35 @@ func (s *GORMStoreV2) SaveCVEBypass(ctx context.Context, bypass *metadata.CVEByp
 	bypass.ID = fmt.Sprintf("%d", model.ID)
 	bypass.CreatedAt = model.CreatedAt
 
+	return nil
+}
+
+// updateCVEBypass rewrites the editable columns only, so created_at and usage counters survive an edit.
+func (s *GORMStoreV2) updateCVEBypass(ctx context.Context, id int64, model *CVEBypassModel) error {
+	db := s.db.WithContext(ctx)
+	res := db.Model(&CVEBypassModel{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"type":             model.Type,
+		"target":           model.Target,
+		"reason":           model.Reason,
+		"created_by":       model.CreatedBy,
+		"expires_at":       model.ExpiresAt,
+		"notify_on_expiry": model.NotifyOnExpiry,
+		"active":           model.Active,
+	})
+	if res.Error != nil {
+		return errors.Wrap(res.Error, errors.ErrCodeStorageFailure, "failed to update CVE bypass")
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+	// MySQL reports 0 rows for an unchanged row, so tell that apart from a missing one.
+	var count int64
+	if err := db.Model(&CVEBypassModel{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		return errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to update CVE bypass")
+	}
+	if count == 0 {
+		return errors.NotFound("CVE bypass not found")
+	}
 	return nil
 }
 

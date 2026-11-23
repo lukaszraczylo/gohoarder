@@ -713,6 +713,36 @@ func (s *GORMStoreV2TestSuite) Test_V2_SaveCVEBypass_Update() {
 	s.NoError(err)
 }
 
+// Test_V2_SaveCVEBypass_UpdateKeepsCreatedAt guards against an edit zeroing created_at.
+func (s *GORMStoreV2TestSuite) Test_V2_SaveCVEBypass_UpdateKeepsCreatedAt() {
+	bypass := &metadata.CVEBypass{
+		Type: metadata.BypassTypeCVE, Target: "CVE-2024-0003", Reason: "before",
+		CreatedBy: "admin@example.com", ExpiresAt: time.Now().Add(time.Hour), Active: true,
+	}
+	s.Require().NoError(s.store.SaveCVEBypass(s.ctx, bypass))
+
+	var before CVEBypassModel
+	s.Require().NoError(s.store.db.First(&before, bypass.ID).Error)
+
+	bypass.Reason = "after"
+	s.Require().NoError(s.store.SaveCVEBypass(s.ctx, bypass))
+
+	var after CVEBypassModel
+	s.Require().NoError(s.store.db.First(&after, bypass.ID).Error)
+	s.Equal("after", after.Reason)
+	s.False(after.CreatedAt.IsZero())
+	s.WithinDuration(before.CreatedAt, after.CreatedAt, time.Second)
+}
+
+// Test_V2_SaveCVEBypass_UpdateMissing tests that editing an unknown bypass fails.
+func (s *GORMStoreV2TestSuite) Test_V2_SaveCVEBypass_UpdateMissing() {
+	err := s.store.SaveCVEBypass(s.ctx, &metadata.CVEBypass{
+		ID: "999999", Type: metadata.BypassTypeCVE, Target: "CVE-2024-0004", Reason: "x",
+		CreatedBy: "admin@example.com", ExpiresAt: time.Now().Add(time.Hour), Active: true,
+	})
+	s.Error(err)
+}
+
 // Test_V2_GetActiveCVEBypasses tests retrieving active CVE bypasses
 func (s *GORMStoreV2TestSuite) Test_V2_GetActiveCVEBypasses() {
 	// Create active bypass with unique target

@@ -693,6 +693,39 @@ func (m *Manager) store(ctx context.Context, registry, name, version, releaseVer
 	return pkg, nil
 }
 
+// ScanFile returns a local file holding a cached package, for a scan retry. Backends with a
+// local path serve it directly; others are copied to a temp file that cleanup removes.
+func (m *Manager) ScanFile(ctx context.Context, registry, name, version string) (string, func(), error) {
+	pkg, err := m.metadata.GetPackage(ctx, registry, name, version)
+	if err != nil {
+		return "", nil, err
+	}
+	if local, ok := m.storage.(storage.LocalPathProvider); ok {
+		path, pathErr := local.GetLocalPath(ctx, pkg.StorageKey)
+		return path, func() {}, pathErr
+	}
+	rc, err := m.storage.Get(ctx, pkg.StorageKey)
+	if err != nil {
+		return "", nil, err
+	}
+	defer func() { _ = rc.Close() }()
+	tmp, err := os.CreateTemp(os.TempDir(), "gohoarder-rescan-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.Remove(tmp.Name()) } // #nosec G104 -- cleanup
+	if _, err := io.Copy(tmp, rc); err != nil {
+		_ = tmp.Close() // #nosec G104 -- cleanup
+		cleanup()
+		return "", nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return tmp.Name(), cleanup, nil
+}
+
 // Delete removes a package from cache
 func (m *Manager) Delete(ctx context.Context, registry, name, version string) error {
 	pkg, err := m.metadata.GetPackage(ctx, registry, name, version)

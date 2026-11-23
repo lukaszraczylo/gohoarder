@@ -6,6 +6,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -53,11 +54,23 @@ const (
 	maxScanRetries           = 6
 )
 
+// FileSource returns a readable local copy of a stored package for a retry, plus its cleanup.
+type FileSource func(ctx context.Context, registry, packageName, version string) (path string, cleanup func(), err error)
+
+// SetFileSource lets a retry re-read the stored blob when the file its first scan used is gone,
+// as with remote storage whose scan source is a temp file removed after the first attempt.
+func (m *Manager) SetFileSource(fs FileSource) {
+	m.stateMu.Lock()
+	m.fileSource = fs
+	m.stateMu.Unlock()
+}
+
 // Manager manages multiple security scanners
 type Manager struct {
 	metadataStore metadata.MetadataStore
 	broadcaster   events.Broadcaster
 	retryTimers   map[string]*time.Timer
+	fileSource    FileSource
 	inflight      map[string]int
 	scanners      []Scanner
 	config        config.SecurityConfig
@@ -121,8 +134,21 @@ func (m *Manager) scheduleRetry(registry, packageName, version, filePath string,
 	m.retryTimers[key] = time.AfterFunc(interval, func() {
 		m.stateMu.Lock()
 		delete(m.retryTimers, key)
+		source := m.fileSource
 		m.stateMu.Unlock()
-		if err := m.scan(context.Background(), registry, packageName, version, filePath, attempt); err != nil {
+
+		ctx := context.Background()
+		path := filePath
+		if _, statErr := os.Stat(filePath); statErr != nil && source != nil {
+			fresh, cleanup, err := source(ctx, registry, packageName, version)
+			if err != nil {
+				log.Warn().Err(err).Str("package", packageName).Int("attempt", attempt).Msg("Scan retry could not re-read package")
+				return
+			}
+			defer cleanup()
+			path = fresh
+		}
+		if err := m.scan(ctx, registry, packageName, version, path, attempt); err != nil {
 			log.Warn().Err(err).Str("package", packageName).Int("attempt", attempt).Msg("Scan retry failed")
 		}
 	})

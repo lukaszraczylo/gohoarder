@@ -308,6 +308,8 @@ func (a *App) initializeComponents() error {
 	}
 	bootCancel()
 
+	a.scanManager.SetFileSource(a.cache.ScanFile)
+
 	// Initialize rescan worker if enabled
 	if a.config.Security.Enabled && a.config.Security.RescanInterval > 0 {
 		log.Info().Dur("interval", a.config.Security.RescanInterval).Msg("Initializing package rescan worker")

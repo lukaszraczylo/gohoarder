@@ -30,6 +30,7 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
 | GH-23 | PyPI sidecar | pip's PEP 658 request (`<link>.metadata`, suffix on `original_url`) is served as its wheel's sidecar; another file's sidecar is still refused | correctness (pip install failed with 400) | medium (every pip install through the proxy) | `Access.pip_form_keeps_key_binding`, `pip_sidecar_of_other_file_rejected`, `pip_sidecar_of_same_file_accepted` / `TestPipSidecarFormIsStreamed`, `TestHandlePackageFile_OriginalURLFilenameBound` | 501bf1a |
 | GH-24 | rescan | with `security.rescan_interval` set, artifacts whose scan never completed are scanned and old results refreshed | correctness (scans lost to a restart stayed unscanned; new CVEs never picked up) | medium | not modelled (worker wiring) / `TestWorkersStartTheRescanWorker` | 378b873 |
 | GH-25 | scanners | an error result from one scanner is left out of the merge, so the row reads error only when every scanner failed; grype, npm-audit, govulncheck and pip-audit give correct results with the scanner image tool versions | correctness (false error, false clean) | high (grype, npm-audit and pip-audit failed on every package; govulncheck and a bare-archive grype scan read vulnerable packages clean) | `Security.old_error_poisons_clean`, `error_and_clean_reads_clean`, `all_error_reads_error`, `merged_not_error_when_one_ran` / `TestScanPackage_ErrorResultPlusCleanReadsClean`, `TestScanPackage_AllErrorResultsReadError`, `TestScanPackage_InfrastructureErrorResultsCountAsInfrastructure`, `TestScanMapsRealOutput`, `TestParseKeepsBothViaShapes`, `TestScanReadsPrettyPrintedFindings`, `TestScanAuditsTheReleaseFromARequirement` | 3731ca0 |
+| GH-26 | rescan | the rescan worker skips the entries the serve path skips, so Go `.mod` and `.info` rows are no longer scanned | cost (1316 of about 2780 rescans on production were these rows, about 3.3 s each) | low | `Cache.old_rescan_scanned_go_metadata`, `rescan_skips_what_serve_skips` / `TestRescanSkipsMetadataEntries` | d6044cd |
 
 ### Exploit paths and reach
 
@@ -84,6 +85,11 @@ Currency: `sh lean4/scripts/check_currency.sh origin/main`.
   as clean the same way grype did.
 - **GH-17 cleanup.** The per-handler `Access-Control-*` lines in `pkg/app/handlers*.go` are removed; `apiOriginGuard` is the only CORS
   source. `TestHandlersSetNoCORSHeaders` and `TestAPIResponsesNeverCarryWildcardOrigin` guard it.
+- **GH-26.** `rescanPackages` kept its own list of metadata versions and never called `IsMetadataEntry`, so Go `.mod` and `.info`
+  rows were scanned every cycle. Related options, whose defaults keep the old behaviour: `rescan_active_window` skips packages idle longer than the
+  window, `rescan_concurrency` runs scans in parallel, and `rescan_on_access` rescans a stale cache hit before serving it.
+  Model of the last: `Security.finished_rescan_verdict_younger_than_interval`, `old_verdict_only_on_timeout`,
+  `stale_clean_fresh_vulnerable_blocked`, `timeout_keeps_previous`, `timeout_without_previous_is_miss_rule`, `off_is_old_hit_path`.
 
 ## Not fixed
 

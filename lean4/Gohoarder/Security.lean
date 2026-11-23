@@ -271,4 +271,90 @@ theorem one_package_failure_is_not_infra : infraOnly [true, false] = false := by
 
 theorem all_infra_failures_are_infra : infraOnly [true, true] = true := by decide
 
+/-! ### Rescan on access (`pkg/cache/rescan_on_access.go` `refreshStaleScan`)
+
+Ages are seconds since `ScannedAt`; `interval` is `Config.RescanAfter` (0 = off). A rescan that timed out
+or failed is `none`: the previous verdict stands, and with no previous verdict the first-download rule applies. -/
+
+structure Verdict where
+  scan : Scan
+  age : ℕ
+
+/-- The hit is rescanned when the feature is on and its result is missing or at least `interval` old. -/
+def rescans (interval : ℕ) (prev : Option Verdict) : Bool :=
+  decide (0 < interval) && (match prev with
+    | none => true
+    | some v => decide (interval ≤ v.age))
+
+/-- The verdict the gate decides on; a finished rescan is brand new (age 0). -/
+def hitVerdict (interval : ℕ) (prev : Option Verdict) (rescan : Option Scan) : Option Verdict :=
+  if rescans interval prev then
+    (match rescan with
+      | some s => some ⟨s, 0⟩
+      | none => prev)
+  else prev
+
+/-- No verdict at all is a scan still in flight: `fail_closed` refuses, otherwise the package is served. -/
+def servesOnAccess (failClosed pkgBypass : Bool) (policy : Option ℕ) (now : ℤ) (bs : List Bypass)
+    (interval : ℕ) (prev : Option Verdict) (rescan : Option Scan) : Bool :=
+  match hitVerdict interval prev rescan with
+  | some v => serves failClosed pkgBypass policy now bs v.scan
+  | none => serves failClosed pkgBypass policy now bs (Scan.missing true)
+
+/-- Key property: with the feature on, a rescan that finished leaves no verdict as old as `interval`. -/
+theorem finished_rescan_verdict_younger_than_interval (interval : ℕ) (hi : 0 < interval)
+    (prev : Option Verdict) (s : Scan) (v : Verdict)
+    (h : hitVerdict interval prev (some s) = some v) : v.age < interval := by
+  unfold hitVerdict at h
+  by_cases hr : rescans interval prev = true
+  · simp only [hr, ite_true, Option.some.injEq] at h
+    subst h
+    simpa using hi
+  · simp only [hr] at h
+    subst h
+    simp only [rescans, hi, decide_true, Bool.true_and, Bool.not_eq_true] at hr
+    simpa using hr
+
+/-- A verdict older than `interval` survives only when the rescan timed out or failed. -/
+theorem old_verdict_only_on_timeout (interval : ℕ) (hi : 0 < interval) (prev : Option Verdict)
+    (rescan : Option Scan) (v : Verdict) (h : hitVerdict interval prev rescan = some v)
+    (hold : interval ≤ v.age) : rescan = none := by
+  cases rescan with
+  | none => rfl
+  | some s => exact absurd (finished_rescan_verdict_younger_than_interval interval hi prev s v h) (not_lt.mpr hold)
+
+/-- A stale hit is judged on the fresh scan: a clean result that now holds a blocked vulnerability is refused. -/
+theorem stale_clean_fresh_vulnerable_blocked (policy : Option ℕ) (t : ℕ) (hp : policy = some t)
+    (failClosed : Bool) (now : ℤ) (bs : List Bypass) (interval age : ℕ) (hi : 0 < interval)
+    (hage : interval ≤ age) (vs : List Vuln) (v : Vuln) (hv : v ∈ vs) (hsev : t ≤ v.sev)
+    (hun : v.id ∉ bypassedIds now bs) :
+    servesOnAccess failClosed false policy now bs interval (some ⟨Scan.ok [], age⟩) (some (Scan.ok vs)) = false := by
+  have hr : rescans interval (some ⟨Scan.ok [], age⟩) = true := by simp [rescans, hi, hage]
+  simp only [servesOnAccess, hitVerdict, hr, ite_true]
+  exact vulnerable_not_served policy t hp failClosed now bs vs v hv hsev hun
+
+/-- A fresh result is served as is: no rescan, whatever the rescan outcome. -/
+theorem fresh_hit_not_rescanned (interval : ℕ) (v : Verdict) (hfresh : v.age < interval)
+    (rescan : Option Scan) : hitVerdict interval (some v) rescan = some v := by
+  have : rescans interval (some v) = false := by simp [rescans, not_le.mpr hfresh]
+  simp [hitVerdict, this]
+
+/-- A timeout keeps the previous verdict. -/
+theorem timeout_keeps_previous (interval : ℕ) (prev : Option Verdict) :
+    hitVerdict interval prev none = prev := by
+  unfold hitVerdict
+  split <;> rfl
+
+/-- A timeout with no previous verdict follows the first-download rule. -/
+theorem timeout_without_previous_is_miss_rule (failClosed pkgBypass : Bool) (policy : Option ℕ) (now : ℤ)
+    (bs : List Bypass) (interval : ℕ) :
+    servesOnAccess failClosed pkgBypass policy now bs interval none none = (pkgBypass || !failClosed) := by
+  simp only [servesOnAccess, timeout_keeps_previous]
+  cases failClosed <;> cases pkgBypass <;> simp [serves]
+
+/-- `rescan_on_access` off (`RescanAfter` 0) is the old hit path: the stored verdict decides. -/
+theorem off_is_old_hit_path (prev : Option Verdict) (rescan : Option Scan) :
+    hitVerdict 0 prev rescan = prev := by
+  simp [hitVerdict, rescans]
+
 end Gohoarder.Security

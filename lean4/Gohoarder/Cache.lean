@@ -208,4 +208,16 @@ theorem old_exempted_npm_package : scanExemptOld true "1.0.0" = true := by decid
 
 theorem go_metadata_still_exempt : scanExempt "go" true "v1.0.0" = true := by decide
 
+/-- `pkg/scanner/rescanner.go` before the fix: the worker skipped only the version names, not the Go suffixes. -/
+def rescanSkipOld (version : String) : Bool := decide (version ∈ metaVersions)
+
+/-- After the fix the worker asks `IsMetadataEntry`, the same predicate as the serve path. -/
+def rescanSkip : String → Bool → String → Bool := scanExempt
+
+theorem old_rescan_scanned_go_metadata :
+    rescanSkipOld "v1.0.0" = false ∧ scanExempt "go" true "v1.0.0" = true := by decide
+
+theorem rescan_skips_what_serve_skips (registry : String) (suffixMeta : Bool) (version : String) :
+    rescanSkip registry suffixMeta version = scanExempt registry suffixMeta version := rfl
+
 end Gohoarder.Cache

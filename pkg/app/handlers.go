@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/lukaszraczylo/gohoarder/internal/version"
+	apperrors "github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner"
 	"github.com/lukaszraczylo/gohoarder/pkg/websocket"
@@ -291,6 +293,10 @@ func (a *App) handleDeletePackage(c fiber.Ctx) error {
 	} else {
 		// For NPM and PyPI, delete directly
 		if err := a.cache.Delete(ctx, registry, name, version); err != nil {
+			var appErr *apperrors.Error
+			if stderrors.As(err, &appErr) && appErr.Code == apperrors.ErrCodeNotFound {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "package not found"})
+			}
 			log.Error().
 				Err(err).
 				Str("registry", registry).

@@ -652,108 +652,108 @@ func (s *GORMStoreV2) GetTimeSeriesStats(ctx context.Context, period string, reg
 		DataPoints: make([]*metadata.TimeSeriesDataPoint, 0),
 	}
 
-	// Determine which table to query based on period
-	var tableName string
-	var since time.Time
-	var bucketDuration time.Duration
-
+	now := time.Now().UTC()
+	var span, bucketDuration time.Duration
+	daily := false
 	switch period {
 	case "1h":
-		tableName = "download_stats_hourly"
-		since = time.Now().Add(-1 * time.Hour).Truncate(time.Hour)
-		bucketDuration = time.Hour
-	case "1day":
-		tableName = "download_stats_hourly"
-		since = time.Now().Add(-24 * time.Hour).Truncate(time.Hour)
-		bucketDuration = time.Hour
+		span, bucketDuration = time.Hour, time.Hour
 	case "7day":
-		tableName = "download_stats_daily"
-		since = time.Now().Add(-7 * 24 * time.Hour).Truncate(24 * time.Hour)
-		bucketDuration = 24 * time.Hour
+		span, bucketDuration, daily = 7*24*time.Hour, 24*time.Hour, true
 	case "30day":
-		tableName = "download_stats_daily"
-		since = time.Now().Add(-30 * 24 * time.Hour).Truncate(24 * time.Hour)
-		bucketDuration = 24 * time.Hour
+		span, bucketDuration, daily = 30*24*time.Hour, 24*time.Hour, true
 	default:
-		tableName = "download_stats_hourly"
-		since = time.Now().Add(-24 * time.Hour).Truncate(time.Hour)
-		bucketDuration = time.Hour
+		span, bucketDuration = 24*time.Hour, time.Hour
 	}
+	since := now.Add(-span).Truncate(bucketDuration)
 
-	now := time.Now()
-
-	// Try to get registry-level aggregate stats first
-	query := s.db.WithContext(ctx).
-		Table(tableName).
-		Select("time_bucket as timestamp, download_count as value").
-		Where("time_bucket >= ? AND time_bucket <= ?", since, now)
-
-	// Filter by registry if specified
+	var registryID int32
 	if registry != "" {
-		registryID, err := s.getRegistryID(registry)
+		id, err := s.getRegistryID(registry)
 		if err != nil {
 			return nil, err
 		}
-		query = query.Where("registry_id = ? AND package_id IS NULL", registryID)
-	} else {
-		query = query.Where("package_id IS NULL")
+		registryID = id
 	}
 
-	query = query.Order("time_bucket ASC")
+	// Aggregation lags behind: the current hour sits in download_events and
+	// completed hours not yet rolled into a day sit in download_stats_hourly,
+	// so all three sources are merged. Aggregation deletes the events it
+	// counts, so no download is counted twice.
+	counts := make(map[int64]int64)
+	add := func(t time.Time, v int64) { counts[t.UTC().Truncate(bucketDuration).Unix()] += v }
 
-	type Result struct {
-		Timestamp time.Time
-		Value     int64
+	hourly, err := s.aggregateRows(ctx, "download_stats_hourly", since, now, registryID)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range hourly {
+		add(r.Timestamp, r.Value)
 	}
 
-	var results []Result
-	if err := query.Scan(&results).Error; err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get time series stats")
+	var events []time.Time
+	eventQuery := s.db.WithContext(ctx).Table("download_events").Where("downloaded_at >= ?", since)
+	if registryID != 0 {
+		eventQuery = eventQuery.Where("registry_id = ?", registryID)
+	}
+	if err := eventQuery.Pluck("downloaded_at", &events).Error; err != nil {
+		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get recent download events")
+	}
+	for _, t := range events {
+		add(t, 1)
 	}
 
-	// If no aggregate data found, try summing package-level stats
-	if len(results) == 0 {
-		sumQuery := s.db.WithContext(ctx).
-			Table(tableName).
-			Select("time_bucket as timestamp, SUM(download_count) as value").
-			Where("time_bucket >= ? AND time_bucket <= ?", since, now)
-
-		if registry != "" {
-			registryID, err := s.getRegistryID(registry)
-			if err != nil {
-				return nil, err
-			}
-			sumQuery = sumQuery.Where("registry_id = ? AND package_id IS NOT NULL", registryID)
-		} else {
-			sumQuery = sumQuery.Where("package_id IS NOT NULL")
+	if daily {
+		// A completed day's rollup is authoritative over its leftover hourly rows.
+		rollups, err := s.aggregateRows(ctx, "download_stats_daily", since, now, registryID)
+		if err != nil {
+			return nil, err
 		}
-
-		sumQuery = sumQuery.Group("time_bucket").Order("time_bucket ASC")
-
-		if err := sumQuery.Scan(&results).Error; err != nil {
-			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get time series stats from package data")
+		for _, r := range rollups {
+			counts[r.Timestamp.UTC().Truncate(bucketDuration).Unix()] = r.Value
 		}
 	}
 
-	// Create a map of existing data points
-	dataMap := make(map[time.Time]int64)
-	for _, r := range results {
-		dataMap[r.Timestamp] = r.Value
-	}
-
-	// Generate continuous time series with 0 values for missing periods
-	for t := since; t.Before(now) || t.Equal(now); t = t.Add(bucketDuration) {
-		value := int64(0)
-		if v, exists := dataMap[t]; exists {
-			value = v
-		}
+	for t := since; !t.After(now); t = t.Add(bucketDuration) {
 		stats.DataPoints = append(stats.DataPoints, &metadata.TimeSeriesDataPoint{
 			Timestamp: t,
-			Value:     value,
+			Value:     counts[t.Unix()],
 		})
 	}
 
 	return stats, nil
+}
+
+type timeSeriesRow struct {
+	Timestamp time.Time
+	Value     int64
+}
+
+// aggregateRows reads registry-level rows (package_id NULL), falling back to
+// summing package-level rows when none exist. registryID 0 means all registries.
+func (s *GORMStoreV2) aggregateRows(ctx context.Context, table string, since, until time.Time, registryID int32) ([]timeSeriesRow, error) {
+	var rows []timeSeriesRow
+	for _, packageLevel := range []bool{false, true} {
+		cond := "package_id IS NULL"
+		if packageLevel {
+			cond = "package_id IS NOT NULL"
+		}
+		query := s.db.WithContext(ctx).
+			Table(table).
+			Select("time_bucket as timestamp, SUM(download_count) as value").
+			Where("time_bucket >= ? AND time_bucket <= ?", since, until).
+			Where(cond)
+		if registryID != 0 {
+			query = query.Where("registry_id = ?", registryID)
+		}
+		if err := query.Group("time_bucket").Order("time_bucket ASC").Scan(&rows).Error; err != nil {
+			return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to get time series stats")
+		}
+		if len(rows) > 0 {
+			return rows, nil
+		}
+	}
+	return rows, nil
 }
 
 // AggregateDownloadData aggregates raw download events into hourly/daily stats

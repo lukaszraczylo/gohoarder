@@ -147,6 +147,8 @@ server {
 
     # Frontend SPA - serve index.html for all other routes
     location / {
+        # index.html names the hashed bundles; a cached copy keeps serving the previous release.
+        add_header Cache-Control "no-cache" always;
         try_files $uri $uri/ /index.html;
     }
 }

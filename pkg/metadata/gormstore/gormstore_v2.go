@@ -64,7 +64,11 @@ func NewV2(cfg Config) (*GORMStoreV2, error) {
 	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger:                 gormLogger,
 		SkipDefaultTransaction: true, // Better performance
-		PrepareStmt:            true, // Cached prepared statements
+		// A cached statement prepared inside a transaction takes a second pool
+		// connection. With SQLite's single writer, transactions queue on the
+		// write lock holding connections, so the holder can starve for one
+		// and stall until busy_timeout. SQLite prepares cheaply; skip the cache.
+		PrepareStmt: cfg.Driver != "sqlite",
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to connect to database")

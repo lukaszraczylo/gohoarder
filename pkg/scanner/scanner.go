@@ -262,6 +262,8 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 		Str("version", version).
 		Msg("Starting security scan")
 
+	scanVersion := m.scanVersion(ctx, registry, packageName, version)
+
 	// Collect results from all scanners
 	var scanResults []*metadata.ScanResult
 	scannerNames := make([]string, 0)
@@ -277,7 +279,7 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 			continue
 		}
 
-		result, err := scanner.Scan(ctx, registry, packageName, version, filePath)
+		result, err := scanner.Scan(ctx, registry, packageName, scanVersion, filePath)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -355,6 +357,8 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 
 	// Merge and deduplicate results from all scanners
 	mergedResult := m.mergeResults(scanResults, scannerNames)
+	// The store finds the package by its cache version, not the release version.
+	mergedResult.PackageVersion = version
 
 	// Save consolidated result to metadata store
 	if err := m.metadataStore.SaveScanResult(ctx, mergedResult); err != nil {
@@ -382,6 +386,16 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 	})
 
 	return nil
+}
+
+// scanVersion is the version scanners are asked about. PyPI artifacts are cached
+// under their file name; the release version is on the package row.
+func (m *Manager) scanVersion(ctx context.Context, registry, packageName, version string) string {
+	pkg, err := m.metadataStore.GetPackage(ctx, registry, packageName, version)
+	if err != nil || pkg == nil || pkg.ReleaseVersion == "" {
+		return version
+	}
+	return pkg.ReleaseVersion
 }
 
 // mergeResults merges and deduplicates scan results from multiple scanners

@@ -49,7 +49,6 @@ type Manager struct {
 	sf          singleflight.Group
 	config      Config
 	cleanupWG   sync.WaitGroup
-	mu          sync.RWMutex
 	bcMu        sync.RWMutex
 	closeOnce   sync.Once
 	evictMu     sync.Mutex // serialises LRU eviction; a second caller waits and re-checks its quota
@@ -96,6 +95,9 @@ const defaultScanWaitTimeout = 30 * time.Second
 
 // cleanupBatchSize bounds how many rows one cleanup query reads.
 const cleanupBatchSize = metadata.DefaultBatchSize
+
+// getAttempts bounds how often Get re-resolves an entry whose blob vanished.
+const getAttempts = 2
 
 // Eviction metric reasons.
 const (
@@ -221,36 +223,44 @@ func (m *Manager) Get(ctx context.Context, registry, name, version string, fetch
 	// Use singleflight to deduplicate concurrent requests
 	key := fmt.Sprintf("%s/%s/%s", registry, name, version)
 
-	result, err, _ := m.sf.Do(key, func() (interface{}, error) {
-		// getOrFetch returns a CacheEntry with Data == nil. Each caller
-		// re-opens its own storage reader below to avoid sharing a
-		// single io.ReadCloser across concurrent waiters.
-		return m.getOrFetch(ctx, registry, name, version, fetchFunc)
-	})
+	var openErr error
+	// A purge can delete the blob between the cache-hit probe and the open
+	// below. The second pass sees the miss and fetches again.
+	for attempt := 0; attempt < getAttempts; attempt++ {
+		result, err, _ := m.sf.Do(key, func() (interface{}, error) {
+			// getOrFetch returns a CacheEntry with Data == nil. Each caller
+			// re-opens its own storage reader below to avoid sharing a
+			// single io.ReadCloser across concurrent waiters.
+			return m.getOrFetch(ctx, registry, name, version, fetchFunc)
+		})
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+
+		entry := result.(*CacheEntry)
+		if entry == nil || entry.Package == nil {
+			return nil, errors.New(errors.ErrCodeStorageFailure, "cache entry missing package metadata")
+		}
+
+		// Open a fresh ReadCloser per caller from storage.
+		data, err := m.storage.Get(ctx, entry.Package.StorageKey)
+		if err != nil {
+			openErr = err
+			continue
+		}
+
+		// Return a copy so concurrent waiters don't share the Data field.
+		return &CacheEntry{
+			Data:         data,
+			Package:      entry.Package,
+			UpstreamURL:  entry.UpstreamURL,
+			CacheControl: entry.CacheControl,
+			FromCache:    entry.FromCache,
+		}, nil
 	}
 
-	entry := result.(*CacheEntry)
-	if entry == nil || entry.Package == nil {
-		return nil, errors.New(errors.ErrCodeStorageFailure, "cache entry missing package metadata")
-	}
-
-	// Open a fresh ReadCloser per caller from storage.
-	data, err := m.storage.Get(ctx, entry.Package.StorageKey)
-	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to retrieve cached package")
-	}
-
-	// Return a copy so concurrent waiters don't share the Data field.
-	return &CacheEntry{
-		Data:         data,
-		Package:      entry.Package,
-		UpstreamURL:  entry.UpstreamURL,
-		CacheControl: entry.CacheControl,
-		FromCache:    entry.FromCache,
-	}, nil
+	return nil, errors.Wrap(openErr, errors.ErrCodeStorageFailure, "failed to retrieve cached package")
 }
 
 // getOrFetch implements the actual get-or-fetch logic

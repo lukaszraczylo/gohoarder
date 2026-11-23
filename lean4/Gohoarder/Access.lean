@@ -121,6 +121,30 @@ theorem old_guard_allows_key_poisoning :
   exact ⟨"requests-2.31.0-py3-none-any.whl", ⟨"files.pythonhosted.org", "evil-9.9.9-py3-none-any.whl"⟩,
     by decide, by decide⟩
 
+/-- pip requests the PEP 658 sidecar as `<link>.metadata`, so the suffix lands on `original_url` and the
+request names the sidecar of the requested file. `handlePackageFile` streams it and never stores it. -/
+def pipSidecar (requested : String) (f : Fetch) : Bool := decide (f.file = requested ++ ".metadata")
+
+/-- The guard with the pip form: the requested file, or its own sidecar. -/
+def acceptsPip (requested : String) (f : Fetch) : Bool :=
+  hostAllowed f.host && (decide (f.file = requested) || pipSidecar requested f)
+
+/-- What the pip form stores still names the key: only the sidecar escapes, and it is not stored. -/
+theorem pip_form_keeps_key_binding (requested : String) (f : Fetch)
+    (h : acceptsPip requested f = true) (hs : pipSidecar requested f = false) : f.file = requested := by
+  simp only [acceptsPip, Bool.and_eq_true, Bool.or_eq_true, decide_eq_true_eq] at h
+  rcases h.2 with h2 | h2
+  · exact h2
+  · rw [h2] at hs; exact absurd hs (by simp)
+
+theorem pip_sidecar_of_other_file_rejected :
+    acceptsPip "example-1.0.0-py3-none-any.whl"
+      ⟨"files.pythonhosted.org", "evil-9.9.9-py3-none-any.whl.metadata"⟩ = false := by decide
+
+theorem pip_sidecar_of_same_file_accepted :
+    acceptsPip "example-1.0.0-py3-none-any.whl"
+      ⟨"files.pythonhosted.org", "example-1.0.0-py3-none-any.whl.metadata"⟩ = true := by decide
+
 theorem internal_hosts_rejected :
     hostAllowed "169.254.169.254" = false ∧ hostAllowed "localhost" = false ∧
     hostAllowed "metadata.google.internal" = false := by decide

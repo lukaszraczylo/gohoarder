@@ -22,6 +22,9 @@ func TestHandlePackageFile_OriginalURLFilenameBound(t *testing.T) {
 		{"same file", path, "https://files.pythonhosted.org/packages/ab/cd/ef/example-1.0.0-py3-none-any.whl", false},
 		{"same file with query", path, "https://files.pythonhosted.org/packages/ab/cd/ef/example-1.0.0-py3-none-any.whl?x=1", false},
 		{"sidecar of same file", path + ".metadata", "https://files.pythonhosted.org/packages/ab/cd/ef/example-1.0.0-py3-none-any.whl", false},
+		// pip appends ".metadata" to the whole link, so the suffix lands on original_url instead of the path.
+		{"pip sidecar of same file", path, "https://files.pythonhosted.org/packages/ab/cd/ef/example-1.0.0-py3-none-any.whl.metadata", false},
+		{"pip sidecar of another file", path, "https://files.pythonhosted.org/packages/ab/cd/ef/evil-9.9.9-py3-none-any.whl.metadata", true},
 	}
 
 	h := newHandlerForSSRFTest()

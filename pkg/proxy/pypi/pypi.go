@@ -288,6 +288,11 @@ func (h *Handler) handlePackageFile(ctx context.Context, w http.ResponseWriter, 
 			parsed.RawPath = ""
 			originalURL = parsed.String()
 		}
+		// pip appends ".metadata" to the whole link, so the suffix lands on original_url, not the path.
+		if !isSidecar && gopath.Base(parsed.Path) == filename+metadataSuffix {
+			isSidecar = true
+			filename += metadataSuffix
+		}
 		if !isAllowedPyPIHost(parsed.Host, h.allowedHosts) {
 			log.Warn().
 				Str("original_url", originalURL).

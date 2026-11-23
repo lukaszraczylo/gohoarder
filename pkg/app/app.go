@@ -320,7 +320,10 @@ func (a *App) initializeComponents() error {
 	// Initialize rescan worker if enabled
 	if a.config.Security.Enabled && a.config.Security.RescanInterval > 0 {
 		log.Info().Dur("interval", a.config.Security.RescanInterval).Msg("Initializing package rescan worker")
-		a.rescanWorker = scanner.NewRescanWorker(a.scanManager, a.metadata, a.config.Security.RescanInterval)
+		a.rescanWorker = scanner.NewRescanWorker(a.scanManager, a.metadata, a.config.Security.RescanInterval,
+			scanner.WithActiveWindow(a.config.Security.RescanActiveWindow),
+			scanner.WithConcurrency(a.config.Security.RescanConcurrency),
+		)
 	}
 
 	// Initialize WebSocket server

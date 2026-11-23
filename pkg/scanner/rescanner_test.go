@@ -9,6 +9,7 @@ import (
 	hoardererrors "github.com/lukaszraczylo/gohoarder/pkg/errors"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // rescanStore serves a fixed package list and keeps saved scan results.
@@ -76,7 +77,7 @@ func pkgRow(registry, name, version string, lastAccessed time.Time) *metadata.Pa
 	}
 }
 
-func runRescan(t *testing.T, pkgs []*metadata.Package) map[string]int {
+func runRescan(t *testing.T, pkgs []*metadata.Package, opts ...RescanOption) map[string]int {
 	t.Helper()
 	store := &rescanStore{results: map[string]*metadata.ScanResult{}, packages: pkgs}
 	mgr := newTestManager(t, store)
@@ -85,7 +86,7 @@ func runRescan(t *testing.T, pkgs []*metadata.Package) map[string]int {
 	mgr.SetFileSource(func(context.Context, string, string, string) (string, func(), error) {
 		return "/tmp/dummy", func() {}, nil
 	})
-	NewRescanWorker(mgr, store, time.Hour).rescanPackages(context.Background())
+	NewRescanWorker(mgr, store, time.Hour, opts...).rescanPackages(context.Background())
 	return cs.snapshot()
 }
 
@@ -105,4 +106,56 @@ func TestRescanSkipsMetadataEntries(t *testing.T) {
 		scanKey("npm", "left-pad", "1.3.0"):                    1,
 		scanKey("npm", "weird.mod", "1.0.0"):                   1,
 	}, got)
+}
+
+func TestRescanActiveWindow(t *testing.T) {
+	now := time.Now()
+	pkgs := []*metadata.Package{
+		pkgRow("npm", "hot", "1.0.0", now.Add(-time.Hour)),
+		pkgRow("npm", "cold", "1.0.0", now.Add(-72*time.Hour)),
+		pkgRow("npm", "unknown", "1.0.0", time.Time{}),
+	}
+	tests := []struct {
+		name   string
+		want   []string
+		window time.Duration
+	}{
+		{"window off scans everything", []string{"hot", "cold", "unknown"}, 0},
+		{"window skips idle only", []string{"hot", "unknown"}, 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runRescan(t, pkgs, WithActiveWindow(tt.window))
+			want := map[string]int{}
+			for _, n := range tt.want {
+				want[scanKey("npm", n, "1.0.0")] = 1
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+func TestRescanConcurrencyScansEachOnce(t *testing.T) {
+	now := time.Now()
+	var pkgs []*metadata.Package
+	want := map[string]int{}
+	for i := 0; i < 40; i++ {
+		name := string(rune('a'+i%26)) + string(rune('a'+i/26))
+		pkgs = append(pkgs, pkgRow("npm", name, "1.0.0", now))
+		want[scanKey("npm", name, "1.0.0")] = 1
+	}
+	pkgs = append(pkgs, pkgRow("go", "m/@v/v1.mod", "v1", now))
+
+	for _, n := range []int{-2, 0, 1, 3, 8} {
+		got := runRescan(t, pkgs, WithConcurrency(n))
+		require.Equal(t, want, got, "concurrency %d", n)
+	}
+}
+
+func TestRescanConcurrencyFloor(t *testing.T) {
+	for _, n := range []int{-1, 0} {
+		w := NewRescanWorker(nil, nil, time.Hour, WithConcurrency(n))
+		assert.Equal(t, 1, w.concurrency)
+	}
+	assert.Equal(t, 1, NewRescanWorker(nil, nil, time.Hour).concurrency)
 }

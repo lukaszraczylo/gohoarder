@@ -110,6 +110,8 @@ security:
   block_on_severity: "high"  # none, low, medium, high, critical
   scan_on_download: true  # Scan packages on first download
   rescan_interval: "24h"  # How often to re-scan packages (e.g., 24h, 168h for weekly)
+  rescan_active_window: "0s"  # Rescan only packages requested within this window (e.g., 720h); 0 = all packages
+  rescan_concurrency: 1  # Scans run in parallel during one rescan cycle; values below 1 mean 1
   # When a scan fails on infrastructure (timeout, upstream 5xx) the package is served and the
   # scan is retried every scan_retry_interval. Set fail_closed to refuse such packages instead.
   fail_closed: false

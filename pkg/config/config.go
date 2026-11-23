@@ -174,18 +174,20 @@ type CacheConfig struct {
 
 // SecurityConfig contains security scanning configuration
 type SecurityConfig struct {
-	BlockOnSeverity   string                  `mapstructure:"block_on_severity" json:"block_on_severity"`
-	AllowedPackages   []string                `mapstructure:"allowed_packages" json:"allowed_packages"`
-	IgnoredCVEs       []string                `mapstructure:"ignored_cves" json:"ignored_cves"`
-	Scanners          ScannersConfig          `mapstructure:"scanners" json:"scanners"`
-	BlockThresholds   VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`
-	RescanInterval    time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`
-	ScanRetryInterval time.Duration           `mapstructure:"scan_retry_interval" json:"scan_retry_interval"` // wait before retrying a scan that failed on infrastructure; 0 = 5m
-	ScanWaitTimeout   time.Duration           `mapstructure:"scan_wait_timeout" json:"scan_wait_timeout"`     // how long a first download waits for its scan; 0 = 30s
-	FailClosed        bool                    `mapstructure:"fail_closed" json:"fail_closed"`                 // refuse packages whose scan failed on infrastructure
-	Enabled           bool                    `mapstructure:"enabled" json:"enabled"`
-	ScanOnDownload    bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`
-	UpdateDBOnStartup bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"`
+	BlockOnSeverity    string                  `mapstructure:"block_on_severity" json:"block_on_severity"`
+	AllowedPackages    []string                `mapstructure:"allowed_packages" json:"allowed_packages"`
+	IgnoredCVEs        []string                `mapstructure:"ignored_cves" json:"ignored_cves"`
+	Scanners           ScannersConfig          `mapstructure:"scanners" json:"scanners"`
+	BlockThresholds    VulnerabilityThresholds `mapstructure:"block_thresholds" json:"block_thresholds"`
+	RescanInterval     time.Duration           `mapstructure:"rescan_interval" json:"rescan_interval"`
+	RescanActiveWindow time.Duration           `mapstructure:"rescan_active_window" json:"rescan_active_window"` // rescan only packages accessed within this window; 0 = all
+	RescanConcurrency  int                     `mapstructure:"rescan_concurrency" json:"rescan_concurrency"`     // scans run in parallel per rescan cycle; <1 = 1
+	ScanRetryInterval  time.Duration           `mapstructure:"scan_retry_interval" json:"scan_retry_interval"`   // wait before retrying a scan that failed on infrastructure; 0 = 5m
+	ScanWaitTimeout    time.Duration           `mapstructure:"scan_wait_timeout" json:"scan_wait_timeout"`       // how long a first download waits for its scan; 0 = 30s
+	FailClosed         bool                    `mapstructure:"fail_closed" json:"fail_closed"`                   // refuse packages whose scan failed on infrastructure
+	Enabled            bool                    `mapstructure:"enabled" json:"enabled"`
+	ScanOnDownload     bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`
+	UpdateDBOnStartup  bool                    `mapstructure:"update_db_on_startup" json:"update_db_on_startup"`
 }
 
 // VulnerabilityThresholds defines max allowed vulnerabilities per severity

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 )
 
 // ErrInfrastructure marks a failure of the scanning machinery (timeout,
@@ -41,6 +42,26 @@ func IsInfrastructure(err error) bool {
 	var statusErr *StatusError
 	if errors.As(err, &statusErr) {
 		return statusErr.Code >= http.StatusInternalServerError || statusErr.Code == http.StatusTooManyRequests
+	}
+	return false
+}
+
+// DetailInfrastructure is the scan-result detail key that marks an error result as infrastructure.
+const DetailInfrastructure = "infrastructure_error"
+
+// ErrorDetails builds the Details of a scan-error result.
+func ErrorDetails(reason string, infra bool) map[string]interface{} {
+	return map[string]interface{}{"error": reason, DetailInfrastructure: infra}
+}
+
+var networkMarkers = []string{"ENOTFOUND", "ETIMEDOUT", "ECONNREFUSED", "ECONNRESET", "EAI_AGAIN", "i/o timeout", "no such host", "connection refused"}
+
+// NetworkFailure reports whether a tool's output shows it could not reach the network.
+func NetworkFailure(output string) bool {
+	for _, m := range networkMarkers {
+		if strings.Contains(output, m) {
+			return true
+		}
 	}
 	return false
 }

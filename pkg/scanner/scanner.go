@@ -48,7 +48,7 @@ type DatabaseUpdater interface {
 const (
 	// DetailInfrastructureError marks a stored scan-error result as caused by
 	// scanner infrastructure (timeout, upstream 5xx) rather than by the package.
-	DetailInfrastructureError = "infrastructure_error"
+	DetailInfrastructureError = scanerr.DetailInfrastructure
 
 	defaultScanRetryInterval = 5 * time.Minute
 	maxScanRetries           = 6
@@ -326,6 +326,22 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 			continue
 		}
 
+		// A scanner that returns an error-status result failed exactly like one
+		// that returns an error: another scanner's verdict still stands.
+		if result.Status == metadata.ScanStatusError {
+			log.Error().
+				Str("scanner", scanner.Name()).
+				Str("package", packageName).
+				Interface("details", result.Details).
+				Msg("Scanner returned an error result")
+			if infra, _ := result.Details[DetailInfrastructureError].(bool); infra {
+				infraFailures++
+			} else {
+				otherFailures++
+			}
+			continue
+		}
+
 		scanResults = append(scanResults, result)
 		scannerNames = append(scannerNames, scanner.Name())
 
@@ -430,13 +446,36 @@ func (m *Manager) scanVersion(ctx context.Context, registry, packageName, versio
 	return pkg.ReleaseVersion
 }
 
+// succeeded drops error-status results; a failed scanner leaves no trace in the merge.
+func succeeded(results []*metadata.ScanResult, names []string) ([]*metadata.ScanResult, []string) {
+	okResults := make([]*metadata.ScanResult, 0, len(results))
+	okNames := make([]string, 0, len(results))
+	for i, r := range results {
+		if r.Status == metadata.ScanStatusError {
+			continue
+		}
+		okResults = append(okResults, r)
+		okNames = append(okNames, names[i])
+	}
+	return okResults, okNames
+}
+
 // mergeResults merges and deduplicates scan results from multiple scanners
 func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []string) *metadata.ScanResult {
 	if len(results) == 0 {
 		return nil
 	}
 
-	// Use first result as base
+	results, scannerNames = succeeded(results, scannerNames)
+
+	// Use first result as base, or the failure itself when none succeeded
+	if len(results) == 0 {
+		return &metadata.ScanResult{
+			Status:          metadata.ScanStatusError,
+			Vulnerabilities: make([]metadata.Vulnerability, 0),
+			Details:         map[string]interface{}{"error": "all scanners failed"},
+		}
+	}
 	merged := &metadata.ScanResult{
 		ID:              results[0].ID,
 		Registry:        results[0].Registry,
@@ -506,19 +545,13 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 			}
 		}
 
-		// Update status to worst case.
-		// Order: vulnerable > error > pending > clean. Vulnerable wins because
-		// the cache layer must surface the actual vulns. Otherwise, if any
-		// scanner errored, propagate so CheckVulnerabilities can fail closed.
+		// Update status to worst case: vulnerable > pending > clean.
+		// Error results never reach this loop (see succeeded).
 		switch result.Status {
 		case metadata.ScanStatusVulnerable:
 			merged.Status = metadata.ScanStatusVulnerable
-		case metadata.ScanStatusError:
-			if merged.Status != metadata.ScanStatusVulnerable {
-				merged.Status = metadata.ScanStatusError
-			}
 		case metadata.ScanStatusPending:
-			if merged.Status != metadata.ScanStatusVulnerable && merged.Status != metadata.ScanStatusError {
+			if merged.Status != metadata.ScanStatusVulnerable {
 				merged.Status = metadata.ScanStatusPending
 			}
 		}

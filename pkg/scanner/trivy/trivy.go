@@ -13,6 +13,7 @@ import (
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -140,9 +141,7 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 				Scanner:        s.Name(),
 				ScannedAt:      time.Now(),
 				Status:         metadata.ScanStatusError,
-				Details: map[string]interface{}{
-					"error": "scan timeout",
-				},
+				Details:        scanerr.ErrorDetails("scan timeout", true),
 			}, nil
 		}
 

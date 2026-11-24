@@ -399,6 +399,13 @@ func vulnerabilitiesFromDetails(details JSONBField) []metadata.Vulnerability {
 				}
 			}
 		}
+		if aliases, ok := vulnMap["aliases"].([]interface{}); ok {
+			for _, a := range aliases {
+				if aStr, ok := a.(string); ok {
+					vuln.Aliases = append(vuln.Aliases, aStr)
+				}
+			}
+		}
 		vulnerabilities = append(vulnerabilities, vuln)
 	}
 	return vulnerabilities

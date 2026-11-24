@@ -149,3 +149,18 @@ func TestExtractEnforcesSizeCap(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 10, n)
 }
+
+func TestFindingsNameTheGHSAOfTheirAdvisoryLinks(t *testing.T) {
+	res := New(config.TrivyConfig{}).convertTrivyResult(&TrivyResult{Results: []TrivyVulnResult{{Vulnerabilities: []TrivyVulnerability{{
+		VulnerabilityID: "CVE-2021-44906",
+		Severity:        "CRITICAL",
+		PrimaryURL:      "https://avd.aquasec.com/nvd/cve-2021-44906",
+		References: []string{
+			"https://github.com/advisories/GHSA-xvch-5gv4-984h",
+			"https://nvd.nist.gov/vuln/detail/CVE-2021-44906",
+			"https://github.com/minimistjs/minimist/issues/CVE-2020-0001",
+		},
+	}}}}}, "npm", "minimist", "0.0.8")
+
+	assert.Equal(t, []string{"GHSA-xvch-5gv4-984h"}, res.Vulnerabilities[0].Aliases)
+}

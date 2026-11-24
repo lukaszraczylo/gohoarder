@@ -161,6 +161,7 @@ func (s *Scanner) convertGrypeResult(grypeResult *GrypeResult, registry, package
 			Description: match.Vulnerability.Description,
 			References:  match.Vulnerability.URLs,
 			FixedIn:     fixedIn,
+			Aliases:     metadata.NormalizeAliases(match.Vulnerability.ID, grypeAliases(match)...),
 		})
 	}
 
@@ -205,8 +206,14 @@ type GrypeSource struct {
 }
 
 type GrypeMatch struct {
-	Artifact      GrypeArtifact      `json:"artifact"`
-	Vulnerability GrypeVulnerability `json:"vulnerability"`
+	Artifact               GrypeArtifact      `json:"artifact"`
+	Vulnerability          GrypeVulnerability `json:"vulnerability"`
+	RelatedVulnerabilities []GrypeRelatedVuln `json:"relatedVulnerabilities"`
+}
+
+// GrypeRelatedVuln is another id of the matched advisory, such as the CVE of a GHSA match.
+type GrypeRelatedVuln struct {
+	ID string `json:"id"`
 }
 
 type GrypeVulnerability struct {
@@ -230,3 +237,12 @@ type GrypeArtifact struct {
 
 // Version returns the version the last successful health check reported.
 func (s *Scanner) Version() string { return s.version.Version() }
+
+// grypeAliases lists the ids grype relates to a match, plus any named by its advisory links.
+func grypeAliases(match GrypeMatch) []string {
+	out := make([]string, 0, len(match.RelatedVulnerabilities))
+	for _, rel := range match.RelatedVulnerabilities {
+		out = append(out, rel.ID)
+	}
+	return append(out, metadata.ExtractAdvisoryIDs(match.Vulnerability.URLs...)...)
+}

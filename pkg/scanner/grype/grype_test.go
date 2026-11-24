@@ -124,3 +124,19 @@ func TestPurl(t *testing.T) {
 		assert.Equal(t, tc.want, purl(tc.registry, tc.name, tc.version), "%s %s", tc.registry, tc.name)
 	}
 }
+
+func TestFindingsCarryTheRelatedCVEAsAnAlias(t *testing.T) {
+	data, err := os.ReadFile(fixture("purl-minimist-0.0.8.json"))
+	require.NoError(t, err)
+	parsed, err := parse(data)
+	require.NoError(t, err)
+
+	res := New(config.GrypeConfig{}).convertGrypeResult(parsed, "npm", "minimist", "0.0.8")
+
+	aliases := map[string][]string{}
+	for _, v := range res.Vulnerabilities {
+		aliases[v.ID] = v.Aliases
+	}
+	assert.Equal(t, []string{"CVE-2021-44906"}, aliases["GHSA-xvch-5gv4-984h"])
+	assert.Equal(t, []string{"CVE-2020-7598"}, aliases["GHSA-vh95-rmgr-6w4m"])
+}

@@ -222,6 +222,7 @@ type Vulnerability struct {
 	References  []string `json:"references"`
 	FixedIn     string   `json:"fixed_in"`              // Version where fixed
 	DetectedBy  []string `json:"detected_by,omitempty"` // List of scanners that detected this vulnerability
+	Aliases     []string `json:"aliases,omitempty"`     // Other ids of the same advisory; a CVE bypass matches any of them
 }
 
 // NormalizeSeverity normalizes severity names to standard values

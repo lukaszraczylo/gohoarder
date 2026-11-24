@@ -419,6 +419,7 @@ func (s *Scanner) convertResult(advisories []GHSAAdvisory, registry, packageName
 			Description: advisory.Description,
 			References:  refs,
 			FixedIn:     fixedIn,
+			Aliases:     metadata.NormalizeAliases(advisory.GHSAID, advisory.CVEID),
 		})
 	}
 

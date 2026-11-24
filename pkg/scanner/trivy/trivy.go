@@ -212,6 +212,7 @@ func (s *Scanner) convertTrivyResult(trivyResult *TrivyResult, registry, package
 				Description: vuln.Description,
 				References:  vuln.References,
 				FixedIn:     vuln.FixedVersion,
+				Aliases:     metadata.NormalizeAliases(vuln.VulnerabilityID, metadata.ExtractAdvisoryIDs(append([]string{vuln.PrimaryURL}, vuln.References...)...)...),
 			})
 		}
 	}

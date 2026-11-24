@@ -202,3 +202,15 @@ func TestScanSkipsOtherRegistries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, metadata.ScanStatusClean, res.Status)
 }
+
+func TestFindingsKeepOnlyTheIDOfTheirAdvisoryLink(t *testing.T) {
+	audit := &NpmAuditResult{Vulnerabilities: map[string]NpmVulnerability{"minimist": {Via: []NpmVia{{Advisory: &NpmAdvisory{
+		Source: 1, Name: "minimist", Severity: "critical", URL: "https://github.com/advisories/GHSA-xvch-5gv4-984h",
+	}}}}}}
+
+	res := New(config.NpmAuditConfig{}).convertResult(audit, "npm", "minimist", "0.0.8")
+
+	if res.Vulnerabilities[0].ID != "GHSA-xvch-5gv4-984h" || len(res.Vulnerabilities[0].Aliases) != 0 {
+		t.Errorf("id %q aliases %v, want the GHSA id and no aliases", res.Vulnerabilities[0].ID, res.Vulnerabilities[0].Aliases)
+	}
+}

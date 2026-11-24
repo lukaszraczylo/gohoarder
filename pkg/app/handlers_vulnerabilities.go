@@ -117,7 +117,7 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 		var bypassInfo map[string]interface{}
 
 		// Check if this CVE is bypassed
-		if bypass, ok := bypassedCVEs[strings.ToUpper(vuln.ID)]; ok {
+		if bypass, ok := metadata.BypassFor(bypassedCVEs, vuln); ok {
 			bypassed = true
 			bypassInfo = map[string]interface{}{
 				"id":         bypass.ID,
@@ -138,6 +138,7 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 			"references":  vuln.References,
 			"fixed_in":    vuln.FixedIn,
 			"detected_by": vuln.DetectedBy,
+			"aliases":     vuln.Aliases,
 			"bypassed":    bypassed,
 		}
 

@@ -63,3 +63,21 @@ func TestScan_FixedVersionComesFromTheQueriedPackage(t *testing.T) {
 		t.Fatalf("vulnerabilities = %+v, want one fixed in 0.60.0", res.Vulnerabilities)
 	}
 }
+
+func TestConvertOSVResultKeepsAliases(t *testing.T) {
+	s := New(config.OSVConfig{})
+	resp := &OSVResponse{Vulns: []OSVVulnerability{{
+		ID:      "GHSA-xvch-5gv4-984h",
+		Aliases: []string{"CVE-2021-44906", "ghsa-xvch-5gv4-984h"},
+		References: []OSVReference{
+			{Type: "ADVISORY", URL: "https://nvd.nist.gov/vuln/detail/CVE-2021-44906"},
+			{Type: "ADVISORY", URL: "https://github.com/advisories/GHSA-xvch-5gv4-984h"},
+		},
+	}}}
+
+	res := s.convertOSVResult(resp, "npm", "minimist", "0.0.8")
+
+	if got := res.Vulnerabilities[0].Aliases; len(got) != 1 || got[0] != "CVE-2021-44906" {
+		t.Errorf("aliases = %v, want only CVE-2021-44906", got)
+	}
+}

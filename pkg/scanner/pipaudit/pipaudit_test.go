@@ -140,3 +140,13 @@ func TestScanSkipsOtherRegistries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, metadata.ScanStatusClean, res.Status)
 }
+
+func TestFindingsKeepThePipAuditAliases(t *testing.T) {
+	audit := &PipAuditResult{Dependencies: []PipDependency{{Name: "requests", Version: "2.19.0", Vulns: []PipVuln{{
+		ID: "PYSEC-2018-28", Aliases: []string{"CVE-2018-18074", "GHSA-x84v-xcm2-53pg", "pysec-2018-28"},
+	}}}}}
+
+	res := New(config.PipAuditConfig{}).convertResult(audit, "pypi", "requests", "2.19.0")
+
+	assert.Equal(t, []string{"CVE-2018-18074", "GHSA-x84v-xcm2-53pg"}, res.Vulnerabilities[0].Aliases)
+}

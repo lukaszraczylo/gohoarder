@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ type OSVVulnerability struct {
 	DatabaseSpecific map[string]interface{} `json:"database_specific,omitempty"`
 	ID               string                 `json:"id"`
 	Summary          string                 `json:"summary"`
+	Aliases          []string               `json:"aliases,omitempty"`
 	Details          string                 `json:"details"`
 	Severity         []OSVSeverity          `json:"severity,omitempty"`
 	References       []OSVReference         `json:"references,omitempty"`
@@ -287,6 +289,7 @@ func (s *Scanner) convertOSVResult(osvResp *OSVResponse, registry, packageName, 
 			Description: vuln.Details,
 			References:  references,
 			FixedIn:     fixedVersion,
+			Aliases:     metadata.NormalizeAliases(vuln.ID, append(slices.Clone(vuln.Aliases), metadata.ExtractAdvisoryIDs(references...)...)...),
 		})
 	}
 

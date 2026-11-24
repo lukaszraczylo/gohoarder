@@ -510,61 +510,19 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 		Details:         make(map[string]interface{}),
 	}
 
-	// Use map for deduplication - key is CVE ID in uppercase
-	vulnMap := make(map[string]*metadata.Vulnerability)
+	findings := newFindingSet()
 	severityCounts := make(map[string]int)
 
-	// Merge vulnerabilities from all scanners
+	// Merge vulnerabilities from all scanners; one advisory reported under different ids is one finding.
 	for i, result := range results {
 		scannerName := scannerNames[i]
 
 		// Track scanner details
 		merged.Details[scannerName] = result.Details
 
-		// Add/merge vulnerabilities
 		for _, vuln := range result.Vulnerabilities {
-			cveKey := strings.ToUpper(vuln.ID)
-
-			// Check if CVE already exists
-			if existing, exists := vulnMap[cveKey]; exists {
-				// CVE found by multiple scanners - merge information
-				log.Debug().
-					Str("cve", vuln.ID).
-					Strs("existing_scanners", existing.DetectedBy).
-					Str("new_scanner", scannerName).
-					Msg("CVE found by multiple scanners, merging")
-
-				// Add scanner to DetectedBy list
-				existing.DetectedBy = append(existing.DetectedBy, scannerName)
-
-				// Prefer higher severity if different
-				if m.compareSeverity(vuln.Severity, existing.Severity) > 0 {
-					existing.Severity = vuln.Severity
-				}
-
-				// Merge references (deduplicate URLs)
-				refSet := make(map[string]bool)
-				for _, ref := range existing.References {
-					refSet[ref] = true
-				}
-				for _, ref := range vuln.References {
-					if !refSet[ref] {
-						existing.References = append(existing.References, ref)
-						refSet[ref] = true
-					}
-				}
-
-				// Prefer fixed_in version if not already set
-				if existing.FixedIn == "" && vuln.FixedIn != "" {
-					existing.FixedIn = vuln.FixedIn
-				}
-
-			} else {
-				// New CVE - add to map
-				vulnCopy := vuln
-				vulnCopy.DetectedBy = []string{scannerName}
-				vulnMap[cveKey] = &vulnCopy
-			}
+			vuln.DetectedBy = []string{scannerName}
+			findings.add(vuln)
 		}
 
 		// Update status to worst case: vulnerable > pending > clean.
@@ -579,9 +537,9 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 		}
 	}
 
-	// Convert map to slice and count severities
-	for _, vuln := range vulnMap {
-		merged.Vulnerabilities = append(merged.Vulnerabilities, *vuln)
+	// Convert to a slice and count severities
+	for _, vuln := range findings.list() {
+		merged.Vulnerabilities = append(merged.Vulnerabilities, vuln)
 		severityCounts[metadata.NormalizeSeverity(vuln.Severity)]++
 	}
 
@@ -597,21 +555,123 @@ func (m *Manager) mergeResults(results []*metadata.ScanResult, scannerNames []st
 	return merged
 }
 
-// compareSeverity returns >0 if s1 is more severe than s2, <0 if less, 0 if equal
-func (m *Manager) compareSeverity(s1, s2 string) int {
-	severityOrder := map[string]int{
-		"CRITICAL": 4,
-		"HIGH":     3,
-		"MODERATE": 2,
-		"MEDIUM":   2, // Support both for backwards compatibility
-		"LOW":      1,
-		"UNKNOWN":  0,
+// severityRank orders severities; unknown ones rank 0.
+func severityRank(severity string) int {
+	switch strings.ToUpper(severity) {
+	case "CRITICAL":
+		return 4
+	case "HIGH":
+		return 3
+	case "MODERATE", "MEDIUM": // MEDIUM is the older name
+		return 2
+	case "LOW":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// findingSet merges findings that share any id or alias.
+type findingSet struct {
+	byID  map[string]int
+	items []*metadata.Vulnerability
+}
+
+func newFindingSet() *findingSet { return &findingSet{byID: make(map[string]int)} }
+
+// add inserts vuln, or folds it into the findings that already carry one of its ids.
+func (fs *findingSet) add(vuln metadata.Vulnerability) {
+	ids := vuln.IDs()
+	target := -1
+	for _, id := range ids {
+		i, ok := fs.byID[id]
+		if !ok {
+			continue
+		}
+		if target < 0 {
+			target = i
+		} else if i != target {
+			// The new finding links two findings seen so far: they are one advisory.
+			fs.fold(target, i)
+		}
+	}
+	if target < 0 {
+		fs.items = append(fs.items, &vuln)
+		target = len(fs.items) - 1
+	} else {
+		fs.fold(target, -1, vuln)
+	}
+	for _, id := range fs.items[target].IDs() {
+		fs.byID[id] = target
+	}
+}
+
+// fold merges items[from] (or extra, when from is negative) into items[into].
+func (fs *findingSet) fold(into, from int, extra ...metadata.Vulnerability) {
+	dst := fs.items[into]
+	var srcs []metadata.Vulnerability
+	if from >= 0 {
+		srcs = append(srcs, *fs.items[from])
+		fs.items[from] = nil
+	} else {
+		srcs = extra
+	}
+	for _, src := range srcs {
+		mergeFinding(dst, src)
+	}
+	for id, i := range fs.byID {
+		if from >= 0 && i == from {
+			fs.byID[id] = into
+		}
+	}
+}
+
+// list returns the merged findings in the order they were first seen.
+func (fs *findingSet) list() []metadata.Vulnerability {
+	out := make([]metadata.Vulnerability, 0, len(fs.items))
+	for _, v := range fs.items {
+		if v != nil {
+			out = append(out, *v)
+		}
+	}
+	return out
+}
+
+// mergeFinding folds src into dst: scanners, ids, the worse severity, references and the fix.
+func mergeFinding(dst *metadata.Vulnerability, src metadata.Vulnerability) {
+	for _, name := range src.DetectedBy {
+		if !slices.Contains(dst.DetectedBy, name) {
+			dst.DetectedBy = append(dst.DetectedBy, name)
+		}
 	}
 
-	v1 := severityOrder[strings.ToUpper(s1)]
-	v2 := severityOrder[strings.ToUpper(s2)]
+	// A CVE id is the one people search for, so it leads whichever scanner saw it first.
+	id, aliases := dst.ID, append(slices.Clone(dst.Aliases), src.ID)
+	aliases = append(aliases, src.Aliases...)
+	if !metadata.IsCVE(id) && metadata.IsCVE(src.ID) {
+		id = src.ID
+		aliases = append(aliases, dst.ID)
+	}
+	dst.ID = id
+	dst.Aliases = metadata.NormalizeAliases(id, aliases...)
 
-	return v1 - v2
+	if severityRank(src.Severity) > severityRank(dst.Severity) {
+		dst.Severity = src.Severity
+	}
+	for _, ref := range src.References {
+		if !slices.Contains(dst.References, ref) {
+			dst.References = append(dst.References, ref)
+		}
+	}
+	if dst.FixedIn == "" && src.FixedIn != "" {
+		dst.FixedIn = src.FixedIn
+	}
+	if dst.Title == "" {
+		dst.Title = src.Title
+	}
+	if dst.Description == "" {
+		dst.Description = src.Description
+	}
 }
 
 // normalizeBypassPackageName reduces a stored package cache key to the
@@ -775,7 +835,7 @@ func (m *Manager) evaluateScan(registry, packageName, version, releaseKey string
 		remaining = 0
 		for _, vuln := range f.vulns {
 			// Check if this CVE is bypassed
-			if bypass, ok := bypassedCVEs[strings.ToUpper(vuln.ID)]; ok {
+			if bypass, ok := metadata.BypassFor(bypassedCVEs, vuln); ok {
 				log.Debug().
 					Str("cve", vuln.ID).
 					Str("package", packageName).
@@ -916,7 +976,7 @@ func (m *Manager) judgeSummary(sum *metadata.ScanSummary, bypasses []*metadata.C
 	if withList {
 		covered := cveBypasses(sum.Registry, bypassName, sum.Version, releaseKey, bypasses)
 		for _, v := range sum.Vulnerabilities {
-			if b, ok := covered[strings.ToUpper(v.ID)]; ok {
+			if b, ok := metadata.BypassFor(covered, v); ok {
 				applied = b
 				break
 			}

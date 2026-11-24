@@ -233,6 +233,7 @@ func (s *Scanner) convertResult(auditResult *NpmAuditResult, registry, packageNa
 				Title:       adv.Title,
 				Description: fmt.Sprintf("%s: %s (affected %s)", adv.Name, adv.Title, adv.Range),
 				References:  refs,
+				Aliases:     metadata.NormalizeAliases(advisoryID(adv), metadata.ExtractAdvisoryIDs(refs...)...),
 			})
 		}
 	}

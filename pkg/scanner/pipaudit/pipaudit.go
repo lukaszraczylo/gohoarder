@@ -182,6 +182,7 @@ func (s *Scanner) convertResult(auditResult *PipAuditResult, registry, packageNa
 				Description: vuln.Description,
 				References:  []string{fmt.Sprintf("https://osv.dev/vulnerability/%s", vuln.ID)},
 				FixedIn:     fixedIn,
+				Aliases:     metadata.NormalizeAliases(vuln.ID, vuln.Aliases...),
 			})
 		}
 	}

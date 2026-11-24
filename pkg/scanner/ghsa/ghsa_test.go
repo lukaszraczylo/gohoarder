@@ -158,3 +158,12 @@ func TestFilterAffectedAdvisoriesFiltersByRange(t *testing.T) {
 		t.Fatalf("expected only MATCH, got %+v", out)
 	}
 }
+
+func TestFindingsCarryTheCVEOfTheAdvisory(t *testing.T) {
+	s := &Scanner{}
+	res := s.convertResult([]GHSAAdvisory{{GHSAID: "GHSA-xvch-5gv4-984h", CVEID: "CVE-2021-44906", Severity: "critical"}}, "npm", "minimist", "0.0.8")
+
+	if got := res.Vulnerabilities[0].Aliases; len(got) != 1 || got[0] != "CVE-2021-44906" {
+		t.Errorf("aliases = %v, want [CVE-2021-44906]", got)
+	}
+}

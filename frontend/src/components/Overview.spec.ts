@@ -46,6 +46,15 @@ async function open() {
 }
 
 describe('Overview', () => {
+  it('fetches each panel once while the stats load', async () => {
+    await open()
+    const urls = vi.mocked(axios.get).mock.calls.map(([url]) => String(url))
+    const count = (prefix: string) => urls.filter((u) => u.startsWith(prefix)).length
+    expect(count('/api/stats/timeseries')).toBe(1)
+    expect(count('/api/analytics/trending')).toBe(1)
+    expect(urls.filter((u) => u.includes('layout=rows')).length).toBe(1)
+  })
+
   it('counts each verdict from the stats', async () => {
     const { wrapper, problems } = await open()
     expect(problems).toEqual([])

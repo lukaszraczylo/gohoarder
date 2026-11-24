@@ -40,17 +40,25 @@
           <template #icon><Icon :icon="tile.icon" :class="VERDICT_TEXT[tile.verdict]" /></template>
         </KpiTile>
       </StatGroup>
+    </template>
 
-      <div class="grid items-start gap-6 xl:grid-cols-3">
-        <CacheCapacity :used="displayStats?.total_size ?? 0" :max-size="displayStats?.max_cache_size ?? 0" :registries="registries" />
-        <DownloadTrend class="xl:col-span-2" />
-      </div>
+    <!-- Outside the stats loading chain: a stats refresh must not remount these and refetch their data. -->
+    <div class="grid items-start gap-6 xl:grid-cols-3">
+      <CacheCapacity
+        v-if="displayStats"
+        :used="displayStats.total_size ?? 0"
+        :max-size="displayStats.max_cache_size ?? 0"
+        :registries="registries"
+      />
+      <LoadingState v-else-if="loading" variant="card" label="Loading cache capacity..." />
+      <DownloadTrend class="xl:col-span-2" />
+    </div>
 
       <TopPackages />
 
       <div class="grid gap-6 lg:grid-cols-2">
         <ScannerHealth />
-        <Card class="min-w-0" data-testid="ws-event-feed">
+        <Card v-if="!(error && !displayStats)" class="min-w-0" data-testid="ws-event-feed">
           <CardHeader>
             <CardTitle as="h2">Live activity</CardTitle>
             <CardDescription>What the proxy just did.</CardDescription>
@@ -67,7 +75,6 @@
           </CardContent>
         </Card>
       </div>
-    </template>
   </div>
 </template>
 

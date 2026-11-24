@@ -1,112 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import axios from 'axios'
-import { usePackageStore, RECENT_PACKAGES, type Package } from './packages'
+import { usePackageStore } from './packages'
 
 vi.mock('axios')
 
-function pkg(id: number, cachedAt: string, over: Partial<Package> = {}): Package {
-  return {
-    id: String(id),
-    registry: 'npm',
-    name: `p${id}`,
-    version: '1.0.0',
-    size: 1,
-    cached_at: cachedAt,
-    last_accessed: cachedAt,
-    download_count: 0,
-    ...over,
-  }
-}
-
-describe('package store paging', () => {
+describe('package store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(axios.get).mockReset()
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('sends page, page_size, registry and q; skips the all-registries and empty values', async () => {
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [], total_groups: 0 } })
+  it('loads the stats of one registry', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: { stats: { total_packages: 3 }, registries: { npm: {} } } })
     const store = usePackageStore()
 
-    await store.fetchPackagePage({ page: 2, pageSize: 25, registry: 'pypi', q: ' six ' })
-    await store.fetchPackagePage({ page: 1, pageSize: 25, registry: 'all', q: '' })
+    await store.fetchStats('npm')
 
-    expect(vi.mocked(axios.get).mock.calls.map((c) => c[0])).toEqual([
-      '/api/packages?page=2&page_size=25&registry=pypi&q=six',
-      '/api/packages?page=1&page_size=25',
-    ])
+    expect(vi.mocked(axios.get)).toHaveBeenCalledWith('/api/stats?registry=npm')
+    expect(store.stats?.total_packages).toBe(3)
+    expect(store.registries).toEqual({ npm: {} })
   })
 
-  it('fetchPackages asks for the listed severities only, and for everything without them', async () => {
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [] } })
+  it('keeps the last stats and reports the error when a request fails', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: { stats: { total_packages: 3 }, registries: {} } })
     const store = usePackageStore()
+    await store.fetchStats()
 
-    await store.fetchPackages()
-    await store.fetchPackages({ severity: [] })
-    await store.fetchPackages({ severity: ['critical', 'high'] })
-
-    expect(vi.mocked(axios.get).mock.calls.map((c) => c[0])).toEqual([
-      '/api/packages',
-      '/api/packages',
-      '/api/packages?severity=critical,high',
-    ])
-  })
-
-  it('keeps the server group count, and counts groups itself when the server sends none', async () => {
-    const store = usePackageStore()
-    vi.mocked(axios.get).mockResolvedValueOnce({ data: { packages: [pkg(1, '2026-01-01T00:00:00Z')], total_groups: 80 } })
-    await store.fetchPackagePage({ page: 3, pageSize: 25 })
-    expect(store.packagePage).toMatchObject({ totalGroups: 80, page: 3, pageSize: 25 })
-
-    vi.mocked(axios.get).mockResolvedValueOnce({
-      data: { packages: [pkg(1, '2026-01-01T00:00:00Z'), pkg(1, '2026-01-02T00:00:00Z', { version: '2.0.0' })] },
-    })
-    await store.fetchPackagePage({ page: 1, pageSize: 25 })
-    expect(store.packagePage.totalGroups).toBe(1)
-  })
-
-  it('drops the answer of a request a newer one has replaced', async () => {
-    const store = usePackageStore()
-    let release: (v: unknown) => void = () => {}
-    vi.mocked(axios.get)
-      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
-      .mockResolvedValueOnce({ data: { packages: [pkg(2, '2026-01-01T00:00:00Z')], total_groups: 1 } })
-
-    const slow = store.fetchPackagePage({ page: 1, pageSize: 25, q: 'old' })
-    await store.fetchPackagePage({ page: 1, pageSize: 25, q: 'new' })
-    release({ data: { packages: [pkg(1, '2026-01-01T00:00:00Z')], total_groups: 1 } })
-    await slow
-
-    expect(store.packagePage.packages.map((p) => p.id)).toEqual(['2'])
-    expect(store.loading).toBe(false)
-  })
-
-  it('reports a failed page request and leaves the last page in place', async () => {
-    const store = usePackageStore()
+    vi.mocked(axios.get).mockRejectedValueOnce(new Error('boom'))
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.mocked(axios.get).mockResolvedValueOnce({ data: { packages: [pkg(1, '2026-01-01T00:00:00Z')], total_groups: 1 } })
-    await store.fetchPackagePage({ page: 1, pageSize: 25 })
-    vi.mocked(axios.get).mockRejectedValueOnce(new Error('502'))
-    await store.fetchPackagePage({ page: 1, pageSize: 25 })
+    await store.fetchStats()
 
-    expect(store.error).toBe('502')
-    expect(store.packagePage.packages).toHaveLength(1)
+    expect(store.stats?.total_packages).toBe(3)
+    expect(store.error).toBe('boom')
     expect(store.loading).toBe(false)
-  })
-
-  it('recent packages: small page sorted by cached_at, newest ten rows, newest first', async () => {
-    const rows = Array.from({ length: 14 }, (_, i) => pkg(i, `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`))
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: rows, total_groups: 14 } })
-    const store = usePackageStore()
-
-    await store.fetchRecentPackages()
-
-    expect(vi.mocked(axios.get)).toHaveBeenCalledWith(`/api/packages?page=1&page_size=${RECENT_PACKAGES}&sort=cached_at&order=desc`)
-    expect(store.recentPackages).toHaveLength(RECENT_PACKAGES)
-    expect(store.recentPackages[0].id).toBe('13')
-    expect(store.recentPackages[9].id).toBe('4')
   })
 
   it('loading stays on until the last overlapping request settles', async () => {
@@ -114,14 +42,14 @@ describe('package store paging', () => {
     const releases: Array<(v: unknown) => void> = []
     vi.mocked(axios.get).mockImplementation(() => new Promise((resolve) => releases.push(resolve)))
 
-    const stats = store.fetchStats()
-    const recent = store.fetchRecentPackages()
+    const first = store.fetchStats()
+    const second = store.fetchStats('pypi')
     expect(store.loading).toBe(true)
     releases[0]({ data: { stats: { total_packages: 1 }, registries: {} } })
-    await stats
+    await first
     expect(store.loading).toBe(true)
-    releases[1]({ data: { packages: [] } })
-    await recent
+    releases[1]({ data: { stats: { total_packages: 2 }, registries: {} } })
+    await second
     expect(store.loading).toBe(false)
   })
 

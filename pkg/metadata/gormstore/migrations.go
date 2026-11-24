@@ -113,8 +113,21 @@ func GetMigrations() []*gormigrate.Migration {
 				return tx.Migrator().DropTable(&StatsSnapshotModel{})
 			},
 		},
+		{
+			// Serves the previous-week range read behind trending packages.
+			ID: "202611250002",
+			Migrate: func(tx *gorm.DB) error {
+				return createIndexIfMissing(tx, &DownloadStatsDailyModel{}, dailyTimeIndex)
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropIndex(&DownloadStatsDailyModel{}, dailyTimeIndex)
+			},
+		},
 	}
 }
+
+// dailyTimeIndex is download_stats_daily (time_bucket).
+const dailyTimeIndex = "idx_stats_daily_time"
 
 // scanPackageScannedAtIndex is scan_results (package_id, scanned_at).
 const scanPackageScannedAtIndex = "idx_scan_package_scanned_at"

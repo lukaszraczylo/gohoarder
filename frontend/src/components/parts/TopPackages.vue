@@ -15,7 +15,7 @@
     <Card class="min-w-0">
       <CardHeader>
         <CardTitle as="h2">Trending</CardTitle>
-        <CardDescription>Downloads in the last 7 days. Counted in memory, so it restarts with the server.</CardDescription>
+        <CardDescription>Downloads in the last 7 days, and the change from the 7 days before. The counts survive restarts.</CardDescription>
       </CardHeader>
       <CardContent>
         <LoadingState v-if="loading" layout="inline" label="Loading trending packages..." />
@@ -44,12 +44,13 @@ import {
 } from '@perfect-design/ui'
 import { modulePath } from '@/lib/format'
 
-/** The analytics engine serialises Go field names. */
+/** The trending endpoint serialises Go field names. */
 interface PopularPackage {
   Registry: string
   Name: string
   Downloads: number
   RecentDownloads: number
+  PreviousDownloads?: number
 }
 
 /** One stored version row; its count is kept in the database. */
@@ -69,13 +70,17 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 // Rows with equal registry and module path (a Go module's .zip, .mod and .info) are one package.
-function entries(rows: PopularPackage[], pick: (p: PopularPackage) => number): LeaderboardEntry[] {
+function entries(rows: PopularPackage[], pick: (p: PopularPackage) => number, change?: (p: PopularPackage) => number): LeaderboardEntry[] {
   const totals = new Map<string, LeaderboardEntry>()
   for (const row of rows) {
     const id = `${row.Registry}/${modulePath(row.Name)}`
     const existing = totals.get(id)
-    if (existing) existing.value += pick(row)
-    else totals.set(id, { id, label: `${row.Registry} · ${modulePath(row.Name)}`, value: pick(row) })
+    if (existing) {
+      existing.value += pick(row)
+      if (change) existing.delta = (existing.delta ?? 0) + change(row)
+    } else {
+      totals.set(id, { id, label: `${row.Registry} · ${modulePath(row.Name)}`, value: pick(row), ...(change ? { delta: change(row) } : {}) })
+    }
   }
   return [...totals.values()].filter((e) => e.value > 0).sort((a, b) => b.value - a.value).slice(0, LIMIT)
 }
@@ -88,7 +93,13 @@ const top = computed(() =>
     (p) => p.Downloads,
   ),
 )
-const trending = computed(() => entries(recent.value, (p) => p.RecentDownloads))
+const trending = computed(() =>
+  entries(
+    recent.value,
+    (p) => p.RecentDownloads,
+    (p) => p.RecentDownloads - (p.PreviousDownloads ?? 0),
+  ),
+)
 
 async function load() {
   loading.value = true

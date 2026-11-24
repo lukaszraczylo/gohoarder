@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,7 +28,18 @@ func (a *App) handleAnalyticsTopPackages(c fiber.Ctx) error {
 	})
 }
 
-// handleAnalyticsTrendingPackages returns trending packages
+// trendingPackage keeps the Go field names the dashboard reads from the analytics engine.
+type trendingPackage struct {
+	Registry          string
+	Name              string
+	Downloads         int64
+	RecentDownloads   int64
+	PreviousDownloads int64
+	Trend             float64
+}
+
+// handleAnalyticsTrendingPackages ranks packages by downloads in the last 7 days. Persisted
+// history serves it so a restart keeps the ranking; the in-memory engine covers stores without it.
 func (a *App) handleAnalyticsTrendingPackages(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
@@ -37,6 +49,35 @@ func (a *App) handleAnalyticsTrendingPackages(c fiber.Ctx) error {
 		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
 			limit = parsedLimit
 		}
+	}
+
+	if source, ok := a.metadata.(metadata.TrendingSource); ok {
+		stored, err := source.GetTrendingPackages(c.Context(), limit)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to read trending packages")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "failed to read trending packages",
+			})
+		}
+		packages := make([]trendingPackage, 0, len(stored))
+		for _, p := range stored {
+			trend := 0.0
+			if p.Previous > 0 {
+				trend = float64(p.Recent-p.Previous) / float64(p.Previous) * 100
+			}
+			packages = append(packages, trendingPackage{
+				Registry:          p.Registry,
+				Name:              p.Name,
+				Downloads:         p.Recent,
+				RecentDownloads:   p.Recent,
+				PreviousDownloads: p.Previous,
+				Trend:             trend,
+			})
+		}
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"packages": packages,
+			"total":    len(packages),
+		})
 	}
 
 	packages := a.analyticsEngine.GetTrendingPackages(limit)

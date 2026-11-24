@@ -443,3 +443,17 @@ func DedupeVersions(rows []*Package) []*Package {
 	}
 	return out
 }
+
+// TrendingPackage is a package's download count over the last 7 days and the 7 days before.
+type TrendingPackage struct {
+	Registry string `json:"registry"`
+	Name     string `json:"name"`
+	Recent   int64  `json:"recent"`
+	Previous int64  `json:"previous"`
+}
+
+// TrendingSource ranks packages from persisted download history. Backends without
+// persisted downloads do not implement it.
+type TrendingSource interface {
+	GetTrendingPackages(ctx context.Context, limit int) ([]*TrendingPackage, error)
+}

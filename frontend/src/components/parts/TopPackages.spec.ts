@@ -74,11 +74,25 @@ describe('TopPackages', () => {
     expect(wrapper.get('[data-testid="top-packages"]').text()).toContain('No downloads yet')
   })
 
+  it('shows the change against the previous 7 days for trending packages', async () => {
+    serve([], [
+      { Registry: 'npm', Name: 'left-pad', Downloads: 9, RecentDownloads: 9, PreviousDownloads: 4 },
+      { Registry: 'npm', Name: 'six', Downloads: 3, RecentDownloads: 3, PreviousDownloads: 8 },
+    ])
+    const wrapper = await open()
+    const rows = wrapper.findAll('[data-testid="top-packages"] li').map((li) => li.text())
+    const pad = rows.find((r) => r.includes('left-pad'))
+    const six = rows.find((r) => r.includes('six'))
+    expect(pad).toMatch(/\+5/)
+    expect(six).toMatch(/[-−]5/)
+  })
+
   it('names where each ranking comes from', async () => {
     serve([row('npm', 'left-pad', 3)])
     const wrapper = await open()
     const text = wrapper.get('[data-testid="top-packages"]').text()
     expect(text).toContain('The counts survive restarts.')
-    expect(text).toContain('Counted in memory, so it restarts with the server.')
+    expect(text).toContain('the change from the 7 days before')
+    expect(text).not.toContain('restarts with the server')
   })
 })

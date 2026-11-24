@@ -238,8 +238,8 @@ func (DownloadStatsHourlyModel) TableName() string {
 
 // DownloadStatsDailyModel represents pre-aggregated daily statistics
 type DownloadStatsDailyModel struct {
-	TimeBucket    time.Time  `gorm:"not null;index:idx_stats_daily_composite,priority:2"` // Truncated to day
-	PackageID     *int64     `gorm:"index:idx_stats_daily_package"`                       // NULL = all packages in registry
+	TimeBucket    time.Time  `gorm:"not null;index:idx_stats_daily_composite,priority:2;index:idx_stats_daily_time"` // Truncated to day
+	PackageID     *int64     `gorm:"index:idx_stats_daily_package"`                                                  // NULL = all packages in registry
 	TopUserAgents JSONBField // Top 10 user agents
 
 	BaseModel

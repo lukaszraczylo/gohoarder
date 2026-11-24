@@ -32,12 +32,39 @@ func (a *App) handlePackages(c fiber.Ctx) error {
 
 	switch c.Method() {
 	case "GET":
+		if registry, name, version, ok := packagePath(c.Path()); ok {
+			return a.handleGetPackage(c, registry, name, version)
+		}
 		return a.handleListPackages(c)
 	case "DELETE":
 		return a.handleDeletePackage(c)
 	default:
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "method not allowed"})
 	}
+}
+
+// packagePath splits /api/packages/{registry}/{name}/{version}. The name can hold slashes
+// (@scope/pkg, Go module paths); the version is the last segment.
+func packagePath(path string) (registry, name, version string, ok bool) {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(path, "/api/packages/"), "/"), "/")
+	if len(parts) < 3 {
+		return "", "", "", false
+	}
+	return parts[0], strings.Join(parts[1:len(parts)-1], "/"), parts[len(parts)-1], true
+}
+
+// handleGetPackage serves one stored package version.
+func (a *App) handleGetPackage(c fiber.Ctx, registry, name, version string) error {
+	_, pkg, err := a.resolvePackageKey(c.Context(), registry, name, version)
+	if err != nil {
+		var appErr *apperrors.Error
+		if stderrors.As(err, &appErr) && appErr.Code == apperrors.ErrCodeNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "package not found"})
+		}
+		log.Error().Err(err).Str("registry", registry).Str("package", name).Msg("Failed to get package")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get package"})
+	}
+	return c.Status(fiber.StatusOK).JSON(packageSummary(pkg))
 }
 
 // packageSummary is the list payload for one package when scan results are attached.

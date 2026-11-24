@@ -3,6 +3,7 @@ package gormstore
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/errors"
@@ -20,8 +21,20 @@ const (
 // artifactPackages limits a query on packages to cache artifacts: no metadata
 // pages and no Go .mod/.info files, as GetStats counts them.
 func artifactPackages(db *gorm.DB) *gorm.DB {
-	return db.Where("version NOT IN ?", metadata.MetadataVersions).
-		Where("name NOT LIKE ?", "%.mod").Where("name NOT LIKE ?", "%.info")
+	cond, args := notGoMetadataName()
+	return db.Where("version NOT IN ?", metadata.MetadataVersions).Where(cond, args...)
+}
+
+// notGoMetadataName is the condition that drops Go .mod/.info rows; the suffixes mean
+// metadata for Go only, as metadata.IsMetadataEntry has it.
+func notGoMetadataName() (string, []interface{}) {
+	conds := make([]string, 0, len(metadata.MetadataNameSuffixes))
+	args := []interface{}{metadata.GoRegistry}
+	for _, suffix := range metadata.MetadataNameSuffixes {
+		conds = append(conds, "name LIKE ?")
+		args = append(args, "%"+suffix)
+	}
+	return "NOT (registry_id IN (SELECT id FROM registries WHERE name = ?) AND (" + strings.Join(conds, " OR ") + "))", args
 }
 
 func dayString(t time.Time) string { return t.UTC().Format(metadata.StatsSnapshotDateLayout) }

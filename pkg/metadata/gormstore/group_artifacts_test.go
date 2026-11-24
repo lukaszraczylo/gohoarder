@@ -20,3 +20,22 @@ func TestGroupListSkipsGoMetadataFiles(t *testing.T) {
 		require.Equal(t, "example.com/m", page.Packages[0].Name)
 	}
 }
+
+func TestMetadataSuffixesAreGoOnly(t *testing.T) {
+	store := trendingStore(t)
+	ctx := context.Background()
+	trendingPackage(t, store, "npm", "left.mod", "1.0.0")
+	trendingPackage(t, store, "npm", "right.info", "1.0.0")
+	trendingPackage(t, store, "pypi", "foo.mod", "foo.mod-1.0.tar.gz")
+	trendingPackage(t, store, "go", "example.com/m/@v/v1.0.0.zip", "v1.0.0")
+	trendingPackage(t, store, "go", "example.com/m/@v/v1.0.0.mod", "v1.0.0")
+	trendingPackage(t, store, "go", "example.com/m/@v/v1.0.0.info", "v1.0.0")
+
+	stats, err := store.GetStats(ctx, "")
+	require.NoError(t, err)
+	require.EqualValues(t, 4, stats.TotalPackages)
+
+	page, err := store.ListPackageGroups(ctx, metadata.GroupListOptions{})
+	require.NoError(t, err)
+	require.Len(t, page.Packages, 4)
+}

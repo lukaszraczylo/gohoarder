@@ -554,14 +554,8 @@ func (s *GORMStoreV2) ClearArtifactExpiry(ctx context.Context) (int64, error) {
 	query := s.db.WithContext(ctx).Model(&PackageModel{}).
 		Where("expires_at IS NOT NULL").
 		Where("version NOT IN ?", metadata.MetadataVersions)
-	// The name suffixes mark metadata for Go modules only.
-	suffixConds := make([]string, 0, len(metadata.MetadataNameSuffixes))
-	args := []interface{}{metadata.GoRegistry}
-	for _, suffix := range metadata.MetadataNameSuffixes {
-		suffixConds = append(suffixConds, "name LIKE ?")
-		args = append(args, "%"+suffix)
-	}
-	query = query.Where("NOT (registry_id IN (SELECT id FROM registries WHERE name = ?) AND ("+strings.Join(suffixConds, " OR ")+"))", args...)
+	cond, args := notGoMetadataName()
+	query = query.Where(cond, args...)
 	result := query.UpdateColumn("expires_at", nil)
 	if result.Error != nil {
 		return 0, errors.Wrap(result.Error, errors.ErrCodeStorageFailure, "failed to clear artifact expiry")
@@ -629,7 +623,8 @@ func (s *GORMStoreV2) GetStats(ctx context.Context, registry string) (*metadata.
 	query = query.Where("version NOT IN (?)", []string{"list", "latest", "metadata", "page"})
 
 	// Filter out Go module metadata files (.mod, .info) - only count actual packages (.zip)
-	query = query.Where("name NOT LIKE ?", "%.mod").Where("name NOT LIKE ?", "%.info")
+	cond, condArgs := notGoMetadataName()
+	query = query.Where(cond, condArgs...)
 
 	// Filter by registry if specified
 	if registry != "" {

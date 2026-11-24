@@ -76,8 +76,11 @@ func checkBackfillStatsSnapshots(t *testing.T, store *GORMStoreV2) {
 
 	seedAt(t, store, "a", "1.0.0", 10, daysAgo(5))
 	seedAt(t, store, "b", "1.0.0", 20, daysAgo(4))
-	seedAt(t, store, "a", "list", 5, daysAgo(5))                  // metadata page: never counted
-	seedAt(t, store, "mod/@v/v1.mod", "v1", 7, daysAgo(5))        // Go .mod file: never counted
+	seedAt(t, store, "a", "list", 5, daysAgo(5))                 // metadata page: never counted
+	require.NoError(t, store.SavePackage(ctx, &metadata.Package{ // Go .mod file: never counted
+		Registry: "go", Name: "mod/@v/v1.mod", Version: "v1", StorageKey: "go/mod/@v/v1.mod",
+		Size: 7, CachedAt: daysAgo(5), LastAccessed: daysAgo(5),
+	}))
 	seedAt(t, store, "early", "1.0.0", 40, daysAgo(2))            // cached and deleted the same day
 	scanAt(t, store, "b", "1.0.0", daysAgo(4), "high")            // first scan: vulnerability history starts here
 	scanAt(t, store, "a", "1.0.0", daysAgo(3), "critical", "low") // critical wins over low

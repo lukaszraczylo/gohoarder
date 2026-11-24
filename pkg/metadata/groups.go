@@ -38,7 +38,7 @@ type groupAgg struct {
 func PageGroups(all []*Package, opts GroupListOptions) *GroupPage {
 	groups := map[string]*groupAgg{}
 	for _, p := range all {
-		if IsMetadataVersion(p.Version) || (opts.Registry != "" && p.Registry != opts.Registry) || !MatchesQuery(p, opts.Query) {
+		if IsMetadataEntry(p.Registry, p.Name, p.Version) || (opts.Registry != "" && p.Registry != opts.Registry) || !MatchesQuery(p, opts.Query) {
 			continue
 		}
 		name := CleanName(p.Name)

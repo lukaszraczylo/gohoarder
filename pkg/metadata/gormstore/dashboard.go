@@ -49,8 +49,9 @@ func (s *GORMStoreV2) registryNames() map[int32]string {
 
 // groupFilter builds the WHERE clause shared by the group count, the group page and the row fetch.
 func (s *GORMStoreV2) groupFilter(opts metadata.GroupListOptions) (clause string, args []interface{}, empty bool, err error) {
-	clause = "version NOT IN ?"
-	args = []interface{}{metadata.MetadataVersions}
+	// The artifact filter GetStats applies, so list totals and /api/stats agree.
+	clause = "version NOT IN ? AND name NOT LIKE ? AND name NOT LIKE ?"
+	args = []interface{}{metadata.MetadataVersions, "%.mod", "%.info"}
 	if opts.Registry != "" {
 		id, idErr := s.getRegistryID(opts.Registry)
 		if idErr != nil {

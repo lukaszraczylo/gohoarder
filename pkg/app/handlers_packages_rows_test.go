@@ -148,3 +148,32 @@ func TestRowsLayoutSortsByRisk(t *testing.T) {
 		t.Errorf("risk desc names = %v, want the clean package last", got)
 	}
 }
+
+func TestRowsLayoutExcludesGoMetadataFiles(t *testing.T) {
+	a := newVerdictApp(t)
+	before, _ := getJSON(t, a, "/api/packages?layout=rows")
+	now := time.Now()
+	for _, name := range []string{"example.com/m/@v/v1.0.0.mod", "example.com/m/@v/v1.0.0.info", "example.com/m/@v/v1.0.0.zip", "example.com/only/@v/v0.1.0.mod"} {
+		if err := a.metadata.SavePackage(context.Background(), &metadata.Package{
+			Registry: "go", Name: name, Version: "v1.0.0", StorageKey: "go/" + name, Size: 1, CachedAt: now, LastAccessed: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, _ := getJSON(t, a, "/api/packages?layout=rows&registry=go")
+	if got := rowNames(out); !slices.Equal(got, []string{"example.com/m"}) {
+		t.Errorf("go rows = %v, want only the .zip", got)
+	}
+	if out["total"].(float64) != 1 {
+		t.Errorf("total = %v, want 1", out["total"])
+	}
+	if pending := out["counts"].(map[string]any)["verdicts"].(map[string]any)["pending"].(float64); pending != 1 {
+		t.Errorf("pending count = %v, want 1", pending)
+	}
+
+	after, _ := getJSON(t, a, "/api/packages?layout=rows")
+	if after["total"].(float64) != before["total"].(float64)+1 {
+		t.Errorf("total = %v, want %v", after["total"], before["total"].(float64)+1)
+	}
+}

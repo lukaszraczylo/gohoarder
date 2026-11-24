@@ -62,7 +62,7 @@ func (s *AnalyticsHandlersTestSuite) SetupTest() {
 	s.app.Get("/api/analytics/trends", s.appInst.handleAnalyticsTrends)
 	s.app.Get("/api/analytics/total", s.appInst.handleAnalyticsTotalStats)
 	s.app.Get("/api/analytics/registry/:registry", s.appInst.handleAnalyticsRegistryStats)
-	s.app.Get("/api/analytics/package/:registry/:name", s.appInst.handleAnalyticsPackageStats)
+	s.app.Get("/api/analytics/package/:registry/*", s.appInst.handleAnalyticsPackageStats)
 	s.app.Get("/api/analytics/search", s.appInst.handleAnalyticsSearch)
 }
 

@@ -470,7 +470,7 @@ func (a *App) setupServer() error {
 		a.app.Get("/api/analytics/trends", mwAuth, a.handleAnalyticsTrends)
 		a.app.Get("/api/analytics/total", mwAuth, a.handleAnalyticsTotalStats)
 		a.app.Get("/api/analytics/registry/:registry", mwAuth, a.handleAnalyticsRegistryStats)
-		a.app.Get("/api/analytics/package/:registry/:name", mwAuth, a.handleAnalyticsPackageStats)
+		a.app.Get("/api/analytics/package/:registry/*", mwAuth, a.handleAnalyticsPackageStats)
 		a.app.Get("/api/analytics/search", mwAuth, a.handleAnalyticsSearch)
 	} else {
 		a.app.Get("/api/config", a.handleConfig)
@@ -486,7 +486,7 @@ func (a *App) setupServer() error {
 		a.app.Get("/api/analytics/trends", a.handleAnalyticsTrends)
 		a.app.Get("/api/analytics/total", a.handleAnalyticsTotalStats)
 		a.app.Get("/api/analytics/registry/:registry", a.handleAnalyticsRegistryStats)
-		a.app.Get("/api/analytics/package/:registry/:name", a.handleAnalyticsPackageStats)
+		a.app.Get("/api/analytics/package/:registry/*", a.handleAnalyticsPackageStats)
 		a.app.Get("/api/analytics/search", a.handleAnalyticsSearch)
 	}
 

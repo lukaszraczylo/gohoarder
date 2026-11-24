@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 )
@@ -249,5 +250,22 @@ func TestVulnerabilityDetailsExplainVerdictAndScanners(t *testing.T) {
 	plain := details("plain")
 	if jsonAt(plain, "decision", "verdict") != VerdictCleared || jsonAt(plain, "decision", "bypass") != nil {
 		t.Errorf("clean decision = %v", plain["decision"])
+	}
+}
+
+// Scoped npm names and Go module paths contain slashes; the per-package analytics route must accept them.
+func TestPackageAnalyticsAcceptsNamesWithSlashes(t *testing.T) {
+	a := newTestApp(t, nil)
+	for _, name := range []string{"@types/node", "github.com/google/uuid/@v/v1.6.0.zip", "lodash"} {
+		a.analyticsEngine.TrackDownload(analytics.PackageDownload{Registry: "npm", Name: name, Version: "1.0.0", Timestamp: time.Now(), BytesSize: 5})
+	}
+	for _, name := range []string{"@types/node", "github.com/google/uuid/@v/v1.6.0.zip", "lodash"} {
+		out, body := getJSON(t, a, "/api/analytics/package/npm/"+name)
+		if jsonAt(out, "package", "TotalDownloads") != float64(1) {
+			t.Errorf("analytics for %q = %s, want one download", name, body)
+		}
+	}
+	if code, _, _ := doRequest(t, a, "/api/analytics/package/npm/@types/missing", nil); code != http.StatusNotFound {
+		t.Errorf("unknown package = %d, want 404", code)
 	}
 }

@@ -88,7 +88,8 @@ func (a *App) handleAnalyticsPackageStats(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
 	registry := c.Params("registry")
-	name := c.Params("name")
+	// The wildcard route carries names with slashes (@scope/pkg, Go module paths).
+	name := c.Params("*")
 
 	if registry == "" || name == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

@@ -139,17 +139,53 @@ func (a *App) scanDecisions(ctx context.Context, ids []string) ([]scanner.ScanDe
 	return out, nil
 }
 
-// vulnerabilityInfo is the per-row scan block of the list payload.
+// Verdicts the dashboard shows for a cached package.
+const (
+	VerdictCleared  = "cleared"
+	VerdictHeld     = "held"
+	VerdictBypassed = "bypassed"
+	VerdictPending  = "pending"
+)
+
+// verdictOf names the outcome of a scan decision: held beats bypassed, which beats cleared.
+func verdictOf(d scanner.ScanDecision) string {
+	switch {
+	case d.Blocked:
+		return VerdictHeld
+	case d.Bypass != nil:
+		return VerdictBypassed
+	default:
+		return VerdictCleared
+	}
+}
+
+// bypassSummary is the public view of the bypass that waved a package through.
+func bypassSummary(b *metadata.CVEBypass) map[string]interface{} {
+	if b == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"id":         b.ID,
+		"type":       b.Type,
+		"target":     b.Target,
+		"reason":     b.Reason,
+		"created_by": b.CreatedBy,
+		"created_at": b.CreatedAt,
+		"expires_at": b.ExpiresAt,
+	}
+}
+
+// vulnerabilityInfo is the per-package scan block of the list response; verdict, reason and bypass extend the original fields.
 func vulnerabilityInfo(pkg *metadata.Package, decisions map[string]scanner.ScanDecision) map[string]interface{} {
 	if !pkg.SecurityScanned {
-		return map[string]interface{}{"scanned": false, "status": "not_scanned", "isBlocked": false}
+		return map[string]interface{}{"scanned": false, "status": "not_scanned", "isBlocked": false, "verdict": VerdictPending}
 	}
 	d, ok := decisions[pkg.ID]
 	if !ok || !d.Summary.HasScan {
-		return map[string]interface{}{"scanned": false, "status": "pending", "isBlocked": false}
+		return map[string]interface{}{"scanned": false, "status": "pending", "isBlocked": false, "verdict": VerdictPending}
 	}
 	sum := d.Summary
-	return map[string]interface{}{
+	info := map[string]interface{}{
 		"scanned":   true,
 		"status":    sum.Status,
 		"scannedAt": sum.ScannedAt.Format(time.RFC3339),
@@ -161,11 +197,17 @@ func vulnerabilityInfo(pkg *metadata.Package, decisions map[string]scanner.ScanD
 		},
 		"total":     sum.Total,
 		"isBlocked": d.Blocked,
+		"verdict":   verdictOf(d),
 	}
+	if d.Reason != "" {
+		info["reason"] = d.Reason
+	}
+	if d.Bypass != nil {
+		info["bypass"] = bypassSummary(d.Bypass)
+	}
+	return info
 }
 
-// handleListPackages returns cached packages, one page of groups when page or
-// page_size is given and every group otherwise.
 func (a *App) handleListPackages(c fiber.Ctx) error {
 	ctx := c.Context()
 	params, err := parseListParams(c)
@@ -391,7 +433,7 @@ func (a *App) handleStats(c fiber.Ctx) error {
 	}
 
 	// Blocked packages need the blocking policy, so judge every scanned package in one batch.
-	blockedCount, err := a.countBlocked(ctx)
+	blockedCount, bypassedCount, err := a.countVerdicts(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to judge scanned packages")
 	}
@@ -410,6 +452,7 @@ func (a *App) handleStats(c fiber.Ctx) error {
 		"scanned_packages":    cacheStats.ScannedPackages,
 		"vulnerable_packages": cacheStats.VulnerablePackages,
 		"blocked_packages":    blockedCount,
+		"bypassed_packages":   bypassedCount,
 	}
 
 	// Convert registry stats to interface map

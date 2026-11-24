@@ -463,6 +463,7 @@ func (a *App) setupServer() error {
 		a.app.Get("/api/stats/timeseries", mwAuth, a.handleTimeSeriesStats)
 		a.app.Get("/api/stats/trend", mwAuth, a.handleStatsTrend)
 		a.app.Get("/api/info", mwAuth, a.handleInfo)
+		a.app.Get("/api/system", mwAuth, a.handleSystem)
 
 		a.app.Get("/api/analytics/top", mwAuth, a.handleAnalyticsTopPackages)
 		a.app.Get("/api/analytics/trending", mwAuth, a.handleAnalyticsTrendingPackages)
@@ -478,6 +479,7 @@ func (a *App) setupServer() error {
 		a.app.Get("/api/stats/timeseries", a.handleTimeSeriesStats)
 		a.app.Get("/api/stats/trend", a.handleStatsTrend)
 		a.app.Get("/api/info", a.handleInfo)
+		a.app.Get("/api/system", a.handleSystem)
 
 		a.app.Get("/api/analytics/top", a.handleAnalyticsTopPackages)
 		a.app.Get("/api/analytics/trending", a.handleAnalyticsTrendingPackages)

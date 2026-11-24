@@ -55,20 +55,31 @@ func (a *App) handleStatsTrend(c fiber.Ctx) error {
 
 // countBlocked counts scanned artifacts the blocking policy refuses.
 func (a *App) countBlocked(ctx context.Context) (int64, error) {
+	blocked, _, err := a.countVerdicts(ctx)
+	return blocked, err
+}
+
+// countVerdicts counts scanned artifacts that are held and that pass only because an admin bypass applies.
+func (a *App) countVerdicts(ctx context.Context) (blocked, bypassed int64, err error) {
 	if !a.config.Security.Enabled || a.scanManager == nil {
-		return 0, nil
+		return 0, 0, nil
 	}
 	decisions, err := a.scanManager.ScanDecisions(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	var blocked int64
 	for _, d := range decisions {
-		if d.Blocked && !metadata.IsMetadataVersion(d.Summary.Version) {
+		if metadata.IsMetadataVersion(d.Summary.Version) {
+			continue
+		}
+		switch verdictOf(d) {
+		case VerdictHeld:
 			blocked++
+		case VerdictBypassed:
+			bypassed++
 		}
 	}
-	return blocked, nil
+	return blocked, bypassed, nil
 }
 
 // blockedCounterSetter is implemented by stores that snapshot blocked packages.

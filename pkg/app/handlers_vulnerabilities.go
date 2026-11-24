@@ -70,6 +70,8 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 			"vulnerability_count": 0,
 			"message":             "Package not yet scanned for vulnerabilities",
 			"security_scanned":    pkg.SecurityScanned,
+			"decision":            fiber.Map{"verdict": VerdictPending, "blocked": false, "reason": "", "bypass": nil},
+			"scanners":            []interface{}{},
 		})
 	}
 
@@ -135,6 +137,7 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 			"description": vuln.Description,
 			"references":  vuln.References,
 			"fixed_in":    vuln.FixedIn,
+			"detected_by": vuln.DetectedBy,
 			"bypassed":    bypassed,
 		}
 
@@ -166,6 +169,8 @@ func (a *App) handleVulnerabilities(c fiber.Ctx) error {
 			"low":      severityCounts["LOW"],
 		},
 		"bypassed_count": len(scanResult.Vulnerabilities) - (severityCounts["CRITICAL"] + severityCounts["HIGH"] + severityCounts["MODERATE"] + severityCounts["LOW"]),
+		"scanners":       scannerBreakdown(scanResult),
+		"decision":       a.packageDecision(ctx, pkg),
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response)
@@ -189,4 +194,59 @@ func (a *App) resolvePackageKey(ctx context.Context, registry, name, version str
 		}
 	}
 	return name, nil, err
+}
+
+// scannerBreakdown counts each scanner's findings by severity, from the merged scan's detected_by lists.
+func scannerBreakdown(res *metadata.ScanResult) []map[string]interface{} {
+	names := strings.Split(res.Scanner, "+")
+	counts := make(map[string]map[string]int, len(names))
+	for _, n := range names {
+		counts[n] = map[string]int{"critical": 0, "high": 0, "moderate": 0, "low": 0}
+	}
+	for _, v := range res.Vulnerabilities {
+		by := v.DetectedBy
+		if len(by) == 0 && len(names) == 1 {
+			by = names
+		}
+		sev := strings.ToLower(metadata.NormalizeSeverity(v.Severity))
+		for _, n := range by {
+			if c, ok := counts[n]; ok {
+				c[sev]++
+			}
+		}
+	}
+	out := make([]map[string]interface{}, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		c := counts[n]
+		out = append(out, map[string]interface{}{
+			"name":            n,
+			"findings":        c["critical"] + c["high"] + c["moderate"] + c["low"],
+			"severity_counts": c,
+		})
+	}
+	return out
+}
+
+// packageDecision is the verdict the proxy applies to one package, with the bypass that applied.
+func (a *App) packageDecision(ctx context.Context, pkg *metadata.Package) fiber.Map {
+	decision := fiber.Map{"verdict": VerdictCleared, "blocked": false, "reason": "", "bypass": nil}
+	if pkg == nil {
+		return decision
+	}
+	list, err := a.scanDecisions(ctx, []string{pkg.ID})
+	if err != nil || len(list) == 0 {
+		if err != nil {
+			log.Warn().Err(err).Str("package", pkg.Name).Msg("Failed to judge package")
+		}
+		return decision
+	}
+	d := list[0]
+	decision["verdict"] = verdictOf(d)
+	decision["blocked"] = d.Blocked
+	decision["reason"] = d.Reason
+	decision["bypass"] = bypassSummary(d.Bypass)
+	return decision
 }

@@ -95,7 +95,8 @@ type Config struct {
 	RescanAfter       time.Duration            // Rescan a cache hit whose scan result is older than this before serving (0 = off)
 }
 
-const defaultScanWaitTimeout = 30 * time.Second
+// DefaultScanWaitTimeout is how long a first download waits for its scan when none is configured.
+const DefaultScanWaitTimeout = 30 * time.Second
 
 // cleanupBatchSize bounds how many rows one cleanup query reads.
 const cleanupBatchSize = metadata.DefaultBatchSize
@@ -196,7 +197,7 @@ func New(storage storage.StorageBackend, metadata metadata.MetadataStore, scanne
 	}
 
 	if config.ScanWaitTimeout == 0 {
-		config.ScanWaitTimeout = defaultScanWaitTimeout
+		config.ScanWaitTimeout = DefaultScanWaitTimeout
 	}
 
 	if config.MaxPackageSize == 0 {

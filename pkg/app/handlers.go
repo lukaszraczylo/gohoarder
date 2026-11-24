@@ -209,6 +209,9 @@ func vulnerabilityInfo(pkg *metadata.Package, decisions map[string]scanner.ScanD
 }
 
 func (a *App) handleListPackages(c fiber.Ctx) error {
+	if c.Query("layout") == layoutRows {
+		return a.handleListPackageRows(c)
+	}
 	ctx := c.Context()
 	params, err := parseListParams(c)
 	if err != nil {

@@ -28,6 +28,8 @@ func newTimeSeriesStore(t *testing.T) *GORMStoreV2 {
 		LogLevel:     "silent",
 	})
 	require.NoError(t, err)
+	// Tests drive aggregation by hand and set the worker clock; the background loop would race that write.
+	store.aggregationWorker.Stop()
 	return store
 }
 

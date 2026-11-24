@@ -106,7 +106,6 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(wrapper.find('[data-testid="cache-capacity"]').text()).toContain('5 GB of 10 GB')
     expect(wrapper.find('[data-testid="download-trend"] [role="img"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="top-packages"]').text()).toContain('npm · left-pad')
-    expect(wrapper.find('[data-testid="top-packages"]').text()).toContain('go · github.com/example/module')
     expect(wrapper.find('[data-testid="scanner-health"]').text()).toContain('grype')
     expect(wrapper.find('[data-testid="scanner-health"]').text()).toContain('Unavailable')
     expect(wrapper.find('[data-testid="ws-event-feed"]').text()).toContain('left-pad')

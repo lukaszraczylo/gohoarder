@@ -3,7 +3,7 @@
     <Card class="min-w-0">
       <CardHeader>
         <CardTitle as="h2">Most requested</CardTitle>
-        <CardDescription>Total downloads since the server started.</CardDescription>
+        <CardDescription>Downloads served from the cache. The counts survive restarts.</CardDescription>
       </CardHeader>
       <CardContent>
         <LoadingState v-if="loading" layout="inline" label="Loading top packages..." />
@@ -15,7 +15,7 @@
     <Card class="min-w-0">
       <CardHeader>
         <CardTitle as="h2">Trending</CardTitle>
-        <CardDescription>Downloads in the last 7 days.</CardDescription>
+        <CardDescription>Downloads in the last 7 days. Counted in memory, so it restarts with the server.</CardDescription>
       </CardHeader>
       <CardContent>
         <LoadingState v-if="loading" layout="inline" label="Loading trending packages..." />
@@ -52,8 +52,18 @@ interface PopularPackage {
   RecentDownloads: number
 }
 
+/** One stored version row; its count is kept in the database. */
+interface DownloadRow {
+  registry: string
+  name: string
+  download_count: number
+}
+
 const LIMIT = 8
-const popular = ref<PopularPackage[]>([])
+// Go keeps one row per file (.zip, .mod, .info) of a version; only the zip is a module download.
+const GO_METADATA = /\.(mod|info)$/
+const ROWS_URL = '/api/packages?layout=rows&sort=downloads&order=desc&page=1&page_size=200'
+const stored = ref<DownloadRow[]>([])
 const recent = ref<PopularPackage[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -70,7 +80,14 @@ function entries(rows: PopularPackage[], pick: (p: PopularPackage) => number): L
   return [...totals.values()].filter((e) => e.value > 0).sort((a, b) => b.value - a.value).slice(0, LIMIT)
 }
 
-const top = computed(() => entries(popular.value, (p) => p.Downloads))
+const top = computed(() =>
+  entries(
+    stored.value
+      .filter((r) => !(r.registry === 'go' && GO_METADATA.test(r.name)))
+      .map((r) => ({ Registry: r.registry, Name: r.name, Downloads: r.download_count, RecentDownloads: 0 })),
+    (p) => p.Downloads,
+  ),
+)
 const trending = computed(() => entries(recent.value, (p) => p.RecentDownloads))
 
 async function load() {
@@ -78,10 +95,10 @@ async function load() {
   error.value = null
   try {
     const [topRes, trendRes] = await Promise.all([
-      axios.get<{ packages: PopularPackage[] }>('/api/analytics/top?limit=50'),
+      axios.get<{ packages: DownloadRow[] }>(ROWS_URL),
       axios.get<{ packages: PopularPackage[] }>('/api/analytics/trending?limit=50'),
     ])
-    popular.value = topRes.data.packages ?? []
+    stored.value = topRes.data.packages ?? []
     recent.value = trendRes.data.packages ?? []
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load package rankings'

@@ -6,7 +6,8 @@ import Overview from './Overview.vue'
 import { usePackageStore } from '../stores/packages'
 import { useRealtimeStore, __resetRealtimeSingleton } from '../stores/realtime'
 import { __resetSystem } from '@/lib/system'
-import { REGISTRIES, STATS, SYSTEM, TIMESERIES, TOP_PACKAGES } from '@/test/fixtures'
+import { PACKAGES, REGISTRIES, STATS, SYSTEM, TIMESERIES, TOP_PACKAGES } from '@/test/fixtures'
+import { serveRows } from '@/test/rowsServer'
 import { mountStrict } from '@/test/mountStrict'
 import { createTestRouter } from '@/test/router'
 
@@ -20,6 +21,7 @@ beforeEach(() => {
   __resetSystem()
   vi.mocked(axios.get).mockImplementation(async (url: string) => {
     if (url.startsWith('/api/system')) return { data: SYSTEM } as never
+    if (url.includes('layout=rows')) return { data: serveRows(url, PACKAGES) } as never
     if (url.startsWith('/api/analytics/')) return { data: TOP_PACKAGES } as never
     if (url.startsWith('/api/stats/timeseries')) return { data: TIMESERIES } as never
     return { data: { stats: STATS, registries: REGISTRIES } } as never

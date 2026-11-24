@@ -50,6 +50,7 @@ export function serveRows(url: string, all: readonly Package[]) {
       return 0
     })
   }
+  if (sort === 'downloads') matched.sort((a, b) => (params.get('order') === 'asc' ? 1 : -1) * (a.download_count - b.download_count))
   return {
     packages: matched.slice((page - 1) * pageSize, page * pageSize),
     total: matched.length,

@@ -58,7 +58,7 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 // ServeHTTP handles NPM registry requests
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	path := strings.TrimPrefix(r.URL.Path, "/npm")
+	path := r.URL.Path
 
 	log.Debug().Str("path", path).Str("method", r.Method).Msg("NPM proxy request")
 

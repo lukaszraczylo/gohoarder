@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -315,4 +316,36 @@ func TestNPMMetadataTTLOverrideReachesCache(t *testing.T) {
 		return
 	}
 	t.Fatalf("no npm metadata entry with an expiry among %d packages", len(pkgs))
+}
+
+// The mount already strips the registry prefix, so a package named after the registry must keep its name.
+func TestPackagesNamedAfterTheRegistryKeepTheirName(t *testing.T) {
+	var npmSeen, pypiSeen []string
+	npmUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		npmSeen = append(npmSeen, r.URL.Path)
+		_, _ = w.Write([]byte(`{"name":"x","versions":{}}`))
+	}))
+	t.Cleanup(npmUp.Close)
+	pypiUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pypiSeen = append(pypiSeen, r.URL.Path)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><body></body></html>`))
+	}))
+	t.Cleanup(pypiUp.Close)
+
+	a := newTestApp(t, func(c *config.Config) {
+		c.Handlers.NPM.UpstreamRegistry = npmUp.URL
+		c.Handlers.PyPI.SimpleAPIURL = pypiUp.URL + "/simple"
+	})
+	for _, target := range []string{"/npm/npm-run-all", "/npm/npm", "/pypi/simple/pypi-a/", "/pypi/pypi-b/"} {
+		if code, _, body := doRequest(t, a, target, nil); code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, body %q", target, code, body)
+		}
+	}
+	if want := []string{"/npm-run-all", "/npm"}; !slices.Equal(npmSeen, want) {
+		t.Errorf("npm upstream paths = %v, want %v", npmSeen, want)
+	}
+	if want := []string{"/simple/pypi-a/", "/simple/pypi-b/"}; !slices.Equal(pypiSeen, want) {
+		t.Errorf("pypi upstream paths = %v, want %v", pypiSeen, want)
+	}
 }

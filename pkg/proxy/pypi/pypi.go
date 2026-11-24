@@ -111,9 +111,11 @@ func New(cacheManager *cache.Manager, client *network.Client, config Config) *Ha
 // ServeHTTP handles PyPI Simple API requests
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	path := strings.TrimPrefix(r.URL.Path, "/pypi")
-	// Also trim /simple prefix since upstream already includes it
-	path = strings.TrimPrefix(path, "/simple")
+	path := r.URL.Path
+	// Upstream already includes /simple; trim it only as a whole segment so a package such as simple-x keeps its name.
+	if path == "/simple" || strings.HasPrefix(path, "/simple/") {
+		path = path[len("/simple"):]
+	}
 
 	log.Debug().Str("path", path).Str("method", r.Method).Msg("PyPI proxy request")
 

@@ -9,6 +9,7 @@ export interface VulnerabilityEntry {
   references: string[]
   fixed_in: string
   detected_by?: string[]
+  aliases?: string[]
   bypassed: boolean
   bypass?: { id: string; reason: string; created_by: string; expires_at: string }
 }

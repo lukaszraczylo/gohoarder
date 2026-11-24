@@ -83,7 +83,7 @@
         </TabsContent>
 
         <TabsContent value="downloads" class="pt-4">
-          <DownloadsPanel :registry="registry" :name="packageName" :version="version" :download-count="row?.download_count ?? 0" />
+          <DownloadsPanel :registry="registry" :name="packageName" :download-count="row?.download_count ?? 0" />
         </TabsContent>
 
         <TabsContent value="bypass" class="pt-4">

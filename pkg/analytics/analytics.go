@@ -4,6 +4,7 @@ package analytics
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type PackageDownload struct {
 
 // PackageStats holds statistics for a package
 type PackageStats struct {
+	versions       map[string]struct{}
 	LastDownload   time.Time
 	FirstSeen      time.Time
 	Registry       string
@@ -111,6 +113,11 @@ func NewEngine(cfg Config) *Engine {
 // engine: append to the buffer under downloadsMu, release it, then update
 // stats under statsMu.
 func (e *Engine) TrackDownload(download PackageDownload) {
+	// Callers pass names sliced from a request buffer that the server reuses; keep our own copy.
+	download.Registry = strings.Clone(download.Registry)
+	download.Name = strings.Clone(download.Name)
+	download.Version = strings.Clone(download.Version)
+
 	// Append to buffer and decide whether buffer is full.
 	e.downloadsMu.Lock()
 	e.downloads = append(e.downloads, download)
@@ -154,8 +161,11 @@ func (e *Engine) updateStats(download PackageDownload) {
 	stats.BytesServed += download.BytesSize
 	stats.LastDownload = download.Timestamp
 
-	// Track unique versions (simplified)
-	stats.UniqueVersions++
+	if stats.versions == nil {
+		stats.versions = make(map[string]struct{})
+	}
+	stats.versions[download.Version] = struct{}{}
+	stats.UniqueVersions = len(stats.versions)
 }
 
 // GetPackageStats returns statistics for a specific package
@@ -171,6 +181,7 @@ func (e *Engine) GetPackageStats(registry, name string) (*PackageStats, bool) {
 
 	// Return a copy to avoid race conditions
 	statsCopy := *stats
+	statsCopy.versions = nil
 	return &statsCopy, true
 }
 

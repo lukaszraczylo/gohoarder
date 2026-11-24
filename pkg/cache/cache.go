@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -986,8 +987,15 @@ func (m *Manager) Health(ctx context.Context) error {
 	return nil
 }
 
-// trackDownload tracks a package download event in analytics
+// trackDownload records an artifact download under the package name. Metadata pages are not
+// downloads, and a Go cache key (module/@v/version.zip) is one module.
 func (m *Manager) trackDownload(registry, name, version string, size int64) {
+	if metadata.IsMetadataEntry(registry, name, version) {
+		return
+	}
+	if registry == metadata.GoRegistry {
+		name, _, _ = strings.Cut(name, "/@v/")
+	}
 	download := analytics.PackageDownload{
 		Registry:  registry,
 		Name:      name,

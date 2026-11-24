@@ -17,7 +17,6 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
-	"github.com/gofiber/fiber/v3/middleware/static"
 	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
 	"github.com/lukaszraczylo/gohoarder/pkg/auth"
 	"github.com/lukaszraczylo/gohoarder/pkg/cache"
@@ -595,7 +594,7 @@ func (a *App) setupServer() error {
 	frontendDir := "frontend/dist"
 	if _, err := os.Stat(frontendDir); err == nil {
 		log.Info().Str("dir", frontendDir).Msg("Serving frontend static files")
-		a.app.Use("/", static.New(frontendDir))
+		a.app.Use("/", spaStatic(frontendDir))
 	} else {
 		log.Warn().Msg("Frontend dist directory not found, frontend won't be served")
 		a.app.Get("/", func(c fiber.Ctx) error {

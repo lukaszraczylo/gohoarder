@@ -309,17 +309,18 @@ func (a *App) initializeComponents() error {
 	log.Info().Msg("Initializing authentication manager")
 	authCfg := auth.Config{BcryptCost: a.config.Auth.BcryptCost}
 	a.authManager = auth.NewWithStore(authCfg, a.metadata)
+	// Bootstrap before Load: a key saved after the cache is hydrated stays invalid until the next restart.
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := auth.BootstrapAdminFromEnv(bootCtx, a.metadata, authCfg); err != nil {
+		log.Warn().Err(err).Msg("Failed to bootstrap admin API key from environment")
+	}
+	bootCancel()
 	loadCtx, loadCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := a.authManager.Load(loadCtx); err != nil {
 		// Empty key set is recoverable: log and continue rather than fail boot.
 		log.Warn().Err(err).Msg("Failed to load API keys from metadata store; starting with empty key set")
 	}
 	loadCancel()
-	bootCtx, bootCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := auth.BootstrapAdminFromEnv(bootCtx, a.metadata, authCfg); err != nil {
-		log.Warn().Err(err).Msg("Failed to bootstrap admin API key from environment")
-	}
-	bootCancel()
 
 	a.scanManager.SetFileSource(a.cache.ScanFile)
 

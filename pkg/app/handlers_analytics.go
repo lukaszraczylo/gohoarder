@@ -97,13 +97,9 @@ func (a *App) handleAnalyticsPackageStats(c fiber.Ctx) error {
 		})
 	}
 
-	stats, exists := a.analyticsEngine.GetPackageStats(registry, name)
-	if !exists {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "package not found in analytics",
-		})
-	}
-
+	// Analytics live in memory and restart empty, so a package with no record yet is a normal
+	// answer, not a missing resource: a 404 here shows up as a failed request in every client.
+	stats, _ := a.analyticsEngine.GetPackageStats(registry, name)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"package": stats,
 	})

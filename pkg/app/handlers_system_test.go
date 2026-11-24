@@ -265,7 +265,9 @@ func TestPackageAnalyticsAcceptsNamesWithSlashes(t *testing.T) {
 			t.Errorf("analytics for %q = %s, want one download", name, body)
 		}
 	}
-	if code, _, _ := doRequest(t, a, "/api/analytics/package/npm/@types/missing", nil); code != http.StatusNotFound {
-		t.Errorf("unknown package = %d, want 404", code)
+	// A package with no record yet is a normal answer; a 404 would show as a failed request in the browser.
+	out, body := getJSON(t, a, "/api/analytics/package/npm/@types/missing")
+	if pkg, present := out["package"]; !present || pkg != nil {
+		t.Errorf("unknown package = %s, want 200 with a null package", body)
 	}
 }

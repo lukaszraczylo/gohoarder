@@ -29,6 +29,7 @@
       <template v-else>
         <section class="flex flex-col gap-3" aria-labelledby="trend-packages-heading">
           <h3 id="trend-packages-heading" class="text-sm font-medium">Cached packages</h3>
+          <p v-if="singleDay" class="m-0 text-sm text-muted-foreground" data-testid="trend-single-day">{{ SINGLE_DAY_NOTE }}</p>
           <LineChart
             variant="area"
             :size="compact ? 'sm' : 'md'"
@@ -50,6 +51,7 @@
               v-model="severities"
               type="multiple"
               variant="outline"
+              tone="primary"
               size="sm"
               aria-label="Add a line per severity"
             >
@@ -61,6 +63,8 @@
           <p v-if="vulnerabilityNote" class="text-sm text-muted-foreground" data-testid="trend-vulnerability-note">
             {{ vulnerabilityNote }}
           </p>
+          <p v-if="singleDay" class="m-0 text-sm text-muted-foreground">{{ SINGLE_DAY_NOTE }}</p>
+          <p class="m-0 text-sm text-muted-foreground" data-testid="trend-series-key">{{ seriesKey }}</p>
           <LineChart
             v-if="data?.vulnerability_history_start"
             :y-min="0"
@@ -100,6 +104,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from '@perfect-design/ui'
+import { plural } from '@/lib/reason'
 import { SEVERITY_LEVELS, formatSeverityName, type SeverityLevel } from '@/lib/severity'
 import {
   DEFAULT_TREND_PERIOD,
@@ -178,6 +183,15 @@ const vulnerableSeries = computed(() => [
   })),
 ])
 
+const SINGLE_DAY_NOTE = 'One day of history so far. A line appears once there is a second day.'
+const singleDay = computed(() => points.value.length === 1)
+
+const seriesKey = computed(() => {
+  const all = 'Plotted: packages with any finding.'
+  if (severities.value.length === 0) return `${all} Select a severity to add its own line.`
+  return `${all} Added: ${severities.value.join(', ')}.`
+})
+
 // Earlier days were never scanned, so their counts are unknown and drawn as a gap.
 const vulnerabilityNote = computed(() => {
   const start = data.value?.vulnerability_history_start
@@ -191,6 +205,6 @@ const compactVulnerable = computed(() => {
   const last = points.value[points.value.length - 1]
   const n = last?.vulnerable_packages
   if (n === null || n === undefined) return 'Vulnerability history has not started yet.'
-  return `${n} vulnerable package${n === 1 ? '' : 's'} on ${formatTrendDate(last!.date, true)}.`
+  return `${plural(n, 'vulnerable package')} on ${formatTrendDate(last!.date, true)}.`
 })
 </script>

@@ -34,6 +34,16 @@ export function scannerState(scanner: ScannerInfo): ScannerState {
   return scanner.healthy === false ? 'down' : 'healthy'
 }
 
+// These scanners query a hosted database, so they have no local binary version.
+const API_SCANNERS = new Set(['osv', 'github-advisory-database'])
+
+/** Version line for a scanner: empty when it is off, "API" for hosted databases. */
+export function scannerVersion(scanner: ScannerInfo): string {
+  if (!scanner.enabled) return ''
+  if (scanner.version) return `v${scanner.version}`
+  return API_SCANNERS.has(scanner.name) ? 'API' : 'Version not reported'
+}
+
 const SEVERITY_NAMES = { critical: 'CRITICAL', high: 'HIGH', moderate: 'MODERATE', low: 'LOW' } as const
 const SEVERITY_ORDER = ['critical', 'high', 'moderate', 'low'] as const
 

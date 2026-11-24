@@ -31,7 +31,7 @@
         />
         <template v-else>
           <p class="m-0 mb-3 text-sm text-muted-foreground" data-testid="package-count">
-            {{ rows.length }} of {{ packages.length }} package versions
+            {{ rows.length }} of {{ plural(packages.length, 'package version') }}
           </p>
           <DataTable
             v-model:sort="sort"
@@ -105,6 +105,7 @@ import {
 import PackageQuickView from './parts/PackageQuickView.vue'
 import VerdictBadge from './parts/VerdictBadge.vue'
 import { usePackageStore, type Package } from '../stores/packages'
+import { plural } from '@/lib/reason'
 import { displayVersion, formatBytes, formatNumber, withVersionPrefix } from '@/lib/format'
 import { filterPackages, packageRoute } from '@/lib/packages'
 import { faBoxOpen, faMagnifyingGlass, faRotateRight } from '@/lib/icons'

@@ -1,5 +1,6 @@
 import type { PackageReport } from '@/lib/report'
 import { formatDate, withVersionPrefix } from '@/lib/format'
+import { humanReason, plural } from '@/lib/reason'
 import { formatSeverityName, severityRank } from '@/lib/severity'
 
 export interface BannerContent {
@@ -19,7 +20,7 @@ function heldBanner(report: PackageReport, policy: string): BannerContent {
   const live = report.vulnerabilities.filter((v) => !v.bypassed)
   const top = live.reduce((max, v) => Math.max(max, severityRank(v.severity)), 0)
   const blockers = live.filter((v) => severityRank(v.severity) === top)
-  const reason = report.decision.reason
+  const reason = humanReason(report.decision.reason)
   const clients = 'Clients that request this version get a 403.'
   if (blockers.length === 0) {
     return { type: 'danger', title: `Held: ${reason || 'the scan did not complete'}`, body: `${policy} ${clients}`.trim() }
@@ -30,7 +31,7 @@ function heldBanner(report: PackageReport, policy: string): BannerContent {
   return {
     type: 'danger',
     title: `Held: ${listIds(blockers.map((b) => b.id))} ${verb} ${formatSeverityName(blockers[0].severity).toUpperCase()}`,
-    body: `${policy} ${reason ? `${reason}. ` : ''}${clients}${fix}`.replace(/\s+/g, ' ').trim(),
+    body: `${reason || policy} ${clients}${fix}`.replace(/\s+/g, ' ').trim(),
   }
 }
 
@@ -63,7 +64,7 @@ export function verdictBanner(report: PackageReport, policy: string, failClosed:
       return {
         type: 'success',
         title: 'Cleared: no finding reaches the block policy',
-        body: n === 0 ? 'The scanners reported nothing. Clients are served this version.' : `${n} finding${n === 1 ? '' : 's'} below the block policy. Clients are served this version.`,
+        body: n === 0 ? 'The scanners reported nothing. Clients are served this version.' : `${plural(n, 'finding')} below the block policy. Clients are served this version.`,
       }
     }
   }

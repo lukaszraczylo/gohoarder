@@ -64,21 +64,26 @@
       <Card data-testid="daily-downloads">
         <CardHeader>
           <CardTitle as="h2">Daily downloads</CardTitle>
-          <CardDescription>The last 30 days. A darker square is a busier day.</CardDescription>
+          <CardDescription>The last 30 days. A stronger colour is a busier day.</CardDescription>
         </CardHeader>
         <CardContent>
           <LoadingState v-if="heatLoading && heatData.length === 0" layout="inline" label="Loading daily downloads..." />
           <ErrorState v-else-if="heatError" variant="inline" title="Could not load daily downloads" :message="heatError" @retry="loadHeatmap" />
           <EmptyState v-else-if="heatData.length === 0" size="sm" title="No downloads yet" description="Days fill in as clients request packages." />
-          <CalendarHeatmap
-            v-else
-            :data="heatData"
-            fit
-            :start="heatStart"
-            :end="heatEnd"
-            label="Downloads per day over the last 30 days"
-            :cell-title="(date: string, value: number | null) => `${date}: ${value ?? 0} downloads`"
-          />
+          <div v-else class="flex flex-wrap items-start gap-x-12 gap-y-6">
+            <CalendarHeatmap
+              :data="heatData"
+              :start="heatStart"
+              :end="heatEnd"
+              label="Downloads per day over the last 30 days"
+              :cell-title="(date: string, value: number | null) => `${date}: ${value ?? 0} downloads`"
+            />
+            <DescriptionList variant="grid" :columns="3" class="min-w-64 flex-1" data-testid="heatmap-summary">
+              <DescriptionItem term="Total">{{ formatNumber(heatSummary.total) }}</DescriptionItem>
+              <DescriptionItem term="Active days">{{ heatSummary.activeDays }} of {{ heatData.length }}</DescriptionItem>
+              <DescriptionItem term="Busiest day">{{ heatSummary.busiest }}</DescriptionItem>
+            </DescriptionList>
+          </div>
         </CardContent>
       </Card>
     </template>
@@ -95,6 +100,8 @@ import {
   BarChart,
   Button,
   CalendarHeatmap,
+  DescriptionItem,
+  DescriptionList,
   Callout,
   Card,
   CardContent,
@@ -170,6 +177,15 @@ const heatError = ref<string | null>(null)
 const heatData = computed(() =>
   heatPoints.value.some((p) => p.value > 0) ? heatPoints.value.map((p) => ({ date: isoDay(p.timestamp), value: p.value })) : [],
 )
+const heatSummary = computed(() => {
+  const days = heatData.value
+  const busiest = days.reduce((max, d) => (d.value > max.value ? d : max), days[0] ?? { date: '', value: 0 })
+  return {
+    total: days.reduce((sum, d) => sum + d.value, 0),
+    activeDays: days.filter((d) => d.value > 0).length,
+    busiest: busiest.value > 0 ? `${busiest.date}, ${formatNumber(busiest.value)}` : 'None',
+  }
+})
 const heatStart = computed(() => heatData.value[0]?.date ?? '')
 const heatEnd = computed(() => heatData.value[heatData.value.length - 1]?.date ?? '')
 

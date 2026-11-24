@@ -130,7 +130,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     await flushPromises()
     expect(problems).toEqual([])
     const sheet = document.body.querySelector('[data-slot="sheet-content"]')
-    expect(sheet?.textContent).toContain('Package has 1 CRITICAL vulnerabilities')
+    expect(sheet?.textContent).toContain('1 critical finding. Policy holds any critical finding.')
     expect(sheet?.querySelector('a[href^="/package/npm/left-pad/1.3.0"]')).not.toBeNull()
   })
 
@@ -144,7 +144,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
 
     const banner = wrapper.find('[data-testid="verdict-banner"]').text()
     expect(banner).toContain('Held: CVE-2026-0003 is HIGH')
-    expect(banner).toContain('Blocks any CRITICAL.')
+    expect(banner).toContain('1 critical finding. Policy holds any critical finding.')
 
     const meta = wrapper.find('[data-testid="package-meta"]').text()
     expect(meta).toContain('2 KB')
@@ -188,7 +188,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     const triggers = wrapper.findAll('[role="tab"]').map((t) => t.text())
     expect(triggers).toEqual(['Held (1)', 'Vulnerable but allowed (1)', 'Bypassed (1)'])
     expect(wrapper.text()).toContain('left-pad')
-    expect(wrapper.text()).toContain('Package has 1 CRITICAL vulnerabilities')
+    expect(wrapper.text()).toContain('1 critical finding. Policy holds any critical finding.')
   })
 
   it('Security opens on the tab named in the URL', async () => {

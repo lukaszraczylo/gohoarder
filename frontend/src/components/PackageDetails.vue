@@ -28,27 +28,31 @@
           <CardTitle as="h2">Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <DescriptionList variant="grid" :columns="3" data-testid="package-meta">
-            <DescriptionItem term="Size">{{ row ? formatBytes(row.size) : 'Unknown' }}</DescriptionItem>
-            <DescriptionItem term="Downloads">{{ row ? formatNumber(row.download_count) : 'Unknown' }}</DescriptionItem>
-            <DescriptionItem term="Checksum (SHA-256)" :copyable="Boolean(row?.checksum_sha256)" :copy-text="row?.checksum_sha256">
-              <span class="break-all font-mono text-xs">{{ row?.checksum_sha256 || 'Not recorded' }}</span>
-            </DescriptionItem>
-            <DescriptionItem term="Upstream">{{ upstream }}</DescriptionItem>
-            <DescriptionItem term="Cached">
-              <RelativeTime v-if="row" :datetime="row.cached_at" />
-              <template v-else>Unknown</template>
-            </DescriptionItem>
-            <DescriptionItem term="Last accessed">
-              <RelativeTime v-if="row" :datetime="row.last_accessed" />
-              <template v-else>Unknown</template>
-            </DescriptionItem>
-            <DescriptionItem term="Expiry">{{ expiry }}</DescriptionItem>
-            <DescriptionItem term="Last scanned">
-              <RelativeTime v-if="report.scanned_at" :datetime="report.scanned_at" />
-              <template v-else>Never</template>
-            </DescriptionItem>
-          </DescriptionList>
+          <div class="flex flex-col gap-6" data-testid="package-meta">
+            <DescriptionList variant="grid" :columns="3" class="items-start">
+              <DescriptionItem term="Size">{{ row ? formatBytes(row.size) : 'Unknown' }}</DescriptionItem>
+              <DescriptionItem term="Downloads">{{ row ? formatNumber(row.download_count) : 'Unknown' }}</DescriptionItem>
+              <DescriptionItem term="Upstream">{{ upstream }}</DescriptionItem>
+              <DescriptionItem term="Cached">
+                <RelativeTime v-if="row" :datetime="row.cached_at" />
+                <template v-else>Unknown</template>
+              </DescriptionItem>
+              <DescriptionItem term="Last accessed">
+                <RelativeTime v-if="row" :datetime="row.last_accessed" />
+                <template v-else>Unknown</template>
+              </DescriptionItem>
+              <DescriptionItem term="Last scanned">
+                <RelativeTime v-if="report.scanned_at" :datetime="report.scanned_at" />
+                <template v-else>Never</template>
+              </DescriptionItem>
+            </DescriptionList>
+            <DescriptionList variant="grid" :columns="1" class="items-start">
+              <DescriptionItem term="Checksum (SHA-256)" :copyable="Boolean(row?.checksum_sha256)" :copy-text="row?.checksum_sha256">
+                <span class="break-all font-mono text-xs">{{ row?.checksum_sha256 || 'Not recorded' }}</span>
+              </DescriptionItem>
+              <DescriptionItem term="Expiry">{{ expiry }}</DescriptionItem>
+            </DescriptionList>
+          </div>
         </CardContent>
       </Card>
 

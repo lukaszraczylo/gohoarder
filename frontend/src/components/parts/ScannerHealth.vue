@@ -17,12 +17,12 @@
         <li
           v-for="scanner in info.security.scanners"
           :key="scanner.name"
-          class="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+          class="flex items-start justify-between gap-3 rounded-md border px-3 py-2"
           :data-scanner="scanner.name"
         >
           <span class="min-w-0">
-            <span class="block truncate text-sm font-medium">{{ scanner.name }}</span>
-            <span class="block text-xs text-muted-foreground">{{ scanner.version ? `v${scanner.version}` : 'version not reported' }}</span>
+            <span class="block break-words text-sm font-medium" :title="scanner.name">{{ scanner.name }}</span>
+            <span v-if="scannerVersion(scanner)" class="block text-xs text-muted-foreground">{{ scannerVersion(scanner) }}</span>
           </span>
           <StatusBadge :status="scannerState(scanner)" :label="STATE_LABELS[scannerState(scanner)]" :tones="STATE_TONES" />
         </li>
@@ -44,7 +44,7 @@ import {
   LoadingState,
   StatusBadge,
 } from '@perfect-design/ui'
-import { scannerState, useSystem } from '@/lib/system'
+import { scannerState, scannerVersion, useSystem } from '@/lib/system'
 
 const { info, error, load } = useSystem()
 

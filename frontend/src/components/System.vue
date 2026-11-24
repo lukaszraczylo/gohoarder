@@ -59,7 +59,7 @@
             <template #cell-state="{ row }">
               <StatusBadge :status="scannerState(row)" :label="STATE_LABELS[scannerState(row)]" :tones="STATE_TONES" />
             </template>
-            <template #cell-version="{ row }">{{ row.version ? `v${row.version}` : 'Not reported' }}</template>
+            <template #cell-version="{ row }">{{ scannerVersion(row) || 'Not applicable' }}</template>
           </DataTable>
         </CardContent>
       </Card>
@@ -133,7 +133,7 @@ import AdminKeyDialog from './parts/AdminKeyDialog.vue'
 import { useAdminKey } from '@/lib/adminKey'
 import { formatBytes, formatDuration } from '@/lib/format'
 import { faRotateRight } from '@/lib/icons'
-import { describePolicy, scannerState, useSystem, type ScannerInfo } from '@/lib/system'
+import { describePolicy, scannerState, scannerVersion, useSystem, type ScannerInfo } from '@/lib/system'
 
 const { info, error, load } = useSystem()
 const adminKey = useAdminKey()

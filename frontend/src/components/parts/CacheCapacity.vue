@@ -71,7 +71,12 @@ const rows = computed<RegistryUsage[]>(() =>
     .map(([registry, r]) => ({ registry, count: r.count ?? 0, size: r.size ?? 0, downloads: r.downloads ?? 0 }))
     .sort((a, b) => b.size - a.size),
 )
-const donut = computed<DonutDatum[]>(() => rows.value.map((r) => ({ label: r.registry, value: r.size })))
+// chart-1 and chart-2 are neighbouring teals in this theme, so each registry gets a distinct hue.
+const REGISTRY_TONES: Record<string, DonutDatum['tone']> = { npm: 'info', go: 'primary', pypi: 'warning' }
+const SPARE_TONES: DonutDatum['tone'][] = ['danger', 'success', 'muted']
+const donut = computed<DonutDatum[]>(() =>
+  rows.value.map((r, i) => ({ label: r.registry, value: r.size, tone: REGISTRY_TONES[r.registry] ?? SPARE_TONES[i % SPARE_TONES.length] })),
+)
 
 const columns: DataTableColumn<RegistryUsage>[] = [
   { key: 'registry', header: 'Registry', rowHeader: true },

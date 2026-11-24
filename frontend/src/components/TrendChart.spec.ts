@@ -37,6 +37,20 @@ const charts = (w: Wrapper) => w.findAll('svg[role="img"]')
 const requested = () => vi.mocked(axios.get).mock.calls.map((c) => c[0])
 
 describe('TrendChart', () => {
+  it('says so when there is a single day of history, and names the plotted series', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: { ...TREND, points: TREND.points.slice(0, 1) } })
+    const { wrapper } = await open()
+
+    expect(wrapper.findAll('[data-testid="trend-single-day"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('One day of history so far')
+    expect(wrapper.get('[data-testid="trend-series-key"]').text()).toContain('Plotted: packages with any finding.')
+  })
+
+  it('does not show the single-day note with several days', async () => {
+    const { wrapper } = await open()
+    expect(wrapper.text()).not.toContain('One day of history so far')
+  })
+
   it('requests the 30 day trend and draws both charts with accessible names', async () => {
     const { wrapper, problems } = await open()
 

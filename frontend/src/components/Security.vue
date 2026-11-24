@@ -123,6 +123,7 @@ import VulnerabilityBadge from './VulnerabilityBadge.vue'
 import { usePackageStore, type Package, type VulnerabilityCounts } from '../stores/packages'
 import { displayVersion, withVersionPrefix } from '@/lib/format'
 import { packageRoute } from '@/lib/packages'
+import { humanReason } from '@/lib/reason'
 import { faCircleCheck, faRotateRight } from '@/lib/icons'
 import { NO_VULNERABILITIES, SEVERITY_LEVELS, formatSeverityName, type SeverityLevel } from '@/lib/severity'
 import { verdictOf } from '@/lib/verdict'
@@ -221,7 +222,7 @@ const BASE_COLUMNS: DataTableColumn<Package>[] = [
 const SCANNED: DataTableColumn<Package> = { key: 'scanned', header: 'Last scanned', accessor: (p) => Date.parse(p.vulnerabilities?.scannedAt ?? '') || 0 }
 
 function columnsFor(name: TabName): DataTableColumn<Package>[] {
-  if (name === 'held') return [...BASE_COLUMNS, { key: 'reason', header: 'Why', accessor: (p) => p.vulnerabilities?.reason ?? '' }, SCANNED]
+  if (name === 'held') return [...BASE_COLUMNS, { key: 'reason', header: 'Why', accessor: (p) => humanReason(p.vulnerabilities?.reason) }, SCANNED]
   if (name === 'bypassed') return [...BASE_COLUMNS, { key: 'bypass', header: 'Bypass', accessor: (p) => p.vulnerabilities?.bypass?.created_by ?? '' }, SCANNED]
   return [...BASE_COLUMNS, SCANNED]
 }

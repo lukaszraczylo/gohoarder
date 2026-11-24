@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describePolicy, scannerState, type SystemInfo } from './system'
+import { describePolicy, scannerState, scannerVersion, type SystemInfo } from './system'
 
 function security(over: Partial<SystemInfo['security']>): SystemInfo['security'] {
   return {
@@ -46,5 +46,14 @@ describe('scannerState', () => {
     expect(scannerState({ name: 'a', enabled: false, healthy: null, version: '' })).toBe('off')
     expect(scannerState({ name: 'a', enabled: true, healthy: false, version: '' })).toBe('down')
     expect(scannerState({ name: 'a', enabled: true, healthy: true, version: '' })).toBe('healthy')
+  })
+})
+
+describe('scannerVersion', () => {
+  it('shows the version, API for hosted databases, and nothing for a scanner that is off', () => {
+    expect(scannerVersion({ name: 'trivy', enabled: true, healthy: true, version: '0.58.1' })).toBe('v0.58.1')
+    expect(scannerVersion({ name: 'osv', enabled: true, healthy: true, version: '' })).toBe('API')
+    expect(scannerVersion({ name: 'grype', enabled: true, healthy: false, version: '' })).toBe('Version not reported')
+    expect(scannerVersion({ name: 'npm-audit', enabled: false, healthy: null, version: '' })).toBe('')
   })
 })

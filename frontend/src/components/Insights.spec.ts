@@ -56,6 +56,14 @@ describe('Insights', () => {
     expect(wrapper.get('[data-testid="daily-downloads"]').find('[role="img"]').exists()).toBe(true)
   })
 
+  it('summarises the heatmap period next to the grid', async () => {
+    const { wrapper } = await open()
+    const summary = wrapper.get('[data-testid="heatmap-summary"]').text()
+    expect(summary).toContain('Total')
+    expect(summary).toContain(`of ${TIMESERIES.data_points.length}`)
+    expect(summary).toContain('Busiest day')
+  })
+
   it('does not draw an empty heatmap for a month with no downloads', async () => {
     const quiet = { ...TIMESERIES, data_points: TIMESERIES.data_points.map((p) => ({ ...p, value: 0 })) }
     const { wrapper } = await open(STATS, quiet)

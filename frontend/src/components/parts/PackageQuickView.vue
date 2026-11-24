@@ -56,6 +56,7 @@ import VerdictBadge from './VerdictBadge.vue'
 import type { Package } from '@/stores/packages'
 import { displayVersion, formatBytes, formatNumber, withVersionPrefix } from '@/lib/format'
 import { packageRoute } from '@/lib/packages'
+import { humanReason } from '@/lib/reason'
 import { faArrowRight, faTrash } from '@/lib/icons'
 import { VERDICT_MEANINGS, verdictOf } from '@/lib/verdict'
 
@@ -63,5 +64,5 @@ const props = defineProps<{ pkg: Package | null }>()
 const emit = defineEmits<{ close: []; delete: [pkg: Package] }>()
 
 const verdict = computed(() => (props.pkg ? verdictOf(props.pkg) : 'unscanned'))
-const explanation = computed(() => props.pkg?.vulnerabilities?.reason || VERDICT_MEANINGS[verdict.value])
+const explanation = computed(() => humanReason(props.pkg?.vulnerabilities?.reason) || VERDICT_MEANINGS[verdict.value])
 </script>

@@ -34,6 +34,7 @@
 <script setup lang="ts">
 import { KpiTile, StatGroup, StatusDot } from '@perfect-design/ui'
 import type { VulnerabilityCounts } from '../stores/packages'
+import { plural } from '@/lib/reason'
 import { SEVERITY_LEVELS, SEVERITY_TONES, formatSeverityName, type SeverityLevel } from '@/lib/severity'
 
 const props = defineProps<{
@@ -60,6 +61,6 @@ function toggle(level: SeverityLevel) {
 }
 
 function formatPackageCount(n: number): string {
-  return `${n} package${n === 1 ? '' : 's'}`
+  return plural(n, 'package')
 }
 </script>

@@ -8,7 +8,8 @@ import { mountStrict } from '@/test/mountStrict'
 vi.mock('axios')
 
 const idle = { enabled: true, running: false, scope: '', queued: 0, done: 0, failed: 0 }
-const running = { enabled: true, running: true, scope: 'vulnerable', queued: 10, done: 3, failed: 1 }
+const running = { enabled: true, running: true, scope: 'vulnerable', queued: 10, done: 3, failed: 1, elapsed_seconds: 40, eta_seconds: 60 }
+let estimate: unknown
 const finished = { ...running, running: false, done: 9 }
 
 let restore: (() => void) | undefined
@@ -17,11 +18,12 @@ let statuses: Array<typeof idle | typeof running>
 beforeEach(() => {
   localStorage.setItem('admin_api_key', 'test-key')
   statuses = [idle]
+  estimate = { vulnerable: { artifacts: 12, seconds: 30 }, all: { artifacts: 1200, seconds: 6000 }, avg_scan_seconds: 10, concurrency: 2 }
   vi.mocked(axios.get).mockReset()
   vi.mocked(axios.post).mockReset()
   vi.mocked(axios.get).mockImplementation(async (url: string) => {
     if (url === '/api/admin/rescan/status') return { data: statuses.length > 1 ? statuses.shift() : statuses[0] } as never
-    if (url === '/api/stats') return { data: { stats: { total_packages: 1200 } } } as never
+    if (url === '/api/admin/rescan/estimate') return { data: estimate } as never
     throw new Error(`unexpected request: ${url}`)
   })
 })
@@ -71,13 +73,28 @@ describe('RescanPanel', () => {
     await flushPromises()
     expect(vi.mocked(axios.post)).not.toHaveBeenCalled()
     expect(body()).toContain('re-runs all scanners on every cached artifact')
-    // 1200 artifacts x 10 s / 2 in parallel = 6000 s = 100 minutes
-    expect(body()).toContain('1,200 artifacts')
-    expect(body()).toContain('roughly 100 minutes')
+    expect(body()).toContain('1,200 artifacts, 2 at a time and 10.0 seconds each on recent scans: roughly 100 minutes')
+    expect(vi.mocked(axios.get)).toHaveBeenCalledWith('/api/admin/rescan/estimate', { headers: { Authorization: 'Bearer test-key' } })
 
     dialogButton('Rescan everything').click()
     await flushPromises()
     expect(vi.mocked(axios.post)).toHaveBeenCalledWith('/api/admin/rescan', { scope: 'all' }, expect.anything())
+  })
+
+  it('does not invent an estimate before any scan was timed', async () => {
+    estimate = { vulnerable: { artifacts: 1, seconds: null }, all: { artifacts: 7, seconds: null }, avg_scan_seconds: 0, concurrency: 2 }
+    const wrapper = await open()
+    await wrapper.get('[data-testid="rescan-all"]').trigger('click')
+    await flushPromises()
+    expect(body()).toContain('No scan has been timed yet, so there is no estimate.')
+    expect(body()).not.toContain('roughly')
+  })
+
+  it('shows the live rate and the time left while a rescan runs', async () => {
+    statuses = [running]
+    const wrapper = await open()
+    // 4 processed in 40 s is 6 a minute; the server says 60 s remain.
+    expect(wrapper.get('[data-testid="rescan-live"]').text()).toBe('6.0 artifacts a minute. About 1 minute left.')
   })
 
   it('polls until the rescan finishes and then stops', async () => {
@@ -123,6 +140,15 @@ describe('RescanPanel', () => {
     await wrapper.get('[data-testid="rescan-vulnerable"]').trigger('click')
     await flushPromises()
     expect(vi.mocked(axios.post)).not.toHaveBeenCalled()
+    expect(body()).toContain('Enter your admin API key to start a rescan.')
+  })
+
+  it('asks for the admin key before it sizes a full rescan', async () => {
+    localStorage.clear()
+    const wrapper = await open()
+    await wrapper.get('[data-testid="rescan-all"]').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(axios.get)).not.toHaveBeenCalledWith('/api/admin/rescan/estimate', expect.anything())
     expect(body()).toContain('Enter your admin API key to start a rescan.')
   })
 

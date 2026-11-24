@@ -502,6 +502,7 @@ func (a *App) setupServer() error {
 	// Admin endpoints (forced rescan)
 	a.app.Post("/api/admin/rescan", a.requireAdmin, a.handleRescanTrigger)
 	a.app.Get("/api/admin/rescan/status", a.requireAdmin, a.handleRescanStatus)
+	a.app.Get("/api/admin/rescan/estimate", a.requireAdmin, a.handleRescanEstimate)
 
 	// Admin endpoints (API key management)
 	a.app.Post("/api/admin/keys", a.requireAdmin, a.handleGenerateAPIKey)

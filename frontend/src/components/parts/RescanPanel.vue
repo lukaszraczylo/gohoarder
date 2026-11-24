@@ -21,6 +21,7 @@
           {{ status.running ? 'Running.' : 'Finished.' }}
           {{ formatNumber(status.done) }} scanned, {{ formatNumber(status.failed) }} failed, of {{ formatNumber(status.queued) }} queued.
         </p>
+        <p v-if="status.running && liveRate" class="m-0 text-sm text-muted-foreground" data-testid="rescan-live">{{ liveRate }}</p>
       </div>
     </CardContent>
 
@@ -41,7 +42,7 @@ import axios from 'axios'
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ConfirmDialog, Progress, useToastStore } from '@perfect-design/ui'
 import AdminKeyDialog from './AdminKeyDialog.vue'
 import { useAdminKey } from '@/lib/adminKey'
-import { formatDuration, formatNumber } from '@/lib/format'
+import { formatApproxDuration, formatNumber } from '@/lib/format'
 import { faRotateRight } from '@/lib/icons'
 
 type Scope = 'vulnerable' | 'all'
@@ -54,13 +55,22 @@ interface RescanStatus {
   queued: number
   done: number
   failed: number
+  elapsed_seconds?: number
+  /** Absent until the first artifact is processed. */
+  eta_seconds?: number
+}
+
+/** Response of GET /api/admin/rescan/estimate; seconds is null until a scan has been timed. */
+interface RescanEstimate {
+  vulnerable: { artifacts: number; seconds: number | null }
+  all: { artifacts: number; seconds: number | null }
+  avg_scan_seconds: number
+  concurrency: number
 }
 
 const props = defineProps<{ enabled: boolean; concurrency: number }>()
 
 const POLL_MS = 2000
-// A guess: one scan of one artifact takes seconds, and the server does not report a measured rate.
-const SECONDS_PER_ARTIFACT = 10
 
 const adminKey = useAdminKey()
 const toasts = useToastStore()
@@ -69,8 +79,9 @@ const status = ref<RescanStatus | null>(null)
 const starting = ref<Scope | null>(null)
 const confirmOpen = ref(false)
 const showKeyDialog = ref(false)
-const cachedArtifacts = ref<number | null>(null)
+const estimate = ref<RescanEstimate | null>(null)
 let pendingScope: Scope | null = null
+let pendingConfirm = false
 let timer: ReturnType<typeof setTimeout> | undefined
 
 const running = computed(() => status.value?.running === true)
@@ -81,12 +92,23 @@ const note = computed(() => {
   if (running.value) return 'A rescan is running. Another one can start when it finishes.'
   return 'Needs the admin API key. The rescan runs in the background.'
 })
+const liveRate = computed(() => {
+  const st = status.value
+  const elapsed = st?.elapsed_seconds ?? 0
+  if (!st || processed.value === 0 || elapsed <= 0) return ''
+  const perMinute = (processed.value / elapsed) * 60
+  const rate = `${perMinute < 10 ? perMinute.toFixed(1) : formatNumber(Math.round(perMinute))} artifacts a minute`
+  return st.eta_seconds === undefined ? rate : `${rate}. About ${formatApproxDuration(st.eta_seconds)} left.`
+})
 const everythingWarning = computed(() => {
   const base = 'This re-runs all scanners on every cached artifact.'
-  const count = cachedArtifacts.value
-  if (count === null) return `${base} It can take a long time and loads the scanners at ${props.concurrency} in parallel.`
-  const seconds = Math.max(60, Math.ceil(((count * SECONDS_PER_ARTIFACT) / Math.max(props.concurrency, 1)) / 60) * 60)
-  return `${base} For ${formatNumber(count)} artifacts, ${props.concurrency} at a time and about ${SECONDS_PER_ARTIFACT} seconds each, that takes roughly ${formatDuration(seconds)}.`
+  const est = estimate.value
+  const all = est?.all
+  if (!est || !all) return `${base} It can take a long time.`
+  const count = `${formatNumber(all.artifacts)} artifacts`
+  if (all.seconds === null) return `${base} ${count} are cached. No scan has been timed yet, so there is no estimate.`
+  const { avg_scan_seconds: avg, concurrency } = est
+  return `${base} ${count}, ${concurrency} at a time and ${avg.toFixed(1)} seconds each on recent scans: roughly ${formatApproxDuration(all.seconds)}.`
 })
 
 function errorStatus(err: unknown): number | undefined {
@@ -111,12 +133,17 @@ function schedulePoll() {
 }
 
 async function askAll() {
+  adminKey.load()
+  if (!adminKey.key.value) {
+    pendingConfirm = true
+    showKeyDialog.value = true
+    return
+  }
   confirmOpen.value = true
   try {
-    const res = await axios.get<{ stats?: { total_packages?: number } }>('/api/stats')
-    cachedArtifacts.value = res.data.stats?.total_packages ?? null
+    estimate.value = (await axios.get<RescanEstimate>('/api/admin/rescan/estimate', { headers: adminKey.headers.value })).data
   } catch {
-    cachedArtifacts.value = null
+    estimate.value = null
   }
 }
 
@@ -152,7 +179,12 @@ async function start(scope: Scope) {
 function resume() {
   const scope = pendingScope
   pendingScope = null
-  if (scope) void start(scope)
+  if (pendingConfirm) {
+    pendingConfirm = false
+    void askAll()
+  } else if (scope) {
+    void start(scope)
+  }
 }
 
 onMounted(async () => {

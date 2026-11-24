@@ -309,6 +309,7 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 	key := scanKey(registry, packageName, version)
 	m.markInflight(key, 1)
 	defer m.markInflight(key, -1)
+	started := time.Now()
 
 	log.Info().
 		Str("registry", registry).
@@ -429,6 +430,7 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 	mergedResult := m.mergeResults(scanResults, scannerNames)
 	// The store finds the package by its cache version, not the release version.
 	mergedResult.PackageVersion = version
+	mergedResult.DurationMs = int(time.Since(started).Milliseconds())
 
 	// Save consolidated result to metadata store
 	if err := m.metadataStore.SaveScanResult(ctx, mergedResult); err != nil {

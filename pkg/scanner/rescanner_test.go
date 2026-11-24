@@ -208,7 +208,7 @@ func TestRescanNowIgnoresActiveWindowAndFreshness(t *testing.T) {
 		scanKey("npm", "cold", "1.0.0"):                        1,
 		scanKey("go", "example.com/m/@v/v1.0.0.zip", "v1.0.0"): 1,
 	}, cs.snapshot())
-	assert.Equal(t, RescanStatus{StartedAt: st.StartedAt, FinishedAt: st.FinishedAt, Scope: RescanAll, Queued: 2, Done: 2}, st)
+	assert.Equal(t, RescanStatus{StartedAt: st.StartedAt, FinishedAt: st.FinishedAt, Elapsed: st.FinishedAt.Sub(st.StartedAt), Scope: RescanAll, Queued: 2, Done: 2}, st)
 	assert.False(t, st.FinishedAt.IsZero())
 }
 
@@ -263,3 +263,50 @@ func TestRescanNowCountsFailures(t *testing.T) {
 	assert.Equal(t, int64(1), st.Done)
 	assert.Equal(t, int64(1), st.Failed)
 }
+
+// durationStore adds the recorded-duration average a gorm store provides.
+type durationStore struct {
+	*rescanStore
+	avg time.Duration
+}
+
+func (d durationStore) AverageScanDuration(context.Context, int) (time.Duration, error) {
+	return d.avg, nil
+}
+
+func TestEstimateCountsScopesAndAveragesRecordedScans(t *testing.T) {
+	now := time.Now()
+	a, b := pkgRow("npm", "a", "1.0.0", now), pkgRow("npm", "b", "1.0.0", now)
+	a.ID, b.ID = "id-a", "id-b"
+	meta := pkgRow("npm", "a", "list", now)
+	store := &rescanStore{
+		results: map[string]*metadata.ScanResult{}, packages: []*metadata.Package{a, b, meta},
+		summaries: []*metadata.ScanSummary{{PackageID: "id-a", Total: 1}},
+	}
+	mgr := newTestManager(t, store)
+	w := NewRescanWorker(mgr, durationStore{store, 1500 * time.Millisecond}, time.Hour, WithConcurrency(3))
+
+	est, err := w.Estimate(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, RescanEstimate{AvgScan: 1500 * time.Millisecond, Vulnerable: 1, All: 2, Concurrency: 3}, est)
+}
+
+func TestScanRecordsItsDuration(t *testing.T) {
+	store := &rescanStore{results: map[string]*metadata.ScanResult{}}
+	mgr := newTestManager(t, store)
+	mgr.RegisterScanner(&slowScanner{delay: 30 * time.Millisecond})
+
+	require.NoError(t, mgr.ScanPackage(context.Background(), "npm", "a", "1.0.0", "/tmp/dummy"))
+	saved := store.results[scanKey("npm", "a", "1.0.0")]
+	require.NotNil(t, saved)
+	assert.GreaterOrEqual(t, saved.DurationMs, 30)
+}
+
+type slowScanner struct{ delay time.Duration }
+
+func (s *slowScanner) Name() string { return "slow" }
+func (s *slowScanner) Scan(_ context.Context, registry, name, version, _ string) (*metadata.ScanResult, error) {
+	time.Sleep(s.delay)
+	return &metadata.ScanResult{Registry: registry, PackageName: name, PackageVersion: version, Scanner: "slow", ScannedAt: time.Now(), Status: metadata.ScanStatusClean}, nil
+}
+func (s *slowScanner) Health(context.Context) error { return nil }

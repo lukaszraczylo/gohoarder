@@ -329,6 +329,7 @@ type RescanStatus struct {
 	Queued     int64
 	Done       int64
 	Failed     int64
+	Elapsed    time.Duration
 	Running    bool
 }
 
@@ -436,6 +437,38 @@ dispatch:
 		Msg("Forced rescan completed")
 }
 
+// scanDurationSample is how many recent scans the estimate averages.
+const scanDurationSample = 200
+
+// RescanEstimate sizes a forced rescan before it starts.
+type RescanEstimate struct {
+	// AvgScan is the mean wall time of recent scans; zero when none was recorded.
+	AvgScan     time.Duration
+	Vulnerable  int
+	All         int
+	Concurrency int
+}
+
+// Estimate counts the artifacts each scope would queue and averages recent scan durations.
+func (w *RescanWorker) Estimate(ctx context.Context) (RescanEstimate, error) {
+	est := RescanEstimate{Concurrency: w.concurrency}
+	all, err := w.forcedPackages(ctx, RescanAll)
+	if err != nil {
+		return est, err
+	}
+	vulnerable, err := w.forcedPackages(ctx, RescanVulnerable)
+	if err != nil {
+		return est, err
+	}
+	est.All, est.Vulnerable = len(all), len(vulnerable)
+	if src, ok := w.metadataStore.(metadata.ScanDurationSource); ok {
+		if est.AvgScan, err = src.AverageScanDuration(ctx, scanDurationSample); err != nil {
+			return est, fmt.Errorf("average scan duration: %w", err)
+		}
+	}
+	return est, nil
+}
+
 // Status reports the latest forced rescan; the zero value means none ran yet.
 func (w *RescanWorker) Status() RescanStatus {
 	w.runMu.Lock()
@@ -444,7 +477,12 @@ func (w *RescanWorker) Status() RescanStatus {
 	if run == nil {
 		return RescanStatus{}
 	}
+	elapsed := run.finished.Sub(run.started)
+	if run.running {
+		elapsed = time.Since(run.started)
+	}
 	return RescanStatus{
+		Elapsed:    elapsed,
 		StartedAt:  run.started,
 		FinishedAt: run.finished,
 		Scope:      run.scope,

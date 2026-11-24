@@ -26,6 +26,13 @@ export function formatDuration(seconds: number): string {
   return plural(Math.round(seconds / SECONDS_PER_MINUTE), 'minute')
 }
 
+/** A span in the largest fitting unit, rounded: "40 seconds", "12 minutes", "3 hours". */
+export function formatApproxDuration(seconds: number): string {
+  if (seconds < SECONDS_PER_MINUTE) return plural(Math.max(1, Math.round(seconds)), 'second')
+  if (seconds < 2 * SECONDS_PER_HOUR) return plural(Math.round(seconds / SECONDS_PER_MINUTE), 'minute')
+  return plural(Math.round(seconds / SECONDS_PER_HOUR), 'hour')
+}
+
 export function formatDate(date: string): string {
   if (!date) return 'N/A'
   const parsed = new Date(date)

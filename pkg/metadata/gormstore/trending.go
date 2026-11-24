@@ -136,3 +136,14 @@ func (s *GORMStoreV2) packageDownloads(ctx context.Context, table, sum, cond str
 	}
 	return rows, nil
 }
+
+// AverageScanDuration averages the latest sample scans that recorded a duration.
+func (s *GORMStoreV2) AverageScanDuration(ctx context.Context, sample int) (time.Duration, error) {
+	recent := s.db.WithContext(ctx).Model(&ScanResultModel{}).
+		Select("scan_duration").Where("scan_duration > 0").Order("scanned_at DESC").Limit(sample)
+	var avgMs float64
+	if err := s.db.WithContext(ctx).Table("(?) AS r", recent).Select("COALESCE(AVG(scan_duration), 0)").Scan(&avgMs).Error; err != nil {
+		return 0, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to average scan durations")
+	}
+	return time.Duration(avgMs * float64(time.Millisecond)), nil
+}

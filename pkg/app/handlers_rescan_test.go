@@ -139,3 +139,76 @@ func TestRescanRoutesNeedAdmin(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, tc.path)
 	}
 }
+
+type fixedScanner struct{}
+
+func (fixedScanner) Name() string { return "fixed" }
+func (fixedScanner) Scan(_ context.Context, registry, name, version, _ string) (*metadata.ScanResult, error) {
+	time.Sleep(20 * time.Millisecond)
+	return &metadata.ScanResult{Registry: registry, PackageName: name, PackageVersion: version, Scanner: "fixed", ScannedAt: time.Now(), Status: metadata.ScanStatusClean}, nil
+}
+func (fixedScanner) Health(context.Context) error { return nil }
+
+func getRescan(t *testing.T, f *fiber.App, path string) map[string]any {
+	t.Helper()
+	resp, err := f.Test(httptest.NewRequest(http.MethodGet, path, nil))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	return decodeBody(t, resp)
+}
+
+func TestRescanEstimateUsesMeasuredScanTimeAndConcurrency(t *testing.T) {
+	a, f := rescanApp(t)
+	f.Get("/api/admin/rescan/estimate", a.handleRescanEstimate)
+	a.scanManager.RegisterScanner(fixedScanner{})
+	a.scanManager.SetFileSource(func(context.Context, string, string, string) (string, func(), error) {
+		return "/tmp/dummy", func() {}, nil
+	})
+	for _, v := range []string{"1.0.0", "1.1.0", "1.2.0", "1.3.0"} {
+		saveRescanPackage(t, a, "left-pad", v)
+	}
+
+	before := getRescan(t, f, "/api/admin/rescan/estimate")
+	require.EqualValues(t, 4, jsonAt(before, "all", "artifacts"))
+	require.Nil(t, jsonAt(before, "all", "seconds"), "no scan was timed yet")
+
+	code, _ := postRescan(t, f, `{"scope":"all"}`)
+	require.Equal(t, http.StatusAccepted, code)
+	require.Eventually(t, func() bool { return rescanStatus(t, f)["running"] == false }, 10*time.Second, 10*time.Millisecond)
+
+	after := getRescan(t, f, "/api/admin/rescan/estimate")
+	avg := after["avg_scan_seconds"].(float64)
+	require.Greater(t, avg, 0.019, "the 20 ms scanner was measured")
+	concurrency := after["concurrency"].(float64)
+	require.EqualValues(t, 4, jsonAt(after, "all", "artifacts"))
+	require.InDelta(t, avg*4/concurrency, jsonAt(after, "all", "seconds"), 1, "ceil of artifacts x average / concurrency")
+	require.EqualValues(t, 0, jsonAt(after, "vulnerable", "artifacts"))
+}
+
+func TestRescanStatusReportsEtaWhileRunning(t *testing.T) {
+	a, f := rescanApp(t)
+	a.scanManager.RegisterScanner(fixedScanner{})
+	saveRescanPackage(t, a, "a", "1.0.0")
+	saveRescanPackage(t, a, "b", "1.0.0")
+	release, calls := make(chan struct{}), make(chan struct{}, 2)
+	a.scanManager.SetFileSource(func(context.Context, string, string, string) (string, func(), error) {
+		calls <- struct{}{}
+		if len(calls) > 1 {
+			<-release
+		}
+		return "/tmp/dummy", func() {}, nil
+	})
+
+	code, _ := postRescan(t, f, `{"scope":"all"}`)
+	require.Equal(t, http.StatusAccepted, code)
+	require.Eventually(t, func() bool { return len(calls) == 2 && rescanStatus(t, f)["done"].(float64) == 1 }, 5*time.Second, 5*time.Millisecond)
+
+	st := rescanStatus(t, f)
+	require.Equal(t, true, st["running"])
+	require.Contains(t, st, "eta_seconds", "one of two is done, so the rate predicts the rest")
+	require.Contains(t, st, "elapsed_seconds")
+	close(release)
+	require.Eventually(t, func() bool { return rescanStatus(t, f)["running"] == false }, 5*time.Second, 10*time.Millisecond)
+	require.NotContains(t, rescanStatus(t, f), "eta_seconds")
+}

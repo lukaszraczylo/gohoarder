@@ -211,6 +211,7 @@ type ScanResult struct {
 	Status             ScanStatus             `json:"status"`
 	Vulnerabilities    []Vulnerability        `json:"vulnerabilities"`
 	VulnerabilityCount int                    `json:"vulnerability_count"`
+	DurationMs         int                    `json:"duration_ms"` // wall time of the scan that produced it
 }
 
 // Vulnerability represents a security vulnerability
@@ -450,6 +451,12 @@ type TrendingPackage struct {
 	Name     string `json:"name"`
 	Recent   int64  `json:"recent"`
 	Previous int64  `json:"previous"`
+}
+
+// ScanDurationSource reports how long recent scans took, for backends that keep it.
+type ScanDurationSource interface {
+	// AverageScanDuration averages the latest sample scans that recorded a duration; zero means none did.
+	AverageScanDuration(ctx context.Context, sample int) (time.Duration, error)
 }
 
 // TrendingSource ranks packages from persisted download history. Backends without

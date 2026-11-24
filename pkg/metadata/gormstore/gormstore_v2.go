@@ -913,6 +913,7 @@ func (s *GORMStoreV2) SaveScanResult(ctx context.Context, result *metadata.ScanR
 		HighCount:     highCount,
 		MediumCount:   mediumCount,
 		LowCount:      lowCount,
+		ScanDuration:  result.DurationMs,
 		Details:       JSONBField(details),
 	}
 

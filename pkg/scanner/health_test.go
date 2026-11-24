@@ -66,3 +66,40 @@ func TestHealthDoesNotCacheCancelledProbe(t *testing.T) {
 		t.Fatalf("scanner health ran %d times, want 2", got)
 	}
 }
+
+type versionedProbe struct {
+	healthProbe
+	name string
+}
+
+func (s *versionedProbe) Name() string    { return s.name }
+func (s *versionedProbe) Version() string { return "1.2.3" }
+
+// One broken scanner must not hide the state of the others.
+func TestStatusesReportEveryScanner(t *testing.T) {
+	good := &versionedProbe{name: "trivy"}
+	bad := &healthProbe{err: errors.New("missing")}
+	m := &Manager{enabled: true, scanners: []Scanner{bad, good}}
+
+	statuses := m.Statuses(context.Background())
+	if len(statuses) != 2 {
+		t.Fatalf("Statuses() = %d entries, want 2", len(statuses))
+	}
+	if statuses[0].Name != "counting" || statuses[0].Healthy || statuses[0].Version != "" {
+		t.Fatalf("broken scanner status = %+v", statuses[0])
+	}
+	if statuses[1].Name != "trivy" || !statuses[1].Healthy || statuses[1].Version != "1.2.3" {
+		t.Fatalf("healthy scanner status = %+v", statuses[1])
+	}
+	_ = m.Statuses(context.Background())
+	if got := bad.calls.Load(); got != 1 {
+		t.Fatalf("scanner health ran %d times, want 1 (cached)", got)
+	}
+}
+
+func TestStatusesEmptyWhenDisabled(t *testing.T) {
+	m := &Manager{enabled: false, scanners: []Scanner{&healthProbe{}}}
+	if got := m.Statuses(context.Background()); got != nil {
+		t.Fatalf("Statuses() = %v, want nil", got)
+	}
+}

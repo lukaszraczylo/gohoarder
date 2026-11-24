@@ -7,6 +7,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -75,10 +76,21 @@ func (m *Manager) currentFileSource() FileSource {
 const healthTTL = 30 * time.Second
 
 type healthCache struct {
-	at  time.Time
-	err error
-	mu  sync.Mutex
+	at     time.Time
+	err    error
+	states []ScannerStatus
+	mu     sync.Mutex
 }
+
+// ScannerStatus is one scanner's last health probe.
+type ScannerStatus struct {
+	Name    string
+	Version string // empty when the scanner does not report one
+	Healthy bool
+}
+
+// versioned is implemented by scanners that learn their version during a health probe.
+type versioned interface{ Version() string }
 
 // Manager manages multiple security scanners
 type Manager struct {
@@ -690,6 +702,11 @@ func (m *Manager) missingScanDecision(registry, packageName, version string) (bo
 
 // packageBypassed reports whether an active admin bypass covers the whole package.
 func packageBypassed(registry, bypassName, version, releaseKey string, bypasses []*metadata.CVEBypass) bool {
+	return packageBypass(registry, bypassName, version, releaseKey, bypasses) != nil
+}
+
+// packageBypass returns the active admin bypass that covers the whole package, or nil.
+func packageBypass(registry, bypassName, version, releaseKey string, bypasses []*metadata.CVEBypass) *metadata.CVEBypass {
 	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
 	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
 	for _, bypass := range bypasses {
@@ -701,11 +718,28 @@ func packageBypassed(registry, bypassName, version, releaseKey string, bypasses 
 					Str("reason", bypass.Reason).
 					Time("expires_at", bypass.ExpiresAt).
 					Msg("Package bypassed by admin")
-				return true
+				return bypass
 			}
 		}
 	}
-	return false
+	return nil
+}
+
+// cveBypasses maps upper-cased CVE ids to the active bypass that applies to this package.
+func cveBypasses(registry, bypassName, version, releaseKey string, bypasses []*metadata.CVEBypass) map[string]*metadata.CVEBypass {
+	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
+	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
+	out := make(map[string]*metadata.CVEBypass)
+	for _, bypass := range bypasses {
+		if bypass.Type != metadata.BypassTypeCVE || !bypass.Active {
+			continue
+		}
+		if bypass.AppliesTo != "" && bypass.AppliesTo != packageKey && bypass.AppliesTo != packageKeyNoVersion && (releaseKey == "" || bypass.AppliesTo != releaseKey) {
+			continue
+		}
+		out[strings.ToUpper(bypass.Target)] = bypass
+	}
+	return out
 }
 
 // scanFacts is what the blocking policy needs to know about one scan.
@@ -731,21 +765,7 @@ func (m *Manager) evaluateScan(registry, packageName, version, releaseKey string
 		return true, "scan failed - fail closed", nil
 	}
 
-	bypassName := normalizeBypassPackageName(registry, packageName)
-	packageKey := fmt.Sprintf("%s/%s@%s", registry, bypassName, version)
-	packageKeyNoVersion := fmt.Sprintf("%s/%s", registry, bypassName)
-
-	// Build set of bypassed CVEs for fast lookup
-	bypassedCVEs := make(map[string]*metadata.CVEBypass)
-	for _, bypass := range bypasses {
-		if bypass.Type == metadata.BypassTypeCVE && bypass.Active {
-			// Check if bypass applies to this package (if AppliesTo is set)
-			if bypass.AppliesTo != "" && bypass.AppliesTo != packageKey && bypass.AppliesTo != packageKeyNoVersion && (releaseKey == "" || bypass.AppliesTo != releaseKey) {
-				continue // This bypass doesn't apply to this package
-			}
-			bypassedCVEs[strings.ToUpper(bypass.Target)] = bypass
-		}
-	}
+	bypassedCVEs := cveBypasses(registry, normalizeBypassPackageName(registry, packageName), version, releaseKey, bypasses)
 
 	// Count vulnerabilities by severity, excluding bypassed CVEs
 	severityCounts := f.counts
@@ -830,6 +850,8 @@ func (m *Manager) evaluateScan(registry, packageName, version, releaseKey string
 // ScanDecision pairs a package's latest scan with the blocking verdict.
 type ScanDecision struct {
 	Summary *metadata.ScanSummary
+	// Bypass is the active admin bypass that applied to this package, if any.
+	Bypass  *metadata.CVEBypass
 	Reason  string
 	Blocked bool
 }
@@ -862,25 +884,25 @@ func (m *Manager) ScanDecisions(ctx context.Context, packageIDs []string) ([]Sca
 	for _, sum := range summaries {
 		d := ScanDecision{Summary: sum}
 		if m.enabled {
-			d.Blocked, d.Reason = m.judgeSummary(sum, bypasses, withList)
+			d.Blocked, d.Reason, d.Bypass = m.judgeSummary(sum, bypasses, withList)
 		}
 		decisions = append(decisions, d)
 	}
 	return decisions, nil
 }
 
-func (m *Manager) judgeSummary(sum *metadata.ScanSummary, bypasses []*metadata.CVEBypass, withList bool) (bool, string) {
+func (m *Manager) judgeSummary(sum *metadata.ScanSummary, bypasses []*metadata.CVEBypass, withList bool) (bool, string, *metadata.CVEBypass) {
 	bypassName := normalizeBypassPackageName(sum.Registry, sum.Name)
 	releaseKey := ""
 	if sum.ReleaseVersion != "" {
 		releaseKey = fmt.Sprintf("%s/%s@%s", sum.Registry, bypassName, sum.ReleaseVersion)
 	}
-	if packageBypassed(sum.Registry, bypassName, sum.Version, releaseKey, bypasses) {
-		return false, ""
+	if b := packageBypass(sum.Registry, bypassName, sum.Version, releaseKey, bypasses); b != nil {
+		return false, "", b
 	}
 	if !sum.HasScan {
 		blocked, reason, _ := m.missingScanDecision(sum.Registry, sum.Name, sum.Version)
-		return blocked, reason
+		return blocked, reason, nil
 	}
 	infra, _ := sum.Details[DetailInfrastructureError].(bool)
 	facts := scanFacts{status: sum.Status, infra: infra, total: sum.Total, hasList: withList, vulns: sum.Vulnerabilities}
@@ -890,7 +912,17 @@ func (m *Manager) judgeSummary(sum *metadata.ScanSummary, bypasses []*metadata.C
 		}
 	}
 	blocked, reason, _ := m.evaluateScan(sum.Registry, sum.Name, sum.Version, releaseKey, bypasses, facts)
-	return blocked, reason
+	var applied *metadata.CVEBypass
+	if withList {
+		covered := cveBypasses(sum.Registry, bypassName, sum.Version, releaseKey, bypasses)
+		for _, v := range sum.Vulnerabilities {
+			if b, ok := covered[strings.ToUpper(v.ID)]; ok {
+				applied = b
+				break
+			}
+		}
+	}
+	return blocked, reason, applied
 }
 
 // UpdateDatabases updates vulnerability databases for all scanners
@@ -925,24 +957,51 @@ func (m *Manager) Health(ctx context.Context) error {
 
 	m.health.mu.Lock()
 	defer m.health.mu.Unlock()
-	if !m.health.at.IsZero() && time.Since(m.health.at) < healthTTL {
-		return m.health.err
-	}
-	err := m.checkScanners(ctx)
-	if ctx.Err() != nil {
-		return err
-	}
-	m.health.at, m.health.err = time.Now(), err
-	return err
+	m.refreshHealth(ctx)
+	return m.health.err
 }
 
-func (m *Manager) checkScanners(ctx context.Context) error {
+// Statuses reports each registered scanner's health from the same 30 s cache as Health.
+func (m *Manager) Statuses(ctx context.Context) []ScannerStatus {
+	if !m.enabled {
+		return nil
+	}
+
+	m.health.mu.Lock()
+	defer m.health.mu.Unlock()
+	m.refreshHealth(ctx)
+	return slices.Clone(m.health.states)
+}
+
+// refreshHealth re-probes the scanners when the cached result is older than healthTTL; the caller holds health.mu.
+func (m *Manager) refreshHealth(ctx context.Context) {
+	if !m.health.at.IsZero() && time.Since(m.health.at) < healthTTL {
+		return
+	}
+	states, err := m.checkScanners(ctx)
+	if ctx.Err() != nil {
+		m.health.err, m.health.states = err, states
+		return
+	}
+	m.health.at, m.health.err, m.health.states = time.Now(), err, states
+}
+
+// checkScanners probes every scanner and returns the first failure, so one broken scanner does not hide the rest.
+func (m *Manager) checkScanners(ctx context.Context) ([]ScannerStatus, error) {
+	var first error
+	states := make([]ScannerStatus, 0, len(m.scanners))
 	for _, scanner := range m.scanners {
-		if err := scanner.Health(ctx); err != nil {
-			return fmt.Errorf("scanner %s health check failed: %w", scanner.Name(), err)
+		err := scanner.Health(ctx)
+		st := ScannerStatus{Name: scanner.Name(), Healthy: err == nil}
+		if v, ok := scanner.(versioned); ok {
+			st.Version = v.Version()
+		}
+		states = append(states, st)
+		if err != nil && first == nil {
+			first = fmt.Errorf("scanner %s health check failed: %w", scanner.Name(), err)
 		}
 	}
-	return nil
+	return states, first
 }
 
 // shouldRunScanner determines if a scanner should run for a given registry

@@ -17,6 +17,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanver"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -26,7 +27,8 @@ const ScannerName = "npm-audit"
 
 // Scanner implements the npm audit vulnerability scanner
 type Scanner struct {
-	config config.NpmAuditConfig
+	version scanver.Cache
+	config  config.NpmAuditConfig
 }
 
 // New creates a new npm audit scanner
@@ -172,9 +174,11 @@ func writeWrapper(dir, packageName, archive string) error {
 // Health checks if npm is available
 func (s *Scanner) Health(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "npm", "--version")
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.Output()
+	if err != nil {
 		return fmt.Errorf("npm not available: %w", err)
 	}
+	s.version.Record(string(output))
 	return nil
 }
 
@@ -313,3 +317,6 @@ type NpmAdvisory struct {
 	Range    string `json:"range"`
 	Source   int    `json:"source"`
 }
+
+// Version returns the version the last successful health check reported.
+func (s *Scanner) Version() string { return s.version.Version() }

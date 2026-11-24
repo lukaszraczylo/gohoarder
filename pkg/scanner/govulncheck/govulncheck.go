@@ -21,6 +21,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/gomodule"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanver"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -30,7 +31,8 @@ const ScannerName = "govulncheck"
 
 // Scanner implements the govulncheck vulnerability scanner for Go modules
 type Scanner struct {
-	config config.GovulncheckConfig
+	version scanver.Cache
+	config  config.GovulncheckConfig
 }
 
 // New creates a new govulncheck scanner
@@ -219,9 +221,11 @@ func parseFindings(output []byte, module string) ([]GovulncheckVuln, error) {
 // Health checks if govulncheck is available
 func (s *Scanner) Health(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "govulncheck", "-version")
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.Output()
+	if err != nil {
 		return fmt.Errorf("govulncheck not available: %w (install with: go install golang.org/x/vuln/cmd/govulncheck@latest)", err)
 	}
+	s.version.Record(string(output))
 	return nil
 }
 
@@ -355,3 +359,6 @@ type GovulncheckVuln struct {
 	ModuleVersion string
 	Summary       string
 }
+
+// Version returns the version the last successful health check reported.
+func (s *Scanner) Version() string { return s.version.Version() }

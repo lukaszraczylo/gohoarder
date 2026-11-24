@@ -14,6 +14,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanver"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -23,7 +24,8 @@ const ScannerName = "trivy"
 
 // Scanner implements the Scanner interface using Trivy
 type Scanner struct {
-	config config.TrivyConfig
+	version scanver.Cache
+	config  config.TrivyConfig
 }
 
 // TrivyResult represents Trivy JSON output structure
@@ -247,6 +249,10 @@ func (s *Scanner) Health(ctx context.Context) error {
 		return fmt.Errorf("trivy not available: %w (output: %s)", err, string(output))
 	}
 
+	s.version.Record(string(output))
 	log.Debug().Str("version", strings.TrimSpace(string(output))).Msg("Trivy health check passed")
 	return nil
 }
+
+// Version returns the version the last successful health check reported.
+func (s *Scanner) Version() string { return s.version.Version() }

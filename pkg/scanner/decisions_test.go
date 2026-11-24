@@ -169,3 +169,33 @@ func TestScanDecisionsVerdicts(t *testing.T) {
 		"github.com/a/b/@v/v1.0.0.zip": true, "six": true,
 	}, blocked)
 }
+
+// A decision names the bypass that applied, so the dashboard can say who waved the package through.
+func TestScanDecisionsReportAppliedBypass(t *testing.T) {
+	store, err := gormstore.NewV2(gormstore.Config{
+		Driver: "sqlite", DSN: fmt.Sprintf("file:decbp_%d?mode=memory&cache=shared", time.Now().UnixNano()),
+		MaxOpenConns: 1, MaxIdleConns: 1, LogLevel: "silent",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	seedDecisions(t, store)
+	addBypass(t, store, metadata.BypassTypePackage, "npm/crit")
+	addBypass(t, store, metadata.BypassTypeCVE, "CVE-2")
+
+	mgr, err := New(config.SecurityConfig{Enabled: true, BlockOnSeverity: "high"}, store)
+	require.NoError(t, err)
+	decisions, err := mgr.ScanDecisions(context.Background(), nil)
+	require.NoError(t, err)
+
+	got := map[string]ScanDecision{}
+	for _, d := range decisions {
+		got[d.Summary.Name] = d
+	}
+	require.NotNil(t, got["crit"].Bypass, "package bypass applies")
+	require.Equal(t, metadata.BypassTypePackage, got["crit"].Bypass.Type)
+	require.False(t, got["crit"].Blocked)
+	require.NotNil(t, got["mix"].Bypass, "CVE bypass covers a finding")
+	require.Equal(t, metadata.BypassTypeCVE, got["mix"].Bypass.Type)
+	require.Nil(t, got["clean"].Bypass)
+	require.Nil(t, got["low"].Bypass)
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/gomodule"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanver"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -23,7 +24,8 @@ const ScannerName = "grype"
 
 // Scanner implements the Grype vulnerability scanner
 type Scanner struct {
-	config config.GrypeConfig
+	version scanver.Cache
+	config  config.GrypeConfig
 }
 
 // New creates a new Grype scanner
@@ -106,9 +108,11 @@ func parse(output []byte) (*GrypeResult, error) {
 // Health checks if Grype is available
 func (s *Scanner) Health(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "grype", "version")
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.Output()
+	if err != nil {
 		return fmt.Errorf("grype not available: %w", err)
 	}
+	s.version.Record(string(output))
 	return nil
 }
 
@@ -223,3 +227,6 @@ type GrypeArtifact struct {
 	Version string `json:"version"`
 	Type    string `json:"type"`
 }
+
+// Version returns the version the last successful health check reported.
+func (s *Scanner) Version() string { return s.version.Version() }

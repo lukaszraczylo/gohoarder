@@ -17,6 +17,7 @@ import (
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
 	"github.com/lukaszraczylo/gohoarder/pkg/metadata"
 	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanerr"
+	"github.com/lukaszraczylo/gohoarder/pkg/scanner/scanver"
 	"github.com/lukaszraczylo/gohoarder/pkg/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -26,7 +27,8 @@ const ScannerName = "pip-audit"
 
 // Scanner implements the pip-audit vulnerability scanner
 type Scanner struct {
-	config config.PipAuditConfig
+	version scanver.Cache
+	config  config.PipAuditConfig
 }
 
 // New creates a new pip-audit scanner
@@ -123,9 +125,11 @@ var (
 // Health checks if pip-audit is available
 func (s *Scanner) Health(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "pip-audit", "--version")
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.Output()
+	if err != nil {
 		return fmt.Errorf("pip-audit not available: %w (install with: pip install pip-audit)", err)
 	}
+	s.version.Record(string(output))
 	return nil
 }
 
@@ -228,3 +232,6 @@ type PipVuln struct {
 	FixVersions []string `json:"fix_versions"`
 	Aliases     []string `json:"aliases"`
 }
+
+// Version returns the version the last successful health check reported.
+func (s *Scanner) Version() string { return s.version.Version() }

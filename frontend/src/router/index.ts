@@ -1,10 +1,15 @@
-import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory } from 'vue-router'
+import { createRouter, createWebHistory, type LocationQuery, type RouteRecordRaw, type RouterHistory } from 'vue-router'
+
+/** Keeps the query string of an old URL when it moves to a tab of the Security page. */
+function toSecurityTab(tab: string) {
+  return (to: { query: LocationQuery }) => ({ path: '/security', query: { ...to.query, tab } })
+}
 
 export const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    name: 'dashboard',
-    component: () => import('../components/Dashboard.vue'),
+    name: 'overview',
+    component: () => import('../components/Overview.vue'),
   },
   {
     path: '/packages/:registry?',
@@ -20,24 +25,34 @@ export const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
-    path: '/stats',
-    name: 'stats',
-    component: () => import('../components/Stats.vue'),
+    path: '/security',
+    name: 'security',
+    component: () => import('../components/Security.vue'),
   },
   {
     path: '/vulnerable-packages',
     name: 'vulnerable-packages',
-    component: () => import('../components/VulnerablePackages.vue'),
+    redirect: toSecurityTab('allowed'),
   },
   {
     path: '/blocked-packages',
     name: 'blocked-packages',
-    component: () => import('../components/VulnerablePackages.vue'),
+    redirect: toSecurityTab('held'),
+  },
+  {
+    path: '/stats',
+    name: 'insights',
+    component: () => import('../components/Insights.vue'),
   },
   {
     path: '/admin/bypasses',
     name: 'bypasses',
     component: () => import('../components/BypassManagementPanel.vue'),
+  },
+  {
+    path: '/admin/system',
+    name: 'system',
+    component: () => import('../components/System.vue'),
   },
   {
     path: '/:pathMatch(.*)*',

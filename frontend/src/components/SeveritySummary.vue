@@ -1,5 +1,5 @@
 <template>
-  <StatGroup :columns="4" :aria-label="label">
+  <StatGroup :columns="4" class="grid-cols-2! lg:grid-cols-4!" :aria-label="label">
     <template v-if="selectable">
       <KpiTile
         v-for="level in SEVERITY_LEVELS"
@@ -10,7 +10,7 @@
         :label="formatSeverityName(level)"
         :value="counts[level]"
         :aria-pressed="isSelected(level)"
-        :class="isSelected(level) && 'ring-2 ring-primary'"
+        :class="['text-left', isSelected(level) && 'ring-2 ring-primary']"
         :data-severity="level"
         @click="toggle(level)"
       >

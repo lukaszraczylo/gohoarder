@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import axios from 'axios'
 import { flushPromises } from '@vue/test-utils'
-import VulnerablePackages from './VulnerablePackages.vue'
+import Security from './Security.vue'
 import type { Package, VulnerabilityCounts } from '@/stores/packages'
 import { mountStrict } from '@/test/mountStrict'
 import { createTestRouter } from '@/test/router'
@@ -31,7 +31,6 @@ function vulnerable(name: string, counts: Partial<VulnerabilityCounts>): Package
   }
 }
 
-const ALL_SEVERITIES = 'critical,high,moderate,low'
 const FIXTURE: Package[] = [
   vulnerable('alpha-critical', { critical: 1 }),
   vulnerable('bravo-high', { high: 2 }),
@@ -53,11 +52,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function open(path = '/vulnerable-packages') {
+async function open(path = '/security?tab=allowed') {
   const router = await createTestRouter(path)
   const pinia = createPinia()
   setActivePinia(pinia)
-  const mounted = await mountStrict(VulnerablePackages, { global: { plugins: [pinia, router] } })
+  const mounted = await mountStrict(Security, { global: { plugins: [pinia, router] } })
   restore = mounted.restore
   await flushPromises()
   return { ...mounted, router }
@@ -71,7 +70,7 @@ const pressed = (wrapper: Wrapper) =>
   wrapper.findAll('button[data-severity]').map((b) => b.attributes('aria-pressed'))
 const clearButtons = (wrapper: Wrapper) => wrapper.findAll('button').filter((b) => b.text() === 'Clear filters')
 
-describe('VulnerablePackages severity filter', () => {
+describe('Security severity filter', () => {
   it('starts unfiltered: every vulnerable package, no tile pressed, no clear control', async () => {
     const { wrapper, problems, router } = await open()
 
@@ -83,9 +82,9 @@ describe('VulnerablePackages severity filter', () => {
     expect(router.currentRoute.value.query.severity).toBeUndefined()
   })
 
-  it('asks the server for vulnerable packages only', async () => {
+  it('asks the server for every package, so a hold with no findings is not dropped', async () => {
     await open()
-    expect(axios.get).toHaveBeenCalledWith(`/api/packages?severity=${ALL_SEVERITIES}`)
+    expect(axios.get).toHaveBeenCalledWith('/api/packages')
   })
 
   it('renders the four tiles as keyboard-operable buttons in severity order', async () => {
@@ -172,7 +171,7 @@ describe('VulnerablePackages severity filter', () => {
   })
 
   it('restores the filter from the URL, as after a reload or a shared link', async () => {
-    const { wrapper } = await open('/vulnerable-packages?severity=high,critical')
+    const { wrapper } = await open('/security?tab=allowed&severity=high,critical')
 
     expect(shown(wrapper)).toEqual(['alpha-critical', 'bravo-high', 'delta-mixed'])
     expect(pressed(wrapper)).toEqual(['true', 'true', 'false', 'false'])
@@ -180,17 +179,17 @@ describe('VulnerablePackages severity filter', () => {
   })
 
   it('ignores unknown severities in the URL and keeps the other query parameters', async () => {
-    const { wrapper, router } = await open('/vulnerable-packages?severity=bogus&ref=mail')
+    const { wrapper, router } = await open('/security?tab=allowed&severity=bogus&ref=mail')
     expect(shown(wrapper)).toEqual(NAMES)
     expect(clearButtons(wrapper)).toHaveLength(0)
 
     await tile(wrapper, 'low').trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value.query).toEqual({ ref: 'mail', severity: 'low' })
+    expect(router.currentRoute.value.query).toEqual({ tab: 'allowed', ref: 'mail', severity: 'low' })
   })
 
   it('shows a library empty state with a clear control when no package matches', async () => {
-    const { wrapper, router } = await open('/vulnerable-packages?severity=low')
+    const { wrapper, router } = await open('/security?tab=allowed&severity=low')
 
     const empty = wrapper.get('[data-slot="empty-state"]')
     expect(empty.text()).toContain('No packages match the filter')
@@ -206,21 +205,32 @@ describe('VulnerablePackages severity filter', () => {
     expect(router.currentRoute.value.query.severity).toBeUndefined()
   })
 
-  it('keeps the success state when nothing is vulnerable, filter or not', async () => {
+  it('keeps the success state when nothing has findings, filter or not', async () => {
     vi.mocked(axios.get).mockResolvedValue({ data: { packages: [] } })
-    const { wrapper } = await open('/vulnerable-packages?severity=critical')
+    const { wrapper } = await open('/security?tab=allowed&severity=critical')
 
-    expect(wrapper.text()).toContain('No vulnerable packages')
+    expect(wrapper.text()).toContain('No package carries findings under the policy')
     expect(wrapper.find('button[data-severity]').exists()).toBe(false)
   })
 
-  it('still narrows to blocked packages on the blocked route', async () => {
-    const blocked = vulnerable('echo-blocked', { critical: 1 })
-    blocked.vulnerabilities!.isBlocked = true
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [...FIXTURE, blocked] } })
+  it('lists a held package under Held, not under Vulnerable but allowed', async () => {
+    const held = vulnerable('echo-blocked', { critical: 1 })
+    held.vulnerabilities!.isBlocked = true
+    held.vulnerabilities!.verdict = 'held'
+    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [...FIXTURE, held] } })
     const { wrapper } = await open('/blocked-packages?severity=critical')
 
     expect(wrapper.text()).toContain('echo-blocked')
     expect(wrapper.text()).not.toContain('alpha-critical')
+  })
+
+  it('lists a held package that has no findings, such as a failed scan', async () => {
+    const failed = vulnerable('foxtrot-failed', {})
+    failed.vulnerabilities = { scanned: true, status: 'clean', isBlocked: true, verdict: 'held', reason: 'scan failed - fail closed' }
+    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [failed] } })
+    const { wrapper } = await open('/security?tab=held')
+
+    expect(wrapper.text()).toContain('foxtrot-failed')
+    expect(wrapper.text()).toContain('scan failed - fail closed')
   })
 })

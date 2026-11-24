@@ -1,8 +1,8 @@
 <template>
   <div class="flex flex-col gap-6">
     <PageHeader
-      title="CVE bypass management"
-      description="Manage temporary security bypasses for packages and CVEs."
+      title="Bypasses"
+      description="A bypass lets a package or an advisory through the block policy until it expires. Each one is kept for the audit trail."
     >
       <template #actions>
         <Button :icon-start="faPlus" @click="showCreateModal = true">Create bypass</Button>
@@ -33,7 +33,7 @@
           v-if="filteredBypasses.length === 0"
           :icon="faShieldHalved"
           title="No bypasses found"
-          description="Create a bypass to allow packages with known vulnerabilities."
+          description="Create a bypass to serve a package that the policy holds."
         />
         <DataTable
           v-else
@@ -44,7 +44,7 @@
           :rows="filteredBypasses"
         >
           <template #cell-type="{ row }">
-            <Badge :variant="row.type === 'cve' ? 'default' : 'outline'">{{ row.type === 'cve' ? 'CVE' : 'Package' }}</Badge>
+            <Badge :variant="row.type === 'cve' ? 'secondary' : 'outline'">{{ row.type === 'cve' ? 'CVE' : 'Package' }}</Badge>
           </template>
           <template #cell-status="{ row }">
             <span class="flex flex-wrap gap-1">
@@ -53,6 +53,13 @@
                 :tones="{ active: 'success', inactive: 'neutral' }"
               />
               <StatusBadge v-if="isExpired(row.expires_at)" status="expired" :tones="{ expired: 'danger' }" />
+            </span>
+          </template>
+          <template #cell-created_at="{ row }"><RelativeTime :datetime="row.created_at" /></template>
+          <template #cell-expires_at="{ row }">
+            <span class="block">{{ formatDate(row.expires_at) }}</span>
+            <span class="block text-xs text-muted-foreground">
+              <RelativeTime :datetime="row.expires_at" />
             </span>
           </template>
           <template #cell-actions="{ row }">
@@ -170,6 +177,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
+import { useRoute } from 'vue-router'
 import {
   Badge,
   Button,
@@ -191,27 +199,17 @@ import {
   Input,
   LoadingState,
   PageHeader,
+  RelativeTime,
   SegmentedControl,
   StatusBadge,
   Textarea,
   useToastStore,
   type DataTableColumn,
 } from '@perfect-design/ui'
+import { useAdminKey } from '@/lib/adminKey'
+import { isExpired, type Bypass } from '@/lib/bypass'
 import { formatDate } from '@/lib/format'
 import { faPen, faPlus, faRotateRight, faShieldHalved, faTrash } from '@/lib/icons'
-
-interface Bypass {
-  id: string
-  type: 'cve' | 'package'
-  target: string
-  reason: string
-  created_by: string
-  created_at: string
-  expires_at: string
-  applies_to?: string
-  notify_on_expiry: boolean
-  active: boolean
-}
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -220,6 +218,7 @@ const bypasses = ref<Bypass[]>([])
 const activeFilter = ref<'all' | 'active' | 'expired'>('all')
 const typeFilter = ref<'all' | 'cve' | 'package'>('all')
 
+const route = useRoute()
 const showCreateModal = ref(false)
 const showDeleteModal = ref(false)
 const editingBypass = ref<Bypass | null>(null)
@@ -238,8 +237,8 @@ const EMPTY_FORM = {
 
 const bypassForm = ref({ ...EMPTY_FORM })
 
-// Get API key from localStorage or prompt user
-const apiKey = ref<string>('')
+const adminKey = useAdminKey()
+const apiKey = adminKey.key
 const keyInput = ref('')
 const showKeyDialog = ref(false)
 
@@ -274,14 +273,22 @@ const isFormValid = computed(() => {
 })
 
 onMounted(() => {
-  // Try to get API key from localStorage
-  apiKey.value = localStorage.getItem('admin_api_key') || ''
+  adminKey.load()
+  prefillFromQuery()
   if (!apiKey.value) {
     promptForApiKey()
   } else {
     fetchBypasses()
   }
 })
+
+// A package page links here with the package to cover.
+function prefillFromQuery() {
+  const { type, target } = route.query
+  if (typeof target !== 'string' || target === '') return
+  bypassForm.value = { ...EMPTY_FORM, type: type === 'cve' ? 'cve' : 'package', target }
+  showCreateModal.value = true
+}
 
 function promptForApiKey() {
   keyInput.value = ''
@@ -291,8 +298,7 @@ function promptForApiKey() {
 function submitApiKey() {
   const key = keyInput.value.trim()
   if (!key) return
-  apiKey.value = key
-  localStorage.setItem('admin_api_key', key)
+  adminKey.save(key)
   showKeyDialog.value = false
   fetchBypasses()
 }
@@ -330,8 +336,7 @@ async function fetchBypasses() {
     console.error('Failed to fetch bypasses:', err)
     if (err.response?.status === 401) {
       error.value = 'Invalid API key. Please check your credentials.'
-      localStorage.removeItem('admin_api_key')
-      apiKey.value = ''
+      adminKey.clear()
     } else {
       error.value = err.response?.data?.error?.message || err.message || 'Failed to load bypasses'
     }
@@ -449,10 +454,6 @@ async function deleteBypass() {
   }
 }
 
-function isExpired(expiresAt: string): boolean {
-  return new Date(expiresAt) < new Date()
-}
-
 const FILTER_OPTIONS = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
@@ -471,13 +472,13 @@ const BYPASS_TYPE_OPTIONS = [
 ]
 
 const bypassColumns: DataTableColumn<Bypass>[] = [
-  { key: 'target', header: 'Target', rowHeader: true },
+  { key: 'target', header: 'Target', sortable: true, rowHeader: true },
   { key: 'type', header: 'Type' },
   { key: 'status', header: 'Status', accessor: (b) => (b.active ? 'active' : 'inactive') },
   { key: 'reason', header: 'Reason' },
   { key: 'created_by', header: 'Created by' },
-  { key: 'created_at', header: 'Created', accessor: (b) => formatDate(b.created_at) },
-  { key: 'expires_at', header: 'Expires', accessor: (b) => formatDate(b.expires_at) },
+  { key: 'created_at', header: 'Created', sortable: true, accessor: (b) => Date.parse(b.created_at) },
+  { key: 'expires_at', header: 'Expires', sortable: true, accessor: (b) => Date.parse(b.expires_at) },
   { key: 'applies_to', header: 'Applies to' },
   { key: 'actions', header: 'Actions', actions: true, accessor: () => '' },
 ]

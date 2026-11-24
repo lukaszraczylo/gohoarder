@@ -1,133 +1,76 @@
 <template>
   <div class="flex flex-col gap-6">
-    <PageHeader title="Packages" description="Everything the proxy has cached, grouped by package.">
+    <PageHeader title="Packages" description="Everything the proxy has cached and the verdict each package received.">
       <template #actions>
         <Button variant="outline" :icon-start="faRotateRight" @click="load()">Refresh</Button>
       </template>
     </PageHeader>
 
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
-      <SegmentedControl
-        :model-value="selectedRegistry"
-        :options="REGISTRY_OPTIONS"
-        aria-label="Filter by registry"
-        @update:model-value="changeRegistryFilter"
-      />
-      <SearchInput v-model="searchTerm" aria-label="Search packages" placeholder="Search packages..." class="w-full sm:ms-auto sm:w-64" />
+    <div class="flex flex-col gap-3">
+      <SearchInput v-model="query" aria-label="Search packages" placeholder="Search by name or version..." class="w-full sm:max-w-md" />
+      <FilterBar v-model="filterItems" :fields="filterFields" variant="compact" />
     </div>
 
-    <LoadingState v-if="loading" variant="table" label="Loading packages..." />
+    <LoadingState v-if="loading && packages.length === 0" variant="table" label="Loading packages..." />
 
-    <ErrorState
-      v-else-if="error"
-      variant="card"
-      title="Could not load packages"
-      :message="error"
-      @retry="load()"
-    />
+    <ErrorState v-else-if="error" variant="card" title="Could not load packages" :message="error" @retry="load()" />
 
     <Card v-else>
       <CardContent>
         <EmptyState
-          v-if="totalGroups === 0 && !filtersActive"
+          v-if="packages.length === 0"
           :icon="faBoxOpen"
           title="No packages cached yet"
           description="Packages will appear here once they are downloaded through the proxy."
         />
         <EmptyState
-          v-else-if="groups.length === 0"
+          v-else-if="rows.length === 0"
           :icon="faMagnifyingGlass"
           title="No packages match"
-          description="Change the registry filter or the search text."
+          description="Change the search text or remove a filter."
         />
-        <Accordion v-else type="multiple" class="w-full">
-          <AccordionItem
-            v-for="group in groups"
-            :key="`${group.registry}:${group.name}`"
-            :value="`${group.registry}:${group.name}`"
-          >
-            <AccordionTrigger :heading-level="2">
-              <!-- Stacked below sm: a side-by-side row leaves the name ~90px at 320px and breaks scoped names mid-word. -->
-              <span class="flex w-full min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <span class="w-full min-w-0 text-start sm:w-auto">
-                  <span class="block break-words font-semibold">{{ group.name }}</span>
-                  <span class="block text-sm text-muted-foreground">
-                    {{ group.versions.length }} version{{ group.versions.length > 1 ? 's' : '' }}
-                  </span>
-                </span>
-                <span class="flex shrink-0 items-center gap-4">
-                  <Badge variant="outline">{{ group.registry }}</Badge>
-                  <span class="text-end tabular-nums">
-                    <span class="block text-sm font-medium">{{ formatBytes(group.totalSize) }}</span>
-                    <span class="block text-xs text-muted-foreground">{{ formatNumber(group.totalDownloads) }} downloads</span>
-                  </span>
-                </span>
-              </span>
-            </AccordionTrigger>
-            <AccordionContent>
-              <Table :label="`Versions of ${group.name}`" layout="cards">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Version</TableHead>
-                    <TableHead align="right">Downloads</TableHead>
-                    <TableHead align="right">Size</TableHead>
-                    <TableHead>Cached</TableHead>
-                    <TableHead>Vulnerabilities</TableHead>
-                    <TableHead align="right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="version in group.versions" :key="version.id">
-                    <TableCell label="Version" class="font-medium">{{ withVersionPrefix(displayVersion(version)) }}</TableCell>
-                    <TableCell label="Downloads" numeric>{{ formatNumber(version.download_count) }}</TableCell>
-                    <TableCell label="Size" numeric>{{ formatBytes(version.size) }}</TableCell>
-                    <TableCell label="Cached">{{ formatDate(version.cached_at) }}</TableCell>
-                    <TableCell label="Vulnerabilities">
-                      <VulnerabilityBadge
-                        v-if="version.vulnerabilities"
-                        :scanned="version.vulnerabilities.scanned"
-                        :status="version.vulnerabilities.status"
-                        :counts="version.vulnerabilities.counts"
-                        :total="version.vulnerabilities.total"
-                        :scannedAt="version.vulnerabilities.scannedAt"
-                        :isBlocked="version.vulnerabilities.isBlocked"
-                        @click="showVulnerabilityDetails(group.registry, group.name, version.version)"
-                      />
-                    </TableCell>
-                    <TableCell label="Actions" align="right">
-                      <IconButton
-                        :icon="faTrash"
-                        :label="`Delete ${group.name} ${version.version}`"
-                        @click="confirmDelete(version)"
-                      />
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-
-        <div v-if="totalPages > 1" class="mt-6 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p class="m-0 text-sm text-muted-foreground">
-            Page {{ currentPage }} of {{ totalPages }} ({{ totalGroups }} total packages)
+        <template v-else>
+          <p class="m-0 mb-3 text-sm text-muted-foreground" data-testid="package-count">
+            {{ rows.length }} of {{ packages.length }} package versions
           </p>
-          <Pagination
-            :page="currentPage"
-            :total="totalGroups"
+          <DataTable
+            v-model:sort="sort"
+            v-model:page="page"
+            label="Cached packages"
+            layout="cards"
+            density="compact"
+            row-clickable
             :page-size="PAGE_SIZE"
-            :show-edges="false"
-            @update:page="changePage"
-          />
-        </div>
+            :columns="columns"
+            :rows="rows"
+            @row-click="(row: Package) => (selected = row)"
+          >
+            <template #cell-name="{ row }">
+              <RouterLink :to="packageRoute(row)" class="break-words font-medium text-foreground underline-offset-4 hover:underline">
+                {{ row.name }}
+              </RouterLink>
+            </template>
+            <template #cell-registry="{ row }"><Badge variant="outline">{{ row.registry }}</Badge></template>
+            <template #cell-size="{ row }">{{ formatBytes(row.size) }}</template>
+            <template #cell-download_count="{ row }">{{ formatNumber(row.download_count) }}</template>
+            <template #cell-last_accessed="{ row }"><RelativeTime :datetime="row.last_accessed" /></template>
+            <template #cell-verdict="{ row }"><VerdictBadge :verdict="verdictOf(row)" /></template>
+            <template #cell-scanned="{ row }">
+              <RelativeTime v-if="row.vulnerabilities?.scannedAt" :datetime="row.vulnerabilities.scannedAt" />
+              <span v-else class="text-muted-foreground">Never</span>
+            </template>
+          </DataTable>
+        </template>
       </CardContent>
     </Card>
 
+    <PackageQuickView :pkg="selected" @close="selected = null" @delete="confirmDelete" />
+
     <ConfirmDialog
       v-model:open="showDeleteModal"
-      title="Delete package version?"
-      :description="`Delete ${packageToDelete?.name}@${packageToDelete?.version}? This action cannot be undone.`"
-      confirm-label="Delete version"
+      title="Remove package version?"
+      :description="`Remove ${packageToDelete?.name}@${packageToDelete?.version} from the cache? Clients can fetch it again from upstream.`"
+      confirm-label="Remove version"
       tone="danger"
       destructive
       @confirm="deletePackage"
@@ -136,129 +79,123 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, computed, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRoute, useRouter } from 'vue-router'
-import { usePackageStore, type Package } from '../stores/packages'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
   Badge,
   Button,
   Card,
   CardContent,
   ConfirmDialog,
+  DataTable,
   EmptyState,
   ErrorState,
-  IconButton,
+  FilterBar,
   LoadingState,
   PageHeader,
-  Pagination,
+  RelativeTime,
   SearchInput,
-  SegmentedControl,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   useToastStore,
+  type DataTableColumn,
+  type FilterField,
+  type FilterItem,
+  type SortState,
 } from '@perfect-design/ui'
-import VulnerabilityBadge from './VulnerabilityBadge.vue'
-import { formatBytes, formatDate, formatNumber, displayVersion, withVersionPrefix } from '@/lib/format'
-import { faBoxOpen, faMagnifyingGlass, faRotateRight, faTrash } from '@/lib/icons'
+import PackageQuickView from './parts/PackageQuickView.vue'
+import VerdictBadge from './parts/VerdictBadge.vue'
+import { usePackageStore, type Package } from '../stores/packages'
+import { displayVersion, formatBytes, formatNumber, withVersionPrefix } from '@/lib/format'
+import { filterPackages, packageRoute } from '@/lib/packages'
+import { faBoxOpen, faMagnifyingGlass, faRotateRight } from '@/lib/icons'
+import { VERDICT_OPTIONS, VERDICT_RANK, verdictOf, type Verdict } from '@/lib/verdict'
 
-// Props from router
-const props = defineProps<{
-  registry?: string
-}>()
-
-const route = useRoute()
-const router = useRouter()
-const store = usePackageStore()
-const toasts = useToastStore()
-const { packagePage, loading, error } = storeToRefs(store)
-
-const showDeleteModal = ref(false)
-const packageToDelete = ref<Package | null>(null)
-const REGISTRY_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'npm', label: 'npm' },
-  { value: 'pypi', label: 'PyPI' },
-  { value: 'go', label: 'Go' },
-]
+const props = defineProps<{ registry?: string }>()
 
 const PAGE_SIZE = 25
-const SEARCH_DEBOUNCE_MS = 300
+const KNOWN_REGISTRIES = ['npm', 'go', 'pypi']
 
-const selectedRegistry = ref<string>(props.registry || 'all')
-const searchTerm = ref<string>('')
-// What the server was last asked: the search text lags the input by the debounce.
-const activeQuery = ref<string>('')
-const currentPage = ref<number>(1)
+const store = usePackageStore()
+const toasts = useToastStore()
+const route = useRoute()
+const router = useRouter()
+const { packages, loading, error } = storeToRefs(store)
 
-const totalGroups = computed(() => packagePage.value.totalGroups)
-const totalPages = computed(() => Math.ceil(totalGroups.value / PAGE_SIZE))
-const filtersActive = computed(() => selectedRegistry.value !== 'all' || activeQuery.value.trim() !== '')
+const selected = ref<Package | null>(null)
+const showDeleteModal = ref(false)
+const packageToDelete = ref<Package | null>(null)
+const sort = ref<SortState | null>(null)
+const page = ref(1)
 
-// The server pages whole (registry, name) groups and sends every version row of each.
-const groups = computed(() => {
-  const byKey = new Map<string, { registry: string; name: string; versions: Package[] }>()
-  for (const pkg of packagePage.value.packages) {
-    const key = `${pkg.registry}\u0000${pkg.name}`
-    let group = byKey.get(key)
-    if (!group) {
-      group = { registry: pkg.registry, name: pkg.name, versions: [] }
-      byKey.set(key, group)
-    }
-    group.versions.push(pkg)
-  }
-  return Array.from(byKey.values()).map((group) => ({
-    ...group,
-    totalSize: group.versions.reduce((sum, v) => sum + v.size, 0),
-    totalDownloads: group.versions.reduce((sum, v) => sum + v.download_count, 0),
-  }))
+function queryText(key: string): string {
+  const raw = route.query[key]
+  return typeof raw === 'string' ? raw : ''
+}
+
+const query = ref(queryText('q'))
+
+let nextFilterId = 0
+function filterItem(field: string, value: string): FilterItem {
+  return { id: `f${nextFilterId++}`, field, operator: 'eq', value }
+}
+
+// The path segment is the pre-redesign way to pick a registry, so it still seeds the filter.
+const filterItems = ref<FilterItem[]>(
+  [
+    ...[props.registry || queryText('registry')].filter(Boolean).map((r) => filterItem('registry', r)),
+    ...[queryText('verdict')].filter(Boolean).map((v) => filterItem('verdict', v)),
+  ],
+)
+
+const registryOptions = computed(() => {
+  const seen = new Set([...KNOWN_REGISTRIES, ...packages.value.map((p) => p.registry)])
+  return [...seen].map((value) => ({ value, label: value }))
 })
+
+const filterFields = computed<FilterField[]>(() => [
+  { id: 'registry', label: 'Registry', type: 'select', options: registryOptions.value, operators: ['eq'] },
+  { id: 'verdict', label: 'Verdict', type: 'select', options: VERDICT_OPTIONS, operators: ['eq'] },
+])
+
+function valuesOf(field: string): string[] {
+  return filterItems.value.filter((f) => f.field === field).map((f) => String(f.value))
+}
+
+const rows = computed(() =>
+  filterPackages(packages.value, {
+    query: query.value,
+    registries: valuesOf('registry'),
+    verdicts: valuesOf('verdict') as Verdict[],
+  }),
+)
+
+// The URL mirrors the filters so a reload or a shared link restores the view.
+watch([query, filterItems], () => {
+  page.value = 1
+  const { q: _q, registry: _r, verdict: _v, ...rest } = route.query
+  const next: Record<string, string> = {}
+  if (query.value.trim()) next.q = query.value.trim()
+  const [registry] = valuesOf('registry')
+  const [verdict] = valuesOf('verdict')
+  if (registry) next.registry = registry
+  if (verdict) next.verdict = verdict
+  void router.replace({ path: '/packages', query: { ...rest, ...next } })
+})
+
+const columns: DataTableColumn<Package>[] = [
+  { key: 'name', header: 'Package', sortable: true, rowHeader: true },
+  { key: 'version', header: 'Version', sortable: true, accessor: (p) => withVersionPrefix(displayVersion(p)) },
+  { key: 'registry', header: 'Registry', sortable: true },
+  { key: 'size', header: 'Size', sortable: true, numeric: true },
+  { key: 'download_count', header: 'Downloads', sortable: true, numeric: true },
+  { key: 'last_accessed', header: 'Last accessed', sortable: true, accessor: (p) => Date.parse(p.last_accessed) || 0 },
+  { key: 'verdict', header: 'Verdict', sortable: true, accessor: (p) => VERDICT_RANK[verdictOf(p)] },
+  { key: 'scanned', header: 'Last scanned', sortable: true, accessor: (p) => Date.parse(p.vulnerabilities?.scannedAt ?? '') || 0 },
+]
 
 async function load() {
-  await store.fetchPackagePage({
-    page: currentPage.value,
-    pageSize: PAGE_SIZE,
-    registry: selectedRegistry.value,
-    q: activeQuery.value,
-  })
+  await store.fetchPackages()
 }
-
-function changePage(page: number) {
-  if (page >= 1 && page <= totalPages.value) {
-    currentPage.value = page
-    void load()
-    // Scroll to top of packages list
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-}
-
-// A burst of keystrokes asks the server once.
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch(searchTerm, (term) => {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
-    if (term === activeQuery.value) return
-    activeQuery.value = term
-    currentPage.value = 1
-    void load()
-  }, SEARCH_DEBOUNCE_MS)
-})
-onBeforeUnmount(() => clearTimeout(searchTimer))
-
-// Watch for route parameter changes to update filter
-watch(() => route.params.registry, (newRegistry) => {
-  selectedRegistry.value = (newRegistry as string) || 'all'
-  currentPage.value = 1
-  void load()
-})
 
 onMounted(load)
 
@@ -273,36 +210,15 @@ async function deletePackage() {
   await store.deletePackage(target.registry, target.name, target.version)
   showDeleteModal.value = false
   packageToDelete.value = null
+  selected.value = null
   const label = `${target.name}@${target.version}`
   if (store.error) {
-    toasts.error('Could not delete package', `${label}: ${store.error}`)
+    toasts.error('Could not remove package', `${label}: ${store.error}`)
     // The toast reports it; the list loaded fine, so it must not be replaced by a load error.
     store.error = null
   } else {
-    toasts.success('Package deleted', label)
+    toasts.success('Package removed', label)
     await load()
-    // Deleting the last group of the last page leaves that page empty.
-    if (packagePage.value.packages.length === 0 && totalGroups.value > 0 && currentPage.value > 1) {
-      currentPage.value = Math.max(totalPages.value, 1)
-      await load()
-    }
   }
-}
-
-function showVulnerabilityDetails(registry: string, name: string, version: string) {
-  // Navigate to the package details page
-  router.push({
-    name: 'package-details',
-    params: {
-      registry,
-      name,
-      version,
-    },
-  })
-}
-
-function changeRegistryFilter(registry: string) {
-  const path = registry === 'all' ? '/packages' : `/packages/${registry}`
-  router.push(path)
 }
 </script>

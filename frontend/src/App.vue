@@ -27,7 +27,7 @@ onMounted(() => {
       <template #brand>
         <Icon :icon="faBoxOpen" size="lg" class="text-primary" />
         <p class="m-0 text-lg font-semibold">GoHoarder</p>
-        <p class="m-0 hidden text-sm text-muted-foreground sm:block">Package cache manager</p>
+        <p class="m-0 hidden text-sm text-muted-foreground sm:block">Package checkpoint</p>
       </template>
       <template #actions><ThemeToggle /></template>
       <template #mobile><AppNav sheet /></template>

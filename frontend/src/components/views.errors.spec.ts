@@ -3,12 +3,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import axios from 'axios'
 import { flushPromises } from '@vue/test-utils'
 import App from '@/App.vue'
-import Dashboard from './Dashboard.vue'
+import Overview from './Overview.vue'
 import PackageList from './PackageList.vue'
 import PackageDetails from './PackageDetails.vue'
-import VulnerablePackages from './VulnerablePackages.vue'
+import Security from './Security.vue'
 import BypassManagementPanel from './BypassManagementPanel.vue'
-import Stats from './Stats.vue'
+import Insights from './Insights.vue'
+import System from './System.vue'
+import { __resetSystem } from '@/lib/system'
 import { __resetRealtimeSingleton, useRealtimeStore } from '@/stores/realtime'
 import { mountStrict } from '@/test/mountStrict'
 import { createTestRouter } from '@/test/router'
@@ -21,20 +23,21 @@ const FAILURE = Object.assign(new Error('Request failed with status code 502'), 
 
 // What each view must not say when the request failed: an empty state would tell the operator there is nothing to see.
 const EMPTY_TEXT: Record<string, string> = {
-  Dashboard: 'No packages cached yet',
+  Overview: 'Quiet at the desk',
   PackageList: 'No packages cached yet',
-  VulnerablePackages: 'No vulnerable packages',
-  Stats: 'No registries reported',
+  Security: 'Nothing is held',
+  Insights: 'No registry data yet',
   BypassManagementPanel: 'No bypasses found',
 }
 
 const CASES: Array<[string, Parameters<typeof mountStrict>[0], string]> = [
-  ['Dashboard', Dashboard, '/'],
+  ['Overview', Overview, '/'],
   ['PackageList', PackageList, '/packages'],
   ['PackageDetails', PackageDetails, '/package/npm/left-pad/1.3.0'],
-  ['VulnerablePackages', VulnerablePackages, '/vulnerable-packages'],
+  ['Security', Security, '/security'],
   ['BypassManagementPanel', BypassManagementPanel, '/admin/bypasses'],
-  ['Stats', Stats, '/stats'],
+  ['Insights', Insights, '/stats'],
+  ['System', System, '/admin/system'],
 ]
 
 let restore: (() => void) | undefined
@@ -42,6 +45,7 @@ let restore: (() => void) | undefined
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetRealtimeSingleton()
+  __resetSystem()
   vi.mocked(axios.get).mockRejectedValue(FAILURE)
   localStorage.setItem('admin_api_key', 'test-key')
 })
@@ -73,16 +77,16 @@ describe('an API failure renders ErrorState, never an empty state', () => {
   })
 
   it('retry fetches again and clears the error when the backend is back', async () => {
-    const router = await createTestRouter('/vulnerable-packages')
+    const router = await createTestRouter('/security')
     const pinia = createPinia()
     setActivePinia(pinia)
-    const mounted = await mountStrict(VulnerablePackages, { global: { plugins: [pinia, router] } })
+    const mounted = await mountStrict(Security, { global: { plugins: [pinia, router] } })
     restore = mounted.restore
     vi.mocked(axios.get).mockResolvedValue({ data: { packages: [] } })
     await mounted.wrapper.find('[data-slot="error-state"] button').trigger('click')
     await flushPromises()
     expect(mounted.wrapper.find('[data-slot="error-state"]').exists()).toBe(false)
-    expect(mounted.wrapper.text()).toContain('No vulnerable packages')
+    expect(mounted.wrapper.text()).toContain('Nothing is held')
   })
 })
 
@@ -102,6 +106,6 @@ describe('unknown routes', () => {
     expect(main.find('h1').text()).toBe('Page not found')
     expect(main.find('[data-slot="empty-state"]').text()).toContain('/vulnerable')
     const link = main.find('a[href="/"]')
-    expect(link.text()).toMatch(/dashboard/i)
+    expect(link.text()).toMatch(/overview|dashboard/i)
   })
 })

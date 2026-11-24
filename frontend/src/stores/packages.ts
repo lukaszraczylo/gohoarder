@@ -9,6 +9,20 @@ export interface VulnerabilityCounts {
   low: number
 }
 
+/** What the proxy did with a package; absent on servers that predate verdicts. */
+export type ApiVerdict = 'cleared' | 'held' | 'bypassed' | 'pending'
+
+/** The admin bypass that applied to a package. */
+export interface AppliedBypass {
+  id: string
+  type: 'cve' | 'package'
+  target: string
+  reason: string
+  created_by: string
+  created_at: string
+  expires_at: string
+}
+
 export interface VulnerabilityInfo {
   scanned: boolean
   status: 'clean' | 'vulnerable' | 'pending' | 'not_scanned'
@@ -16,6 +30,10 @@ export interface VulnerabilityInfo {
   total?: number
   scannedAt?: string // ISO 8601 timestamp
   isBlocked?: boolean // Whether download is blocked due to vulnerability thresholds
+  verdict?: ApiVerdict
+  /** Why the package is held. */
+  reason?: string
+  bypass?: AppliedBypass
 }
 
 export interface Package {
@@ -25,6 +43,7 @@ export interface Package {
   version: string
   release_version?: string
   size: number
+  checksum_sha256?: string
   cached_at: string
   last_accessed: string
   download_count: number
@@ -40,6 +59,7 @@ export interface Stats {
   scanned_packages: number
   vulnerable_packages: number
   blocked_packages: number
+  bypassed_packages?: number
   /** Seconds a cached item can go unrequested before cleanup removes it; 0 means never. */
   idle_ttl?: number
 }

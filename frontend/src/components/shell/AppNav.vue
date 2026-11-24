@@ -6,6 +6,7 @@ import {
   faBoxesStacked,
   faChartColumn,
   faChartPie,
+  faGear,
   faShieldHalved,
   faTriangleExclamation,
 } from '@/lib/icons'
@@ -17,11 +18,17 @@ defineProps<{ readonly sheet?: boolean }>()
 const GROUPS: SidebarNavGroup[] = [
   {
     items: [
-      { label: 'Dashboard', to: '/', icon: faChartPie },
+      { label: 'Overview', to: '/', icon: faChartPie },
       { label: 'Packages', to: '/packages', icon: faBoxesStacked },
-      { label: 'Vulnerable', to: '/vulnerable-packages', icon: faTriangleExclamation },
+      { label: 'Security', to: '/security', icon: faTriangleExclamation },
+      { label: 'Insights', to: '/stats', icon: faChartColumn },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
       { label: 'Bypasses', to: '/admin/bypasses', icon: faShieldHalved },
-      { label: 'Stats', to: '/stats', icon: faChartColumn },
+      { label: 'System', to: '/admin/system', icon: faGear },
     ],
   },
 ]
@@ -29,9 +36,11 @@ const GROUPS: SidebarNavGroup[] = [
 const SECTION_PREFIXES: ReadonlyArray<readonly [string, string]> = [
   ['/packages', '/packages'],
   ['/package/', '/packages'],
-  ['/vulnerable-packages', '/vulnerable-packages'],
-  ['/blocked-packages', '/vulnerable-packages'],
+  ['/security', '/security'],
+  ['/vulnerable-packages', '/security'],
+  ['/blocked-packages', '/security'],
   ['/admin/bypasses', '/admin/bypasses'],
+  ['/admin/system', '/admin/system'],
   ['/stats', '/stats'],
 ]
 

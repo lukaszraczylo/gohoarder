@@ -1,5 +1,6 @@
 export {
   faArrowLeft,
+  faArrowRight,
   faBan,
   faBox,
   faBoxOpen,
@@ -8,10 +9,14 @@ export {
   faChartLine,
   faChartPie,
   faDownload,
+  faGear,
   faHardDrive,
+  faHourglassHalf,
+  faKey,
   faPen,
   faShieldHalved,
   faTrash,
+  faUnlockKeyhole,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 export {

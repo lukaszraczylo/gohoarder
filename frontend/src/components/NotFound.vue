@@ -10,7 +10,7 @@
     >
       <template #action>
         <Button as-child>
-          <RouterLink to="/">Back to the dashboard</RouterLink>
+          <RouterLink to="/">Back to the overview</RouterLink>
         </Button>
       </template>
     </EmptyState>

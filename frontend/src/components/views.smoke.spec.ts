@@ -3,16 +3,29 @@ import { createPinia, setActivePinia } from 'pinia'
 import axios from 'axios'
 import { flushPromises } from '@vue/test-utils'
 import App from '@/App.vue'
-import Dashboard from './Dashboard.vue'
+import Overview from './Overview.vue'
 import PackageList from './PackageList.vue'
 import PackageDetails from './PackageDetails.vue'
-import VulnerablePackages from './VulnerablePackages.vue'
+import Security from './Security.vue'
 import BypassManagementPanel from './BypassManagementPanel.vue'
-import Stats from './Stats.vue'
+import Insights from './Insights.vue'
+import System from './System.vue'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
-import { __resetRealtimeSingleton, useRealtimeStore } from '@/stores/realtime'
+import { __resetSystem } from '@/lib/system'
 import { usePackageStore } from '@/stores/packages'
-import { BYPASSES, PACKAGES, REGISTRIES, STATS, TIMESERIES, TREND, VULNERABILITY_REPORT } from '@/test/fixtures'
+import { __resetRealtimeSingleton, useRealtimeStore } from '@/stores/realtime'
+import {
+  BYPASSES,
+  PACKAGES,
+  PACKAGE_ANALYTICS,
+  REGISTRIES,
+  STATS,
+  SYSTEM,
+  TIMESERIES,
+  TOP_PACKAGES,
+  TREND,
+  VULNERABILITY_REPORT,
+} from '@/test/fixtures'
 import { mountStrict } from '@/test/mountStrict'
 import { createTestRouter } from '@/test/router'
 
@@ -21,6 +34,9 @@ vi.mock('axios')
 const API_KEY_STORAGE = 'admin_api_key'
 
 function respond(url: string) {
+  if (url.startsWith('/api/system')) return { data: SYSTEM }
+  if (url.startsWith('/api/analytics/package/')) return { data: PACKAGE_ANALYTICS }
+  if (url.startsWith('/api/analytics/')) return { data: TOP_PACKAGES }
   if (url.startsWith('/api/stats/timeseries')) return { data: TIMESERIES }
   if (url.startsWith('/api/stats/trend')) return { data: TREND }
   if (url.startsWith('/api/stats')) return { data: { stats: STATS, registries: REGISTRIES } }
@@ -35,6 +51,7 @@ let restore: (() => void) | undefined
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetRealtimeSingleton()
+  __resetSystem()
   vi.mocked(axios.get).mockImplementation(async (url: string) => respond(url) as never)
   localStorage.setItem(API_KEY_STORAGE, 'test-key')
 })
@@ -57,52 +74,84 @@ async function smoke(component: Parameters<typeof mountStrict>[0], path: string,
 }
 
 describe('view smoke tests (strict mode throw, fixture data)', () => {
-  it('Dashboard renders the tiles, chart, feed and recent packages', async () => {
+  it('Overview renders the verdict strip, policy, capacity, trend, rankings, inspectors and feed', async () => {
     const router = await createTestRouter('/')
     const pinia = createPinia()
     setActivePinia(pinia)
     const rt = useRealtimeStore()
     vi.spyOn(rt, 'connect').mockImplementation(() => {})
     rt.events = [{ type: 'package_cached', payload: { name: 'left-pad', version: '1.3.0', registry: 'npm' }, timestamp: Date.now() }]
-    const { wrapper, problems, restore: r } = await mountStrict(Dashboard, { global: { plugins: [pinia, router] } })
+    const { wrapper, problems, restore: r } = await mountStrict(Overview, { global: { plugins: [pinia, router] } })
     restore = r
     await flushPromises()
 
     expect(problems).toEqual([])
-    expect(wrapper.find('h1').text()).toBe('Dashboard')
-    expect(wrapper.text()).toContain('Total packages')
+    expect(wrapper.find('h1').text()).toBe('Overview')
+
+    const strip = wrapper.find('[data-testid="verdict-strip"]').text()
+    for (const word of ['Cleared', 'Held', 'Bypassed', 'Awaiting scan']) expect(strip).toContain(word)
+    // 3 scanned, 1 held, 1 bypassed: 1 cleared; 4 cached, 3 scanned: 1 awaiting.
+    expect(wrapper.find('[data-verdict="cleared"]').text()).toContain('1')
+    expect(wrapper.find('[data-verdict="held"]').attributes('href')).toBe('/security?tab=held')
+
+    expect(wrapper.find('[data-testid="policy-line"]').text()).toContain('Blocks any CRITICAL.')
+    expect(wrapper.find('[data-testid="policy-line"]').text()).toContain('Fail-closed')
+    expect(wrapper.find('[data-testid="cache-capacity"]').text()).toContain('5 GB of 10 GB')
+    expect(wrapper.find('[data-testid="download-trend"] [role="img"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="top-packages"]').text()).toContain('npm · left-pad')
+    expect(wrapper.find('[data-testid="top-packages"]').text()).toContain('go · github.com/example/module')
+    expect(wrapper.find('[data-testid="scanner-health"]').text()).toContain('grype')
+    expect(wrapper.find('[data-testid="scanner-health"]').text()).toContain('Unavailable')
     expect(wrapper.find('[data-testid="ws-event-feed"]').text()).toContain('left-pad')
-    expect(wrapper.find('[role="img"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Recent packages')
-    expect(wrapper.text()).toContain('github.com/example/module')
   })
 
-  it('PackageList groups fixture packages and shows severity words', async () => {
+  it('PackageList shows a verdict for each row and filters by it', async () => {
     const { wrapper, problems } = await smoke(PackageList, '/packages')
     expect(problems).toEqual([])
     expect(wrapper.find('h1').text()).toBe('Packages')
-    expect(wrapper.text()).toContain('left-pad')
-    expect(wrapper.text()).toContain('2 versions')
-    expect(wrapper.text()).toContain('requests')
-
-    const trigger = wrapper.findAll('button').find((b) => b.text().includes('left-pad'))
-    await trigger!.trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('Critical: 1')
-    expect(wrapper.text()).toContain('Blocked')
+    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('4 of 4')
+    const text = wrapper.text()
+    for (const word of ['left-pad', 'requests', 'github.com/example/module', 'Held', 'Cleared', 'Bypassed', 'Awaiting scan']) {
+      expect(text).toContain(word)
+    }
   })
 
-  it('PackageDetails renders the report, severity table and expanded row', async () => {
+  it('PackageList seeds the verdict filter from the URL', async () => {
+    const { wrapper, problems } = await smoke(PackageList, '/packages?verdict=held')
+    expect(problems).toEqual([])
+    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('1 of 4')
+    expect(wrapper.text()).toContain('left-pad')
+    expect(wrapper.text()).not.toContain('requests')
+  })
+
+  it('PackageList opens a quick view with a link to the full page', async () => {
+    const { wrapper, problems } = await smoke(PackageList, '/packages?verdict=held')
+    await wrapper.find('tbody tr').trigger('click')
+    await flushPromises()
+    expect(problems).toEqual([])
+    const sheet = document.body.querySelector('[data-slot="sheet-content"]')
+    expect(sheet?.textContent).toContain('Package has 1 CRITICAL vulnerabilities')
+    expect(sheet?.querySelector('a[href^="/package/npm/left-pad/1.3.0"]')).not.toBeNull()
+  })
+
+  it('PackageDetails explains the verdict and lists findings most severe first', async () => {
     const { wrapper, problems } = await smoke(PackageDetails, '/package/npm/left-pad/1.3.0')
     const router = (wrapper.vm as unknown as { $router: Awaited<ReturnType<typeof createTestRouter>> }).$router
     await router.push('/package/npm/left-pad/1.3.0')
+    await flushPromises()
     expect(problems).toEqual([])
     expect(wrapper.find('h1').text()).toBe('left-pad')
-    expect(wrapper.text()).toContain('Security scan summary')
-    expect(wrapper.text()).toContain('trivy')
 
-    // Most severe first: CRITICAL, HIGH, then LOW.
-    const ids = wrapper.findAll('tbody td.font-mono').map((td) => td.text().replace('CVE ID', ''))
+    const banner = wrapper.find('[data-testid="verdict-banner"]').text()
+    expect(banner).toContain('Held: CVE-2026-0003 is HIGH')
+    expect(banner).toContain('Blocks any CRITICAL.')
+
+    const meta = wrapper.find('[data-testid="package-meta"]').text()
+    expect(meta).toContain('2 KB')
+    expect(meta).toContain('https://registry.npmjs.org')
+    expect(meta).toContain('Removed after 30 days without a request')
+
+    const ids = wrapper.findAll('tbody td.font-mono').map((td) => td.text().replace('Advisory', ''))
     expect(ids.slice(0, 3)).toEqual(['CVE-2026-0002', 'CVE-2026-0003', 'CVE-2026-0001'])
 
     await wrapper.find('button[aria-label^="Show details for CVE-2026-0002"]').trigger('click')
@@ -111,26 +160,49 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(wrapper.text()).toContain('No fix available')
   })
 
-  it('VulnerablePackages lists the vulnerable fixture packages', async () => {
-    const { wrapper, problems } = await smoke(VulnerablePackages, '/vulnerable-packages')
+  it('PackageDetails Inspectors tab shows one row per scanner', async () => {
+    const { wrapper, problems } = await smoke(PackageDetails, '/package/npm/left-pad/1.3.0?tab=inspectors')
+    const router = (wrapper.vm as unknown as { $router: Awaited<ReturnType<typeof createTestRouter>> }).$router
+    await router.push('/package/npm/left-pad/1.3.0?tab=inspectors')
+    await flushPromises()
     expect(problems).toEqual([])
-    expect(wrapper.find('h1').text()).toBe('Vulnerable packages')
-    expect(wrapper.text()).toContain('left-pad')
-    expect(wrapper.text()).not.toContain('requests')
-    expect(wrapper.text()).toContain('Critical')
+    const panel = wrapper.find('[role="tabpanel"]:not([hidden])')
+    const text = panel.text()
+    for (const word of ['trivy', 'osv', 'grype', 'govulncheck', 'v0.58.1', 'No result', 'Off']) expect(text).toContain(word)
   })
 
-  it('VulnerablePackages on the blocked route keeps only blocked packages', async () => {
-    const { wrapper, problems } = await smoke(VulnerablePackages, '/blocked-packages')
+  it('PackageDetails Downloads tab reads the per-package analytics', async () => {
+    const { wrapper, problems } = await smoke(PackageDetails, '/package/npm/left-pad/1.3.0?tab=downloads')
+    const router = (wrapper.vm as unknown as { $router: Awaited<ReturnType<typeof createTestRouter>> }).$router
+    await router.push('/package/npm/left-pad/1.3.0?tab=downloads')
+    await flushPromises()
     expect(problems).toEqual([])
-    expect(wrapper.find('h1').text()).toBe('Blocked packages')
-    expect(wrapper.text()).toContain('1 vulnerable version')
+    expect(vi.mocked(axios.get)).toHaveBeenCalledWith('/api/analytics/package/npm/left-pad')
+    expect(wrapper.text()).toContain('80 KB')
+  })
+
+  it('Security splits packages by what the policy did', async () => {
+    const { wrapper, problems } = await smoke(Security, '/security')
+    expect(problems).toEqual([])
+    expect(wrapper.find('h1').text()).toBe('Security')
+    const triggers = wrapper.findAll('[role="tab"]').map((t) => t.text())
+    expect(triggers).toEqual(['Held (1)', 'Vulnerable but allowed (1)', 'Bypassed (1)'])
+    expect(wrapper.text()).toContain('left-pad')
+    expect(wrapper.text()).toContain('Package has 1 CRITICAL vulnerabilities')
+  })
+
+  it('Security opens on the tab named in the URL', async () => {
+    const { wrapper, problems } = await smoke(Security, '/security?tab=bypassed')
+    expect(problems).toEqual([])
+    const selected = wrapper.findAll('[role="tab"]').find((t) => t.attributes('aria-selected') === 'true')
+    expect(selected?.text()).toBe('Bypassed (1)')
+    expect(wrapper.text()).toContain('a.khan')
   })
 
   it('BypassManagementPanel lists bypasses and opens the create dialog', async () => {
     const { wrapper, problems } = await smoke(BypassManagementPanel, '/admin/bypasses')
     expect(problems).toEqual([])
-    expect(wrapper.find('h1').text()).toBe('CVE bypass management')
+    expect(wrapper.find('h1').text()).toBe('Bypasses')
     expect(wrapper.text()).toContain('CVE-2026-0002')
     expect(wrapper.text()).toContain('Expired')
 
@@ -139,6 +211,14 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     await flushPromises()
     expect(document.body.textContent).toContain('Create a temporary bypass for a CVE or package.')
     expect(document.body.querySelector('textarea')).not.toBeNull()
+  })
+
+  it('BypassManagementPanel opens the form prefilled from a package page link', async () => {
+    const { problems } = await smoke(BypassManagementPanel, '/admin/bypasses?type=package&target=npm/left-pad@1.3.0')
+    await flushPromises()
+    expect(problems).toEqual([])
+    const input = Array.from(document.body.querySelectorAll<HTMLInputElement>('input')).find((i) => i.value === 'npm/left-pad@1.3.0')
+    expect(input).toBeDefined()
   })
 
   it('BypassManagementPanel asks for the admin key in a dialog, not a native prompt', async () => {
@@ -166,14 +246,51 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(wrapper.text()).toContain('CVE-2026-0002')
   })
 
-  it('Stats renders totals, the storage tile and the registry table', async () => {
-    const { wrapper, problems } = await smoke(Stats, '/stats')
+  it('Insights renders the registry breakdown, scan coverage and daily downloads', async () => {
+    const { wrapper, problems } = await smoke(Insights, '/stats')
     expect(problems).toEqual([])
-    expect(wrapper.find('h1').text()).toBe('Statistics')
-    expect(wrapper.text()).toContain('5 GB / 10 GB')
-    expect(wrapper.text()).toContain('50.0% used')
-    expect(wrapper.text()).toContain('Go modules')
-    expect(wrapper.find('[role="progressbar"]').exists()).toBe(true)
+    expect(wrapper.find('h1').text()).toBe('Insights')
+    const breakdown = wrapper.find('[data-testid="registry-breakdown"]').text()
+    for (const word of ['npm', 'pypi', 'go', '2 GB']) expect(breakdown).toContain(word)
+    expect(wrapper.find('[data-testid="scan-coverage"]').text()).toContain('3 of 4')
+    expect(wrapper.find('[data-testid="daily-downloads"] [role="img"]').exists()).toBe(true)
+  })
+
+  it('System shows the policy, scanners, rescans, cache, pre-warming and build version', async () => {
+    const { wrapper, problems } = await smoke(System, '/admin/system')
+    await flushPromises()
+    expect(problems).toEqual([])
+    expect(wrapper.find('h1').text()).toBe('System')
+    expect(wrapper.find('[data-testid="build-version"]').text()).toBe('v1.8.0')
+    expect(wrapper.find('[data-testid="policy-list"]').text()).toContain('Blocks any CRITICAL.')
+    expect(wrapper.find('[data-testid="policy-list"]').text()).toContain('Fail-closed')
+    expect(wrapper.find('[data-testid="rescan-list"]').text()).toContain('1 day')
+    expect(wrapper.find('[data-testid="cache-list"]').text()).toContain('10 GB')
+    expect(wrapper.text()).toContain('v0.58.1')
+    expect(wrapper.find('[data-testid="prewarming"] button').text()).toContain('Run a cycle now')
+  })
+
+  it('System starts a pre-warming cycle with the admin key', async () => {
+    vi.mocked(axios.post).mockResolvedValue({ data: {} })
+    const { wrapper } = await smoke(System, '/admin/system')
+    await flushPromises()
+    await wrapper.find('[data-testid="prewarming"] button').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(axios.post)).toHaveBeenCalledWith(
+      '/api/admin/prewarming/trigger',
+      null,
+      expect.objectContaining({ headers: { Authorization: 'Bearer test-key' } }),
+    )
+  })
+
+  it('System asks for the key before it triggers anything', async () => {
+    localStorage.clear()
+    const { wrapper } = await smoke(System, '/admin/system')
+    await flushPromises()
+    await wrapper.find('[data-testid="prewarming"] button').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(axios.post)).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Enter your admin API key to start a pre-warming cycle.')
   })
 
   it('VulnerabilityBadge prints the severity word for every tone', async () => {
@@ -191,7 +308,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(tones).toEqual(['danger', 'danger', 'warning', 'info', 'neutral'])
   })
 
-  it('App renders one banner, one main, a skip link first and the five sections', async () => {
+  it('App renders one banner, one main, a skip link first and the sections', async () => {
     const { wrapper, problems } = await smoke(App, '/')
     expect(problems).toEqual([])
     // A page's own <header> inside <main> is not a banner landmark.
@@ -200,7 +317,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     const first = document.body.querySelector<HTMLElement>('a[href], button')
     expect(first?.getAttribute('href')).toBe('#main-content')
     const nav = wrapper.find('nav[aria-label="Sections"]')
-    expect(nav.findAll('a').map((a) => a.text())).toEqual(['Dashboard', 'Packages', 'Vulnerable', 'Bypasses', 'Stats'])
+    expect(nav.findAll('a').map((a) => a.text())).toEqual(['Overview', 'Packages', 'Security', 'Insights', 'Bypasses', 'System'])
     expect(document.documentElement.getAttribute('data-style')).toBe('workbench')
     // Brand column and sidebar items share one left edge: 6 spacing units each.
     expect(document.body.querySelector('header')?.className).toContain('[&>div]:px-6')
@@ -209,7 +326,28 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
 
   it('PackageList still fetches through the store on mount', async () => {
     await smoke(PackageList, '/packages')
-    expect(usePackageStore().packagePage.packages.length).toBe(PACKAGES.length)
+    expect(usePackageStore().packages.length).toBe(PACKAGES.length)
+  })
+})
+
+describe('old URLs land on the new pages', () => {
+  it.each([
+    ['/vulnerable-packages', '/security', 'allowed'],
+    ['/blocked-packages', '/security', 'held'],
+  ])('%s redirects to %s with tab %s', async (from, path, tab) => {
+    const router = await createTestRouter(from)
+    expect(router.currentRoute.value.path).toBe(path)
+    expect(router.currentRoute.value.query.tab).toBe(tab)
+  })
+
+  it('keeps the severity filter of the old link', async () => {
+    const router = await createTestRouter('/vulnerable-packages?severity=critical')
+    expect(router.currentRoute.value.query).toEqual({ severity: 'critical', tab: 'allowed' })
+  })
+
+  it('/packages/npm still seeds the registry filter', async () => {
+    const { wrapper } = await smoke(PackageList, '/packages/npm', { registry: 'npm' })
+    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('2 of 4')
   })
 })
 
@@ -245,21 +383,21 @@ describe('PyPI rows show the release version, not the file name', () => {
     })
   })
 
-  it('Dashboard recent packages', async () => {
-    const { wrapper } = await smoke(Dashboard, '/')
+  it('PackageList version column', async () => {
+    const { wrapper } = await smoke(PackageList, '/packages')
     await flushPromises()
     expect(wrapper.text()).toContain('v1.17.0')
     expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')
   })
 
-  it('Dashboard activity feed', async () => {
+  it('Overview activity feed', async () => {
     const router = await createTestRouter('/')
     const pinia = createPinia()
     setActivePinia(pinia)
     const rt = useRealtimeStore()
     vi.spyOn(rt, 'connect').mockImplementation(() => {})
     rt.events = [{ type: 'package_cached', payload: { name: 'six', version: FILE, release_version: '1.17.0', registry: 'pypi' }, timestamp: Date.now() }]
-    const { wrapper, restore: r } = await mountStrict(Dashboard, { global: { plugins: [pinia, router] } })
+    const { wrapper, restore: r } = await mountStrict(Overview, { global: { plugins: [pinia, router] } })
     restore = r
     await flushPromises()
     const feed = wrapper.find('[data-testid="ws-event-feed"]').text()
@@ -267,10 +405,8 @@ describe('PyPI rows show the release version, not the file name', () => {
     expect(feed).not.toContain('whl')
   })
 
-  it('VulnerablePackages version column', async () => {
-    const { wrapper } = await smoke(VulnerablePackages, '/vulnerable-packages')
-    await flushPromises()
-    await wrapper.find('button[aria-expanded]').trigger('click')
+  it('Security version column', async () => {
+    const { wrapper } = await smoke(Security, '/security?tab=allowed')
     await flushPromises()
     expect(wrapper.text()).toContain('v1.17.0')
     expect(wrapper.text()).not.toContain('py2.py3-none-any.whl')

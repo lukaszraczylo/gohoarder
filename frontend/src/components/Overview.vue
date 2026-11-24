@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col gap-6">
-    <PageHeader title="Dashboard" description="What the cache holds and what is moving through it.">
+    <PageHeader title="Overview" description="Packages arrive at the proxy, the scanners inspect them, and each is cleared, held or waved through.">
       <template #actions>
         <StatusBadge
           :status="rt.connected ? 'live' : 'paused'"
@@ -12,10 +12,12 @@
       </template>
     </PageHeader>
 
-    <LoadingState v-if="loading" variant="kpi-grid" :columns="4" label="Loading statistics..." />
+    <PolicyLine />
+
+    <LoadingState v-if="loading && !displayStats" variant="kpi-grid" :columns="4" label="Loading statistics..." />
 
     <ErrorState
-      v-else-if="error"
+      v-else-if="error && !displayStats"
       variant="card"
       title="Could not load statistics"
       :message="error"
@@ -23,138 +25,129 @@
     />
 
     <template v-else>
-    <StatGroup :columns="4" aria-label="Cache totals">
-      <KpiTile label="Total packages" :value="displayStats?.total_packages || 0" :icon="faBoxesStacked" />
-      <KpiTile label="Total size" :value="formatBytes(displayStats?.total_size || 0)" :icon="faHardDrive" />
-      <KpiTile label="Total downloads" :value="displayStats?.total_downloads || 0" :icon="faDownload" />
-      <KpiTile label="Scanned packages" :value="displayStats?.scanned_packages || 0" :icon="faShieldHalved" />
-    </StatGroup>
-
-    <Card v-if="recentRealtimeEvents.length > 0" data-testid="ws-event-feed">
-      <CardHeader>
-        <CardTitle as="h2">Live activity</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ActivityFeed :events="feedEvents" variant="compact" label="Live activity" />
-      </CardContent>
-    </Card>
-
-    <div class="grid gap-6 lg:grid-cols-2">
-      <Card class="min-w-0">
-        <CardHeader>
-          <CardTitle as="h2">Download activity</CardTitle>
-          <CardAction>
-            <SegmentedControl v-model="selectedPeriod" :options="chartPeriods" aria-label="Period" />
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          <LoadingState
-            v-if="chartLoading && chartData.length === 0"
-            layout="inline"
-            label="Loading chart data..."
-          />
-          <ErrorState
-            v-else-if="chartError"
-            variant="inline"
-            title="Could not load download activity"
-            :message="chartError"
-            @retry="fetchTimeSeriesData"
-          />
-          <BarChart
-            v-else
-            :labels="chartLabels"
-            :series="[{ name: 'Downloads', data: chartData }]"
-            label="Downloads over the selected period"
-            empty-text="No download activity in this period"
-          />
-        </CardContent>
-      </Card>
-      <TrendChart compact class="min-w-0" />
-    </div>
-
-    <Card>
-      <CardHeader>
-        <CardTitle as="h2">Recent packages</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <EmptyState
-          v-if="recentPackages.length === 0"
-          size="sm"
-          :icon="faBoxOpen"
-          title="No packages cached yet"
-          description="Packages appear here once they are downloaded through the proxy."
-        />
-        <DataTable
-          v-else
-          label="Recent packages"
-          layout="cards"
-          :columns="packageColumns"
-          :rows="recentPackages"
+      <StatGroup :columns="4" aria-label="Verdicts" data-testid="verdict-strip">
+        <KpiTile
+          v-for="tile in verdictTiles"
+          :key="tile.verdict"
+          :as="RouterLink"
+          :to="tile.to"
+          variant="interactive"
+          :label="VERDICT_LABELS[tile.verdict]"
+          :value="tile.value"
+          :hint="tile.hint"
+          :data-verdict="tile.verdict"
         >
-          <template #cell-registry="{ row }">
-            <Badge variant="outline">{{ row.registry }}</Badge>
-          </template>
-        </DataTable>
-      </CardContent>
-    </Card>
+          <template #icon><Icon :icon="tile.icon" :class="VERDICT_TEXT[tile.verdict]" /></template>
+        </KpiTile>
+      </StatGroup>
+
+      <div class="grid items-start gap-6 xl:grid-cols-3">
+        <CacheCapacity :used="displayStats?.total_size ?? 0" :max-size="displayStats?.max_cache_size ?? 0" :registries="registries" />
+        <DownloadTrend class="xl:col-span-2" />
+      </div>
+
+      <TopPackages />
+
+      <div class="grid gap-6 lg:grid-cols-2">
+        <ScannerHealth />
+        <Card class="min-w-0" data-testid="ws-event-feed">
+          <CardHeader>
+            <CardTitle as="h2">Live activity</CardTitle>
+            <CardDescription>What the proxy just did.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EmptyState
+              v-if="feedEvents.length === 0"
+              size="sm"
+              :icon="faBoxOpen"
+              title="Quiet at the desk"
+              description="Cached, downloaded and scanned packages appear here as they happen."
+            />
+            <ActivityFeed v-else :events="feedEvents" variant="compact" label="Live activity" />
+          </CardContent>
+        </Card>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
-import axios from 'axios'
+import { RouterLink } from 'vue-router'
 import {
   ActivityFeed,
-  BarChart,
-  Badge,
   Card,
-  CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  DataTable,
   EmptyState,
   ErrorState,
+  Icon,
   KpiTile,
   LoadingState,
   PageHeader,
-  SegmentedControl,
   StatGroup,
   StatusBadge,
   type ActivityEvent,
-  type DataTableColumn,
 } from '@perfect-design/ui'
 import type { IconDefinition } from '@perfect-design/ui/lib/icons-tools'
-import TrendChart from './TrendChart.vue'
-import { usePackageStore, type Package } from '../stores/packages'
+import CacheCapacity from './parts/CacheCapacity.vue'
+import DownloadTrend from './parts/DownloadTrend.vue'
+import PolicyLine from './parts/PolicyLine.vue'
+import ScannerHealth from './parts/ScannerHealth.vue'
+import TopPackages from './parts/TopPackages.vue'
+import { usePackageStore, type Stats } from '../stores/packages'
 import { useRealtimeStore } from '../stores/realtime'
 import type { EventType, RealtimeEvent } from '@/lib/ws'
-import { displayVersion, formatBytes, formatNumber, withVersionPrefix } from '@/lib/format'
+import { VERDICT_LABELS, VERDICT_TEXT, type Verdict } from '@/lib/verdict'
 import {
+  faBan,
   faBox,
   faBoxOpen,
-  faBoxesStacked,
   faChartLine,
+  faCircleCheck,
   faDownload,
-  faHardDrive,
+  faHourglassHalf,
   faShieldHalved,
   faTrash,
+  faUnlockKeyhole,
 } from '@/lib/icons'
 
 const store = usePackageStore()
-const { recentPackages, stats, loading, error } = storeToRefs(store)
+const { stats, registries, loading, error } = storeToRefs(store)
 
 const rt = useRealtimeStore()
 const { lastStats, events: rtEvents } = storeToRefs(rt)
 
-// Realtime stats override polled stats when available; otherwise fall back.
-const displayStats = computed(() => lastStats.value ?? stats.value)
+// A live stats frame can lack counters the polled response carries, so it overlays rather than replaces.
+const displayStats = computed<Stats | null>(() => {
+  if (!stats.value && !lastStats.value) return null
+  return { ...stats.value, ...lastStats.value } as Stats
+})
 
-const recentRealtimeEvents = computed<RealtimeEvent[]>(() => {
-  const list = rtEvents.value
-  return list.slice(Math.max(list.length - 5, 0)).reverse()
+interface VerdictTile {
+  verdict: Verdict
+  value: number
+  hint: string
+  to: string
+  icon: IconDefinition
+}
+
+const verdictTiles = computed<VerdictTile[]>(() => {
+  const s = displayStats.value
+  const total = s?.total_packages ?? 0
+  const scanned = s?.scanned_packages ?? 0
+  const held = s?.blocked_packages ?? 0
+  const bypassed = s?.bypassed_packages ?? 0
+  const tiles: Array<[Verdict, number, string, string, IconDefinition]> = [
+    ['cleared', Math.max(scanned - held - bypassed, 0), 'Scanned and served', '/packages?verdict=cleared', faCircleCheck],
+    ['held', held, 'Blocked with a 403', '/security?tab=held', faBan],
+    ['bypassed', bypassed, 'Served under an admin bypass', '/security?tab=bypassed', faUnlockKeyhole],
+    ['pending', Math.max(total - scanned, 0), 'No scan result yet', '/packages?verdict=pending', faHourglassHalf],
+  ]
+  return tiles.map(([verdict, value, hint, to, icon]) => ({ verdict, value, hint, to, icon }))
 })
 
 const EVENT_LABELS: Record<EventType, string> = {
@@ -173,23 +166,21 @@ const EVENT_ICONS: Record<EventType, IconDefinition> = {
   stats_update: faChartLine,
 }
 
-function iconForEvent(type: EventType): IconDefinition {
-  return EVENT_ICONS[type] ?? faChartLine
-}
+const FEED_LENGTH = 6
 
 const feedEvents = computed<ActivityEvent[]>(() =>
-  recentRealtimeEvents.value.map((evt, idx) => ({
-    id: `${evt.timestamp}-${idx}`,
-    action: labelForEvent(evt.type),
-    target: describeEvent(evt) || undefined,
-    time: evt.timestamp,
-    icon: iconForEvent(evt.type),
-  })),
+  rtEvents.value
+    .filter((evt) => evt.type !== 'stats_update')
+    .slice(-FEED_LENGTH)
+    .reverse()
+    .map((evt, idx) => ({
+      id: `${evt.timestamp}-${idx}`,
+      action: EVENT_LABELS[evt.type] ?? evt.type,
+      target: describeEvent(evt) || undefined,
+      time: evt.timestamp,
+      icon: EVENT_ICONS[evt.type] ?? faChartLine,
+    })),
 )
-
-function labelForEvent(type: EventType): string {
-  return EVENT_LABELS[type] ?? type
-}
 
 function describeEvent(evt: RealtimeEvent): string {
   const p = evt.payload
@@ -197,115 +188,16 @@ function describeEvent(evt: RealtimeEvent): string {
   const shown = typeof p.release_version === 'string' && p.release_version ? p.release_version : p.version
   const version = typeof shown === 'string' ? `@${shown}` : ''
   const registry = typeof p.registry === 'string' ? `[${p.registry}] ` : ''
-  if (evt.type === 'stats_update') return ''
-  if (name) return `${registry}${name}${version}`
-  return ''
+  return name ? `${registry}${name}${version}` : ''
 }
-
-// Chart periods and data
-const selectedPeriod = ref<string>('1day')
-const chartPeriods = [
-  { value: '1h', label: '1 hour' },
-  { value: '1day', label: '24 hours' },
-  { value: '7day', label: '7 days' },
-  { value: '30day', label: '30 days' },
-]
-
-// Time-series data from API
-interface TimeSeriesDataPoint {
-  timestamp: string
-  value: number
-}
-
-interface TimeSeriesStats {
-  period: string
-  registry: string
-  data_points: TimeSeriesDataPoint[]
-}
-
-const timeSeriesData = ref<TimeSeriesStats | null>(null)
-const chartLoading = ref(false)
-const chartError = ref<string | null>(null)
-
-// Fetch time-series data from API
-async function fetchTimeSeriesData() {
-  chartLoading.value = true
-  chartError.value = null
-  try {
-    const response = await axios.get(`/api/stats/timeseries?period=${selectedPeriod.value}`)
-    timeSeriesData.value = response.data
-  } catch (err) {
-    console.error('Failed to fetch time-series data:', err)
-    timeSeriesData.value = null
-    chartError.value = err instanceof Error ? err.message : 'Failed to load download activity'
-  } finally {
-    chartLoading.value = false
-  }
-}
-
-// Extract chart values from time-series data
-const chartData = computed(() => {
-  if (!timeSeriesData.value || !timeSeriesData.value.data_points) {
-    return []
-  }
-  return timeSeriesData.value.data_points.map(point => point.value)
-})
-
-const chartLabels = computed(() => chartData.value.map((_, index) => getChartLabel(index)))
-
-const packageColumns: DataTableColumn<Package>[] = [
-  { key: 'name', header: 'Package', rowHeader: true },
-  { key: 'version', header: 'Version', accessor: (pkg) => withVersionPrefix(displayVersion(pkg)) },
-  { key: 'registry', header: 'Registry' },
-  { key: 'size', header: 'Size', numeric: true, accessor: (pkg) => formatBytes(pkg.size) },
-  { key: 'download_count', header: 'Downloads', numeric: true, accessor: (pkg) => formatNumber(pkg.download_count) },
-]
 
 function refresh() {
   void store.fetchStats()
-  void store.fetchRecentPackages()
 }
 
-function getChartLabel(index: number): string {
-  // Use timestamp from data if available
-  if (timeSeriesData.value && timeSeriesData.value.data_points[index]) {
-    const date = new Date(timeSeriesData.value.data_points[index].timestamp)
-
-    switch (selectedPeriod.value) {
-      case '1h':
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-      case '1day':
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-      case '7day':
-        return date.toLocaleDateString('en-US', { weekday: 'short' })
-      case '30day':
-        return date.toLocaleDateString('en-US', { day: 'numeric' })
-      default:
-        return `${index}`
-    }
-  }
-
-  // Fallback to index-based labels
-  const labels: Record<string, (i: number) => string> = {
-    '1h': (i) => `${i * 5}m`,
-    '1day': (i) => `${i}:00`,
-    '7day': (i) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i] || `Day ${i + 1}`,
-    '30day': (i) => `${i + 1}`,
-  }
-  return labels[selectedPeriod.value]?.(index) || `${index}`
-}
-
-// Watch for period changes and fetch new data
-watch(selectedPeriod, () => {
-  fetchTimeSeriesData()
-})
-
-onMounted(async () => {
-  // Connect to realtime stream first so we can pick up live events while
-  // initial polling resolves. Singleton survives navigation, so we
-  // intentionally do not disconnect on unmount.
+onMounted(() => {
+  // The realtime client is a singleton that outlives this view, so it is never disconnected here.
   rt.connect()
-  await Promise.all([store.fetchStats(), store.fetchRecentPackages(), fetchTimeSeriesData()])
+  refresh()
 })
-
 </script>

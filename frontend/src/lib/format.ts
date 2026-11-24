@@ -40,3 +40,9 @@ export function displayVersion(pkg: { version: string; release_version?: string 
 export function withVersionPrefix(version: string): string {
   return version.startsWith('v') ? version : 'v' + version
 }
+
+/** Go cache keys end in `/@v/<version>.<ext>`; the module path is what a person recognises. */
+export function modulePath(name: string): string {
+  const at = name.indexOf('/@v/')
+  return at === -1 ? name : name.slice(0, at)
+}

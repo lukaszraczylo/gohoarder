@@ -9,6 +9,7 @@ export const STATS: Stats = {
   scanned_packages: 3,
   vulnerable_packages: 2,
   blocked_packages: 1,
+  bypassed_packages: 1,
 }
 
 export const REGISTRIES = {
@@ -34,6 +35,8 @@ export const PACKAGES: Package[] = [
       total: 4,
       scannedAt: '2026-01-03T10:05:00Z',
       isBlocked: true,
+      verdict: 'held',
+      reason: 'Package has 1 CRITICAL vulnerabilities (threshold: 0)',
     },
   },
   {
@@ -52,6 +55,7 @@ export const PACKAGES: Package[] = [
       total: 3,
       scannedAt: '2026-01-02T10:05:00Z',
       isBlocked: false,
+      verdict: 'cleared',
     },
   },
   {
@@ -63,7 +67,24 @@ export const PACKAGES: Package[] = [
     cached_at: '2026-01-01T10:00:00Z',
     last_accessed: '2026-01-01T10:00:00Z',
     download_count: 30,
-    vulnerabilities: { scanned: true, status: 'clean', total: 0, scannedAt: '2026-01-01T10:05:00Z' },
+    vulnerabilities: {
+      scanned: true,
+      status: 'vulnerable',
+      counts: { critical: 1, high: 0, moderate: 0, low: 0 },
+      total: 1,
+      scannedAt: '2026-01-01T10:05:00Z',
+      isBlocked: false,
+      verdict: 'bypassed',
+      bypass: {
+        id: 'bypass-1',
+        type: 'package',
+        target: 'pypi/requests@2.31.0',
+        reason: 'Vendored fix',
+        created_by: 'a.khan',
+        created_at: '2026-01-01T00:00:00Z',
+        expires_at: '2099-01-01T00:00:00Z',
+      },
+    },
   },
   {
     id: 'go-1',
@@ -74,7 +95,7 @@ export const PACKAGES: Package[] = [
     cached_at: '2026-01-04T10:00:00Z',
     last_accessed: '2026-01-04T10:00:00Z',
     download_count: 10,
-    vulnerabilities: { scanned: false, status: 'not_scanned' },
+    vulnerabilities: { scanned: false, status: 'not_scanned', isBlocked: false, verdict: 'pending' },
   },
 ]
 
@@ -89,6 +110,16 @@ export const TIMESERIES = {
 }
 
 export const VULNERABILITY_REPORT = {
+  decision: {
+    verdict: 'held',
+    blocked: true,
+    reason: 'Package has 1 CRITICAL vulnerabilities (threshold: 0)',
+    bypass: null,
+  },
+  scanners: [
+    { name: 'trivy', findings: 2, severity_counts: { critical: 1, high: 0, moderate: 0, low: 1 } },
+    { name: 'osv', findings: 3, severity_counts: { critical: 1, high: 1, moderate: 0, low: 1 } },
+  ],
   scanned: true,
   scanner: 'trivy+osv',
   scanned_at: '2026-01-03T10:05:00Z',
@@ -104,6 +135,7 @@ export const VULNERABILITY_REPORT = {
       description: 'A **low** severity sample description.',
       references: ['https://example.com/advisory/1'],
       fixed_in: '1.3.1',
+      detected_by: ['trivy', 'osv'],
       bypassed: false,
     },
     {
@@ -173,4 +205,46 @@ export const TREND = {
     { date: trendDay(-1), total_packages: 4, total_size: 7168, vulnerable_packages: 1, critical: 0, high: 1, moderate: 0, low: 0, blocked: null },
     { date: trendDay(0), total_packages: 4, total_size: 7168, vulnerable_packages: 2, critical: 1, high: 1, moderate: 0, low: 0, blocked: 1 },
   ],
+}
+
+export const SYSTEM = {
+  version: 'v1.8.0',
+  security: {
+    enabled: true,
+    fail_closed: true,
+    scan_on_download: true,
+    block_on_severity: 'none',
+    block_thresholds: { critical: 0, high: -1, moderate: -1, low: -1 },
+    scan_wait_timeout: 30,
+    scanners: [
+      { name: 'trivy', enabled: true, healthy: true, version: '0.58.1' },
+      { name: 'grype', enabled: true, healthy: false, version: '' },
+      { name: 'osv', enabled: true, healthy: true, version: '' },
+      { name: 'govulncheck', enabled: false, healthy: null, version: '' },
+    ],
+    rescan: { interval: 86400, active_window: 2592000, concurrency: 2, on_access: false },
+  },
+  upstreams: { go: 'https://proxy.golang.org', npm: 'https://registry.npmjs.org', pypi: 'https://pypi.org' },
+  cache: { max_size: 10737418240, idle_ttl: 2592000, default_ttl: 86400 },
+  prewarming: { enabled: true, interval: 3600, top_packages: 100 },
+}
+
+export const TOP_PACKAGES = {
+  packages: [
+    { Registry: 'npm', Name: 'left-pad', Downloads: 40, RecentDownloads: 12, Trend: 0.4 },
+    { Registry: 'go', Name: 'github.com/example/module/@v/v0.4.1.zip', Downloads: 10, RecentDownloads: 4, Trend: 0 },
+  ],
+  total: 2,
+}
+
+export const PACKAGE_ANALYTICS = {
+  package: {
+    Registry: 'npm',
+    Name: 'left-pad',
+    TotalDownloads: 40,
+    UniqueVersions: 2,
+    BytesServed: 81920,
+    FirstSeen: '2026-01-01T10:00:00Z',
+    LastDownload: '2026-01-03T10:00:00Z',
+  },
 }

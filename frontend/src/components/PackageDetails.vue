@@ -1,167 +1,108 @@
 <template>
   <div class="flex flex-col gap-6">
-    <PageHeader :title="packageName">
-      <template #back>
-        <Button variant="ghost" size="sm" :icon-start="faArrowLeft" @click="goBack">Back to packages</Button>
-      </template>
+    <PageHeader :title="packageName" back-href="/packages" back-label="Back to packages">
       <template #description>
         <span class="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{{ registry }}</Badge>
           <Badge variant="outline" class="font-mono">{{ withVersionPrefix(shownVersion) }}</Badge>
+          <VerdictBadge v-if="report" :verdict="verdict" />
         </span>
       </template>
     </PageHeader>
 
-    <LoadingState v-if="loading" variant="card" label="Loading vulnerability details..." />
+    <LoadingState v-if="loading" variant="card" label="Loading package details..." />
 
     <ErrorState
       v-else-if="error"
       variant="card"
-      title="Could not load vulnerability details"
+      title="Could not load this package"
       :message="error"
-      @retry="fetchVulnerabilities"
+      @retry="load"
     />
 
-    <template v-else-if="vulnerabilities">
+    <template v-else-if="report">
+      <Callout v-if="banner" :type="banner.type" :title="banner.title" data-testid="verdict-banner">{{ banner.body }}</Callout>
+
       <Card>
         <CardHeader>
-          <CardTitle as="h2">Security scan summary</CardTitle>
+          <CardTitle as="h2">Details</CardTitle>
         </CardHeader>
-        <CardContent class="flex flex-col gap-4">
-          <SeveritySummary :counts="severityCounts" label="Vulnerabilities by severity" />
-          <DescriptionList variant="inline" divided>
-            <DescriptionItem term="Scanned">{{ formatDate(vulnerabilities.scanned_at) }}</DescriptionItem>
-            <DescriptionItem term="Scanners">
-              <span class="flex flex-wrap gap-1">
-                <Badge v-for="scanner in scannerList" :key="scanner" variant="secondary">{{ scanner }}</Badge>
-              </span>
+        <CardContent>
+          <DescriptionList variant="grid" :columns="3" data-testid="package-meta">
+            <DescriptionItem term="Size">{{ row ? formatBytes(row.size) : 'Unknown' }}</DescriptionItem>
+            <DescriptionItem term="Downloads">{{ row ? formatNumber(row.download_count) : 'Unknown' }}</DescriptionItem>
+            <DescriptionItem term="Checksum (SHA-256)" :copyable="Boolean(row?.checksum_sha256)" :copy-text="row?.checksum_sha256">
+              <span class="break-all font-mono text-xs">{{ row?.checksum_sha256 || 'Not recorded' }}</span>
             </DescriptionItem>
-            <DescriptionItem v-if="bypassedCount > 0" term="Bypassed">
-              <StatusBadge status="bypassed" :label="`${bypassedCount} bypassed`" :tones="{ bypassed: 'success' }" />
+            <DescriptionItem term="Upstream">{{ upstream }}</DescriptionItem>
+            <DescriptionItem term="Cached">
+              <RelativeTime v-if="row" :datetime="row.cached_at" />
+              <template v-else>Unknown</template>
+            </DescriptionItem>
+            <DescriptionItem term="Last accessed">
+              <RelativeTime v-if="row" :datetime="row.last_accessed" />
+              <template v-else>Unknown</template>
+            </DescriptionItem>
+            <DescriptionItem term="Expiry">{{ expiry }}</DescriptionItem>
+            <DescriptionItem term="Last scanned">
+              <RelativeTime v-if="report.scanned_at" :datetime="report.scanned_at" />
+              <template v-else>Never</template>
             </DescriptionItem>
           </DescriptionList>
         </CardContent>
       </Card>
 
-      <Card v-if="vulnerabilityList.length === 0">
-        <CardContent>
-          <EmptyState
-            tone="success"
-            :icon="faCircleCheck"
-            title="No vulnerabilities found"
-            description="The scanners reported nothing for this package version."
+      <Tabs v-model="tab">
+        <TabsList aria-label="Package sections">
+          <TabsTrigger value="vulnerabilities">Vulnerabilities ({{ report.vulnerability_count }})</TabsTrigger>
+          <TabsTrigger value="inspectors">Inspectors</TabsTrigger>
+          <TabsTrigger value="downloads">Downloads</TabsTrigger>
+          <TabsTrigger value="bypass">Bypass</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="vulnerabilities" class="pt-4">
+          <div class="flex flex-col gap-4">
+            <SeveritySummary :counts="severityCounts" label="Findings by severity" />
+            <EmptyState
+              v-if="report.vulnerabilities.length === 0"
+              tone="success"
+              :icon="faCircleCheck"
+              :title="report.scanned ? 'No vulnerabilities found' : 'Not scanned yet'"
+              :description="report.scanned ? 'The scanners reported nothing for this package version.' : 'Findings appear here once a scan completes.'"
+            />
+            <VulnerabilityTable v-else :vulnerabilities="report.vulnerabilities" />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="inspectors" class="pt-4">
+          <InspectorMatrix :registry="registry" :results="report.scanners" :configured="configured" />
+        </TabsContent>
+
+        <TabsContent value="downloads" class="pt-4">
+          <DownloadsPanel :registry="registry" :name="packageName" :version="version" :download-count="row?.download_count ?? 0" />
+        </TabsContent>
+
+        <TabsContent value="bypass" class="pt-4">
+          <BypassPanel
+            :applied="report.decision.bypass"
+            :registry="registry"
+            :name="packageName"
+            :version="version"
+            :release-version="report.package?.release_version"
           />
-        </CardContent>
-      </Card>
-
-      <Card v-else>
-        <CardHeader>
-          <CardTitle as="h2">Detected vulnerabilities ({{ vulnerabilityList.length }})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table label="Detected vulnerabilities" layout="cards">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Severity</TableHead>
-                <TableHead>CVE ID</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Fix version</TableHead>
-                <TableHead align="center">Details</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <template v-for="(vuln, index) in vulnerabilityList" :key="vuln.id">
-                <TableRow class="cursor-pointer" :selected="expandedRows.has(index)" @click="toggleRow(index)">
-                  <TableCell label="Severity">
-                    <span class="flex flex-wrap items-center gap-2">
-                      <StatusBadge
-                        :status="vuln.severity"
-                        :tones="SEVERITY_TONES"
-                        :label="formatSeverityName(vuln.severity)"
-                      />
-                      <StatusBadge
-                        v-if="vuln.bypassed"
-                        status="bypassed"
-                        label="Bypassed"
-                        :tones="{ bypassed: 'success' }"
-                      />
-                    </span>
-                  </TableCell>
-                  <TableCell label="CVE ID" class="font-mono font-medium">{{ vuln.id }}</TableCell>
-                  <TableCell label="Description">
-                    <p class="m-0 line-clamp-2 break-words">{{ vuln.title || vuln.description }}</p>
-                  </TableCell>
-                  <TableCell label="Fix version">
-                    <span v-if="vuln.fixed_in">v{{ vuln.fixed_in }}</span>
-                    <span v-else class="text-muted-foreground">-</span>
-                  </TableCell>
-                  <TableCell label="Details" align="center">
-                    <IconButton
-                      size="icon-sm"
-                      :icon="expandedRows.has(index) ? faChevronUp : faChevronDown"
-                      :label="`${expandedRows.has(index) ? 'Hide' : 'Show'} details for ${vuln.id}`"
-                      :aria-expanded="expandedRows.has(index)"
-                      @click.stop="toggleRow(index)"
-                    />
-                  </TableCell>
-                </TableRow>
-
-                <TableRow v-if="expandedRows.has(index)" :hoverable="false">
-                  <TableCell :colspan="5">
-                    <div class="flex flex-col gap-4 py-2">
-                      <section>
-                        <h3 class="mb-2 text-sm font-semibold">Description</h3>
-                        <Markdown :source="vuln.description" :heading-offset="3" />
-                      </section>
-
-                      <Alert v-if="vuln.bypassed && vuln.bypass" variant="success">
-                        <AlertTitle>Bypass active</AlertTitle>
-                        <AlertDescription>
-                          <DescriptionList variant="grid" :columns="3" size="sm">
-                            <DescriptionItem term="Reason">{{ vuln.bypass.reason }}</DescriptionItem>
-                            <DescriptionItem term="By">{{ vuln.bypass.created_by }}</DescriptionItem>
-                            <DescriptionItem term="Expires">{{ formatDate(vuln.bypass.expires_at) }}</DescriptionItem>
-                          </DescriptionList>
-                        </AlertDescription>
-                      </Alert>
-
-                      <Alert v-if="vuln.fixed_in" variant="info">
-                        <AlertTitle>Fix available</AlertTitle>
-                        <AlertDescription>
-                          Upgrade to version <strong>{{ vuln.fixed_in }}</strong> or later.
-                        </AlertDescription>
-                      </Alert>
-
-                      <section v-if="vuln.references && vuln.references.length > 0">
-                        <h3 class="mb-2 text-sm font-semibold">References ({{ vuln.references.length }})</h3>
-                        <ul class="m-0 flex list-none flex-col gap-1 p-0 text-sm">
-                          <li v-for="(ref, refIndex) in vuln.references" :key="refIndex" class="break-all">
-                            <Link :href="ref" external>{{ ref }}</Link>
-                          </li>
-                        </ul>
-                      </section>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </template>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+        </TabsContent>
+      </Tabs>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
   Badge,
-  Button,
+  Callout,
   Card,
   CardContent,
   CardHeader,
@@ -170,129 +111,97 @@ import {
   DescriptionList,
   EmptyState,
   ErrorState,
-  IconButton,
-  Link,
   LoadingState,
-  Markdown,
   PageHeader,
-  StatusBadge,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  RelativeTime,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from '@perfect-design/ui'
 import SeveritySummary from './SeveritySummary.vue'
-import { formatDate, withVersionPrefix } from '@/lib/format'
-import { faArrowLeft, faChevronDown, faChevronUp, faCircleCheck } from '@/lib/icons'
-import { NO_VULNERABILITIES, SEVERITY_TONES, formatSeverityName, severityRank } from '@/lib/severity'
+import BypassPanel from './parts/BypassPanel.vue'
+import DownloadsPanel from './parts/DownloadsPanel.vue'
+import InspectorMatrix from './parts/InspectorMatrix.vue'
+import VerdictBadge from './parts/VerdictBadge.vue'
+import VulnerabilityTable from './parts/VulnerabilityTable.vue'
+import type { Package } from '../stores/packages'
+import { formatBytes, formatDate, formatNumber, formatDuration, withVersionPrefix } from '@/lib/format'
+import { faCircleCheck } from '@/lib/icons'
+import type { PackageReport } from '@/lib/report'
+import { NO_VULNERABILITIES } from '@/lib/severity'
+import { describePolicy, useSystem } from '@/lib/system'
+import type { Verdict } from '@/lib/verdict'
+import { verdictBanner } from '@/lib/verdictBanner'
 
-const router = useRouter()
+const TABS = ['vulnerabilities', 'inspectors', 'downloads', 'bypass'] as const
+type TabName = (typeof TABS)[number]
+
 const route = useRoute()
+const router = useRouter()
+const system = useSystem()
 
 const registry = computed(() => route.params.registry as string)
+// Names with slashes (scoped npm, Go modules) arrive as segments.
 const packageName = computed(() => {
-  // Handle package names with slashes (e.g., Go packages like github.com/user/repo)
-  const nameParam = route.params.name
-  if (Array.isArray(nameParam)) {
-    return nameParam.join('/')
-  }
-  return nameParam as string
+  const name = route.params.name
+  return Array.isArray(name) ? name.join('/') : (name as string)
 })
 const version = computed(() => route.params.version as string)
-const shownVersion = computed(() => vulnerabilities.value?.package?.release_version || version.value)
-
-interface BypassInfo {
-  id: string
-  reason: string
-  created_by: string
-  expires_at: string
-}
-
-interface Vulnerability {
-  id: string
-  severity: string
-  title: string
-  description: string
-  references: string[]
-  fixed_in: string
-  bypassed: boolean
-  bypass?: BypassInfo
-}
-
-interface VulnerabilityResponse {
-  package?: { release_version?: string }
-  scanned: boolean
-  scanner: string
-  scanned_at: string
-  status: string
-  vulnerabilities: Vulnerability[]
-  vulnerability_count: number
-  severity_counts: {
-    critical: number
-    high: number
-    moderate: number
-    low: number
-  }
-  bypassed_count: number
-}
+const shownVersion = computed(() => report.value?.package?.release_version || version.value)
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const vulnerabilities = ref<VulnerabilityResponse | null>(null)
-const expandedRows = ref<Set<number>>(new Set())
+const report = ref<PackageReport | null>(null)
+const row = ref<Package | null>(null)
 
-const vulnerabilityList = computed(() => {
-  const vulns = vulnerabilities.value?.vulnerabilities || []
-  // Sort by severity (most severe first)
-  return [...vulns].sort((a, b) => {
-    return severityRank(b.severity) - severityRank(a.severity)
-  })
+const tab = ref<TabName>(TABS.find((t) => t === route.query.tab) ?? 'vulnerabilities')
+watch(tab, (value) => void router.replace({ query: { ...route.query, tab: value === 'vulnerabilities' ? undefined : value } }))
+
+const severityCounts = computed(() => report.value?.severity_counts ?? NO_VULNERABILITIES)
+const configured = computed(() => system.info.value?.security.scanners ?? [])
+const verdict = computed<Verdict>(() => report.value?.decision.verdict ?? 'unscanned')
+
+const banner = computed(() => {
+  if (!report.value) return null
+  const sec = system.info.value?.security
+  return verdictBanner(report.value, sec ? describePolicy(sec) : '', sec?.fail_closed ?? false)
 })
 
-const severityCounts = computed(() => vulnerabilities.value?.severity_counts || NO_VULNERABILITIES)
-const bypassedCount = computed(() => vulnerabilities.value?.bypassed_count || 0)
+const upstream = computed(() => system.info.value?.upstreams[registry.value] || 'Not reported')
 
-// Parse scanner string into array of scanner names
-const scannerList = computed(() => {
-  if (!vulnerabilities.value?.scanner) return []
-  return vulnerabilities.value.scanner.split('+').map((s: string) => s.trim())
+// Idle eviction is the only expiry the server enforces on a cached package.
+const expiry = computed(() => {
+  const idle = system.info.value?.cache.idle_ttl
+  if (idle === undefined) return 'Not reported'
+  if (idle === 0) return 'Never. Idle eviction is off.'
+  const last = row.value ? Date.parse(row.value.last_accessed) : Number.NaN
+  const after = `Removed after ${formatDuration(idle)} without a request`
+  return Number.isNaN(last) ? after : `${after}, on ${formatDate(new Date(last + idle * 1000).toISOString())} if unused`
 })
 
-onMounted(() => {
-  fetchVulnerabilities()
-})
-
-async function fetchVulnerabilities() {
+async function load() {
   loading.value = true
   error.value = null
-  vulnerabilities.value = null
-
+  report.value = null
   try {
-    const response = await axios.get(
-      `/api/packages/${registry.value}/${packageName.value}/${version.value}/vulnerabilities`
-    )
-    // Store the response data
-    vulnerabilities.value = response.data
-  } catch (err: any) {
-    console.error('Failed to fetch vulnerabilities:', err)
-    error.value = err.response?.data?.error || err.message || 'Failed to load vulnerability details'
+    const encoded = `${registry.value}/${packageName.value}/${version.value}`
+    const [details, list] = await Promise.all([
+      axios.get<PackageReport>(`/api/packages/${encoded}/vulnerabilities`),
+      axios
+        .get<{ packages: Package[] }>(`/api/packages?registry=${encodeURIComponent(registry.value)}&q=${encodeURIComponent(packageName.value)}`)
+        .catch(() => null),
+      system.load(),
+    ])
+    report.value = details.data
+    row.value = list?.data.packages?.find((p) => p.name === packageName.value && p.version === version.value) ?? null
+  } catch (err: unknown) {
+    const e = err as { response?: { data?: { error?: string } }; message?: string }
+    error.value = e.response?.data?.error || e.message || 'Failed to load package details'
   } finally {
     loading.value = false
   }
 }
 
-function goBack() {
-  router.push('/packages')
-}
-
-function toggleRow(index: number) {
-  if (expandedRows.value.has(index)) {
-    expandedRows.value.delete(index)
-  } else {
-    expandedRows.value.add(index)
-  }
-}
-
+onMounted(load)
 </script>

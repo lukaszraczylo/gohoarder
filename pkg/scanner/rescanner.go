@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,7 +17,9 @@ type RescanWorker struct {
 	metadataStore metadata.MetadataStore
 	manager       *Manager
 	stopCh        chan struct{}
+	run           *forcedRun
 	stopOnce      sync.Once
+	runMu         sync.Mutex
 	interval      time.Duration
 	activeWindow  time.Duration
 	concurrency   int
@@ -195,6 +199,11 @@ func (w *RescanWorker) rescanOne(ctx context.Context, pkg *metadata.Package, cou
 		return
 	}
 
+	w.scanOne(ctx, pkg, counts)
+}
+
+// scanOne scans a package from its stored file without asking whether it is due.
+func (w *RescanWorker) scanOne(ctx context.Context, pkg *metadata.Package, counts *rescanCounts) {
 	log.Info().
 		Str("registry", pkg.Registry).
 		Str("package", pkg.Name).
@@ -280,4 +289,168 @@ func (w *RescanWorker) needsRescan(ctx context.Context, pkg *metadata.Package) (
 	}
 
 	return false, nil
+}
+
+// RescanScope selects the artifacts of a forced rescan.
+type RescanScope string
+
+// Scopes of a forced rescan.
+const (
+	// RescanVulnerable rescans artifacts whose latest scan holds findings.
+	RescanVulnerable RescanScope = "vulnerable"
+	// RescanAll rescans every cached artifact.
+	RescanAll RescanScope = "all"
+)
+
+// Valid reports whether s names a known scope.
+func (s RescanScope) Valid() bool { return s == RescanVulnerable || s == RescanAll }
+
+// Errors of a forced rescan.
+var (
+	ErrRescanRunning  = errors.New("a rescan is already running")
+	ErrRescanDisabled = errors.New("security scanning is disabled")
+)
+
+// forcedRun is the state of one forced rescan; counts update while it runs.
+type forcedRun struct {
+	started  time.Time
+	finished time.Time
+	scope    RescanScope
+	counts   rescanCounts
+	queued   int
+	running  bool
+}
+
+// RescanStatus is a snapshot of the latest forced rescan.
+type RescanStatus struct {
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Scope      RescanScope
+	Queued     int64
+	Done       int64
+	Failed     int64
+	Running    bool
+}
+
+// RescanNow queues a background rescan of the cached artifacts in scope, whatever the active
+// window or the age of their last scan, and returns how many it queued. ctx must outlive the caller.
+func (w *RescanWorker) RescanNow(ctx context.Context, scope RescanScope) (int, error) {
+	if !w.manager.enabled {
+		return 0, ErrRescanDisabled
+	}
+	run := &forcedRun{scope: scope, started: time.Now(), running: true}
+	w.runMu.Lock()
+	if w.run != nil && w.run.running {
+		w.runMu.Unlock()
+		return 0, ErrRescanRunning
+	}
+	w.run = run
+	w.runMu.Unlock()
+
+	packages, err := w.forcedPackages(ctx, scope)
+	if err != nil {
+		w.finish(run)
+		return 0, err
+	}
+	w.runMu.Lock()
+	run.queued = len(packages)
+	w.runMu.Unlock()
+	if len(packages) == 0 {
+		w.finish(run)
+		return 0, nil
+	}
+	go w.runForced(ctx, run, packages)
+	return len(packages), nil
+}
+
+func (w *RescanWorker) finish(run *forcedRun) {
+	w.runMu.Lock()
+	run.running = false
+	run.finished = time.Now()
+	w.runMu.Unlock()
+}
+
+func (w *RescanWorker) forcedPackages(ctx context.Context, scope RescanScope) ([]*metadata.Package, error) {
+	all, err := w.metadataStore.ListPackages(ctx, &metadata.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list packages for rescan: %w", err)
+	}
+	var vulnerable map[string]struct{}
+	if scope == RescanVulnerable {
+		summaries, err := w.metadataStore.GetScanSummaries(ctx, nil, false)
+		if err != nil {
+			return nil, fmt.Errorf("read scan summaries for rescan: %w", err)
+		}
+		vulnerable = make(map[string]struct{}, len(summaries))
+		for _, sum := range summaries {
+			if sum.Total > 0 {
+				vulnerable[sum.PackageID] = struct{}{}
+			}
+		}
+	}
+	out := make([]*metadata.Package, 0, len(all))
+	for _, pkg := range all {
+		if metadata.IsMetadataEntry(pkg.Registry, pkg.Name, pkg.Version) {
+			continue
+		}
+		if vulnerable != nil {
+			if _, ok := vulnerable[pkg.ID]; !ok {
+				continue
+			}
+		}
+		out = append(out, pkg)
+	}
+	return out, nil
+}
+
+func (w *RescanWorker) runForced(ctx context.Context, run *forcedRun, packages []*metadata.Package) {
+	defer w.finish(run)
+	jobs := make(chan *metadata.Package)
+	var wg sync.WaitGroup
+	for i := 0; i < w.concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pkg := range jobs {
+				w.scanOne(ctx, pkg, &run.counts)
+			}
+		}()
+	}
+dispatch:
+	for _, pkg := range packages {
+		select {
+		case jobs <- pkg:
+		case <-ctx.Done():
+			break dispatch
+		case <-w.stopCh:
+			break dispatch
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	log.Info().
+		Str("scope", string(run.scope)).
+		Int("queued", run.queued).
+		Int64("scanned", run.counts.scanned.Load()).
+		Int64("failed", run.counts.failed.Load()+run.counts.skipNoSource.Load()).
+		Msg("Forced rescan completed")
+}
+
+// Status reports the latest forced rescan; the zero value means none ran yet.
+func (w *RescanWorker) Status() RescanStatus {
+	w.runMu.Lock()
+	defer w.runMu.Unlock()
+	run := w.run
+	if run == nil {
+		return RescanStatus{}
+	}
+	return RescanStatus{
+		StartedAt:  run.started,
+		FinishedAt: run.finished,
+		Scope:      run.scope,
+		Queued:     int64(run.queued),
+		Done:       run.counts.scanned.Load(),
+		Failed:     run.counts.failed.Load() + run.counts.skipNoSource.Load(),
+		Running:    run.running,
+	}
 }

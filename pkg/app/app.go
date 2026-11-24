@@ -56,6 +56,7 @@ type App struct {
 	networkClient   *network.Client
 	scanManager     *scanner.Manager
 	rescanWorker    *scanner.RescanWorker
+	workerCtx       context.Context
 	analyticsEngine *analytics.Engine
 	wsServer        *websocket.Server
 	prewarmWorker   *prewarming.Worker
@@ -323,7 +324,8 @@ func (a *App) initializeComponents() error {
 	a.scanManager.SetFileSource(a.cache.ScanFile)
 
 	// Initialize rescan worker if enabled
-	if a.config.Security.Enabled && a.config.Security.RescanInterval > 0 {
+	// Built whenever scanning is on: an interval of 0 only turns off the periodic cycle, not admin rescans.
+	if a.config.Security.Enabled {
 		log.Info().Dur("interval", a.config.Security.RescanInterval).Msg("Initializing package rescan worker")
 		a.rescanWorker = scanner.NewRescanWorker(a.scanManager, a.metadata, a.config.Security.RescanInterval,
 			scanner.WithActiveWindow(a.config.Security.RescanActiveWindow),
@@ -497,6 +499,10 @@ func (a *App) setupServer() error {
 	a.app.Post("/api/admin/prewarming/trigger", a.requireAdmin, a.handlePrewarmingTrigger)
 	a.app.Post("/api/admin/prewarming/package", a.requireAdmin, a.handlePrewarmingPackage)
 
+	// Admin endpoints (forced rescan)
+	a.app.Post("/api/admin/rescan", a.requireAdmin, a.handleRescanTrigger)
+	a.app.Get("/api/admin/rescan/status", a.requireAdmin, a.handleRescanStatus)
+
 	// Admin endpoints (API key management)
 	a.app.Post("/api/admin/keys", a.requireAdmin, a.handleGenerateAPIKey)
 	a.app.Get("/api/admin/keys", a.requireAdmin, a.handleListAPIKeys)
@@ -625,6 +631,8 @@ func (a *App) setupServer() error {
 
 // startWorkers starts the background loops that live as long as ctx.
 func (a *App) startWorkers(ctx context.Context) {
+	a.workerCtx = ctx
+
 	// Without the event loop the broadcast channel fills after 256 events and websocket clients never register.
 	a.wsServer.Start(ctx)
 

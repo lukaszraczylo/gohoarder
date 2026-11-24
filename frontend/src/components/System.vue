@@ -48,6 +48,8 @@
         </Card>
       </div>
 
+      <RescanPanel :enabled="info.security.enabled" :concurrency="info.security.rescan.concurrency" />
+
       <Card>
         <CardHeader>
           <CardTitle as="h2">Inspectors</CardTitle>
@@ -130,6 +132,7 @@ import {
   type DataTableColumn,
 } from '@perfect-design/ui'
 import AdminKeyDialog from './parts/AdminKeyDialog.vue'
+import RescanPanel from './parts/RescanPanel.vue'
 import { useAdminKey } from '@/lib/adminKey'
 import { formatBytes, formatDuration } from '@/lib/format'
 import { faRotateRight } from '@/lib/icons'

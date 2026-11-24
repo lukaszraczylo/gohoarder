@@ -35,6 +35,7 @@ const API_KEY_STORAGE = 'admin_api_key'
 
 function respond(url: string) {
   if (url.startsWith('/api/system')) return { data: SYSTEM }
+  if (url.startsWith('/api/admin/rescan/status')) return { data: { enabled: true, running: false, scope: '', queued: 0, done: 0, failed: 0 } }
   if (url.startsWith('/api/analytics/package/')) return { data: PACKAGE_ANALYTICS }
   if (url.startsWith('/api/analytics/')) return { data: TOP_PACKAGES }
   if (url.startsWith('/api/stats/timeseries')) return { data: TIMESERIES }

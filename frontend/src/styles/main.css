@@ -66,6 +66,7 @@
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/Icon/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/IconButton/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/Link/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/primitives/Progress/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/ScrollArea/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/Spinner/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/primitives/StatusBadge/*.js";

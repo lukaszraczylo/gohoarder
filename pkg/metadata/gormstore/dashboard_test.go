@@ -296,7 +296,7 @@ func checkRegistryStats(t *testing.T, store *GORMStoreV2) {
 		got[s.Registry] = s
 	}
 	require.Equal(t, metadata.RegistryStat{Registry: "npm", Count: 6, Size: 100 + 110 + 300 + 900 + 10 + 20, Downloads: 3 + 1 + 7}, got["npm"], "the list page is excluded")
-	require.Equal(t, metadata.RegistryStat{Registry: "go", Count: 5, Size: 500 + 10 + 5 + 520 + 40, Downloads: 3}, got["go"])
+	require.Equal(t, metadata.RegistryStat{Registry: "go", Count: 3, Size: 500 + 520 + 40, Downloads: 3}, got["go"], "the .mod and .info files are excluded, as in GetStats")
 	require.Equal(t, metadata.RegistryStat{Registry: "pypi", Count: 2, Size: 80, Downloads: 4}, got["pypi"])
 }
 

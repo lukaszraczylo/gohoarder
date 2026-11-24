@@ -353,9 +353,8 @@ func (s *GORMStoreV2) GetRegistryStats(ctx context.Context) ([]metadata.Registry
 		Size       int64
 		Downloads  int64
 	}
-	if err := s.db.WithContext(ctx).Model(&PackageModel{}).
+	if err := artifactPackages(s.db.WithContext(ctx).Model(&PackageModel{})).
 		Select("registry_id, COUNT(*) AS count, COALESCE(SUM(size), 0) AS size, COALESCE(SUM(access_count), 0) AS downloads").
-		Where("version NOT IN ?", metadata.MetadataVersions).
 		Group("registry_id").Order("registry_id").
 		Scan(&rows).Error; err != nil {
 		return nil, errors.Wrap(err, errors.ErrCodeStorageFailure, "failed to aggregate registry stats")

@@ -132,7 +132,7 @@ func (s *Store) GetRegistryStats(ctx context.Context) ([]metadata.RegistryStat, 
 	byRegistry := map[string]*metadata.RegistryStat{}
 	var order []string
 	for _, p := range all {
-		if metadata.IsMetadataVersion(p.Version) {
+		if metadata.IsMetadataEntry(p.Registry, p.Name, p.Version) {
 			continue
 		}
 		st, ok := byRegistry[p.Registry]

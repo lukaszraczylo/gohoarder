@@ -70,7 +70,7 @@ func TestTrendingExcludesDownloadsOutsideBothWindows(t *testing.T) {
 	store := trendingStore(t)
 	pad := trendingPackage(t, store, "npm", "left-pad", "1.3.0")
 	trendingStat(t, store, &DownloadStatsDailyModel{}, pad, time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC), 50)
-	trendingStat(t, store, &DownloadStatsDailyModel{}, pad, time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC), 60)
+	trendingStat(t, store, &DownloadStatsDailyModel{}, pad, time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), 60)
 	trendingEvents(t, store, pad, trendingNow.Add(-time.Minute), 1)
 
 	got, err := store.GetTrendingPackages(context.Background(), 10)
@@ -142,4 +142,31 @@ func TestTrendingSurvivesAggregation(t *testing.T) {
 func TestDailyTimeIndexExists(t *testing.T) {
 	store := trendingStore(t)
 	require.True(t, store.db.Migrator().HasIndex(&DownloadStatsDailyModel{}, dailyTimeIndex))
+}
+
+// The day that holds the boundary is split: its rollup minus the hourly rows after the boundary.
+func TestTrendingCountsTheBoundaryDayOnce(t *testing.T) {
+	store := trendingStore(t)
+	pad := trendingPackage(t, store, "npm", "left-pad", "1.3.0")
+	// 5 downloads on Nov 17; 2 of them at 12:00, after the boundary at 10:00.
+	trendingStat(t, store, &DownloadStatsDailyModel{}, pad, time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC), 5)
+	trendingStat(t, store, &DownloadStatsHourlyModel{}, pad, time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC), 2)
+
+	got, err := store.GetTrendingPackages(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, []*metadata.TrendingPackage{{Registry: "npm", Name: "left-pad", Recent: 2, Previous: 3}}, got)
+}
+
+// Past noon the previous window takes six whole days, so it stays near 7 days long.
+func TestTrendingPreviousWindowStaysNearAWeek(t *testing.T) {
+	store := trendingStore(t)
+	store.now = func() time.Time { return time.Date(2026, 11, 24, 14, 30, 0, 0, time.UTC) }
+	pad := trendingPackage(t, store, "npm", "left-pad", "1.3.0")
+	trendingEvents(t, store, pad, store.now().Add(-time.Minute), 1)
+	trendingStat(t, store, &DownloadStatsDailyModel{}, pad, time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC), 40)
+	trendingStat(t, store, &DownloadStatsDailyModel{}, pad, time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC), 6)
+
+	got, err := store.GetTrendingPackages(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), got[0].Previous)
 }

@@ -22,15 +22,22 @@ type trendingRow struct {
 }
 
 // GetTrendingPackages ranks packages by downloads in the last 7 days, with the 7 days before
-// for the change. Downloads sit in raw events (current hour), hourly rows (last 7 days) and
-// daily rollups (older), the same layering GetTimeSeriesStats merges.
+// for the change. Downloads sit in raw events (current hour), hourly rows (kept 7 days) and
+// daily rollups (older), the same layering GetTimeSeriesStats merges. The previous window ends
+// exactly where the recent one starts: whole days come from the rollups, and the day that
+// holds the boundary is its rollup minus the hourly rows after the boundary.
 func (s *GORMStoreV2) GetTrendingPackages(ctx context.Context, limit int) ([]*metadata.TrendingPackage, error) {
 	now := s.clock().UTC()
-	since := now.Add(-trendingWindow)
-	// Daily rows hold whole days, so the previous window ends at the day boundary at or before since.
+	since := now.Add(-trendingWindow).Truncate(time.Hour)
+	boundaryDay := since.Truncate(24 * time.Hour)
+	// Whole days only: pick the count that keeps the previous window closest to 7 days.
+	fullDays := 7
+	if since.Sub(boundaryDay) >= 12*time.Hour {
+		fullDays = 6
+	}
 	// The 12h shift keeps midnight rows on the right side whether the driver stores a date or a timestamp.
-	prevEnd := since.Truncate(24 * time.Hour).Add(-12 * time.Hour)
-	prevStart := prevEnd.Add(-trendingWindow)
+	shift := 12 * time.Hour
+	fullFrom, fullTo := boundaryDay.AddDate(0, 0, -fullDays).Add(-shift), boundaryDay.Add(-shift)
 
 	hourly, err := s.packageDownloads(ctx, "download_stats_hourly s", "SUM(s.download_count)", "s.time_bucket >= ?", since)
 	if err != nil {
@@ -40,9 +47,28 @@ func (s *GORMStoreV2) GetTrendingPackages(ctx context.Context, limit int) ([]*me
 	if err != nil {
 		return nil, err
 	}
-	daily, err := s.packageDownloads(ctx, "download_stats_daily s", "SUM(s.download_count)", "s.time_bucket >= ? AND s.time_bucket < ?", prevStart, prevEnd)
+	daily, err := s.packageDownloads(ctx, "download_stats_daily s", "SUM(s.download_count)", "s.time_bucket >= ? AND s.time_bucket < ?", fullFrom, fullTo)
 	if err != nil {
 		return nil, err
+	}
+	partialDay, err := s.packageDownloads(ctx, "download_stats_daily s", "SUM(s.download_count)", "s.time_bucket >= ? AND s.time_bucket < ?", fullTo, boundaryDay.Add(shift))
+	if err != nil {
+		return nil, err
+	}
+	afterBoundary, err := s.packageDownloads(ctx, "download_stats_hourly s", "SUM(s.download_count)", "s.time_bucket >= ? AND s.time_bucket < ?", since, boundaryDay.Add(24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+	// Hourly rows trail the rollup, so the difference can dip below zero.
+	after := make(map[trendingRow]int64, len(afterBoundary))
+	for _, r := range afterBoundary {
+		after[trendingRow{Registry: r.Registry, Name: r.Name, Version: r.Version}] += r.Count
+	}
+	for _, r := range partialDay {
+		left := r.Count - after[trendingRow{Registry: r.Registry, Name: r.Name, Version: r.Version}]
+		if left > 0 {
+			daily = append(daily, trendingRow{Registry: r.Registry, Name: r.Name, Version: r.Version, Count: left})
+		}
 	}
 
 	totals := make(map[trendingKey]*metadata.TrendingPackage)

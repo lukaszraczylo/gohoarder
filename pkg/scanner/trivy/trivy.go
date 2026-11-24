@@ -110,15 +110,23 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		defer cancel()
 	}
 
-	// Determine scan type based on registry
 	scanType := s.determineScanType(registry, filePath)
+	target := filePath
+	if registry == "npm" {
+		// trivy does not unpack archives; the node-pkg analyzer needs an installed tree.
+		root, err := unpackNPM(filePath, packageName)
+		if err != nil {
+			return nil, fmt.Errorf("prepare npm package for trivy: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(root) }()
+		target = root
+	}
 
-	// Build Trivy command
 	args := []string{
 		scanType,
 		"--format", "json",
 		"--quiet",
-		filePath,
+		target,
 	}
 
 	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec G204 -- trivy command with controlled arguments
@@ -166,7 +174,7 @@ func (s *Scanner) determineScanType(registry, filePath string) string {
 
 	switch registry {
 	case "npm":
-		return "fs" // Filesystem scan for npm packages
+		return "rootfs" // rootfs enables the node-pkg analyzer; fs reads lockfiles only
 	case "pypi":
 		return "fs" // Filesystem scan for Python packages
 	case "go":

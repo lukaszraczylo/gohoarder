@@ -135,7 +135,7 @@ html {
   }
 }
 
-/* The library's sort button bleeds 0.5rem past its cell, more than the workbench cell padding, so the last column adds a horizontal scrollbar. */
+/* The library sort button is 1rem wider than its cell but shifts left only by the cell padding, so the last column overflows the table. */
 [data-slot='table-head']:last-child {
-  padding-right: 0.5rem;
+  padding-right: calc(1rem - var(--spacing) * 2);
 }

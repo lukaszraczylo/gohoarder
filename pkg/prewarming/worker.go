@@ -8,10 +8,27 @@ import (
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/analytics"
-	"github.com/lukaszraczylo/gohoarder/pkg/cache"
-	"github.com/lukaszraczylo/gohoarder/pkg/network"
 	"github.com/rs/zerolog/log"
 )
+
+// LatestVersion asks the Fetcher to resolve the newest release itself.
+const LatestVersion = "latest"
+
+const (
+	fetchTimeout     = 5 * time.Minute
+	trendingPackages = 50
+)
+
+// Fetcher pulls an artifact through the proxy path, so it is cached and scanned like a client request.
+type Fetcher interface {
+	Fetch(ctx context.Context, pkg PackageInfo) error
+}
+
+// Popularity ranks packages by recent demand.
+type Popularity interface {
+	GetTopPackages(limit int) []analytics.PopularPackage
+	GetTrendingPackages(limit int) []analytics.PopularPackage
+}
 
 // PackageInfo represents a package to pre-warm
 type PackageInfo struct {
@@ -23,21 +40,21 @@ type PackageInfo struct {
 
 // Worker handles background pre-warming of popular packages
 type Worker struct {
-	cache         *cache.Manager
-	analytics     *analytics.Engine
-	client        *network.Client
-	stopChan      chan struct{}
+	popularity    Popularity
+	fetcher       Fetcher
+	cancel        context.CancelFunc
 	wg            sync.WaitGroup
+	mu            sync.Mutex
 	interval      time.Duration
 	maxConcurrent int
+	topPackages   int
 	enabled       bool
 }
 
 // Config holds pre-warming worker configuration
 type Config struct {
-	CacheManager  *cache.Manager
-	Analytics     *analytics.Engine
-	NetworkClient *network.Client
+	Popularity    Popularity
+	Fetcher       Fetcher
 	Interval      time.Duration
 	MaxConcurrent int
 	TopPackages   int
@@ -57,13 +74,12 @@ func NewWorker(cfg Config) *Worker {
 	}
 
 	worker := &Worker{
-		cache:         cfg.CacheManager,
-		analytics:     cfg.Analytics,
-		client:        cfg.NetworkClient,
+		popularity:    cfg.Popularity,
+		fetcher:       cfg.Fetcher,
 		interval:      cfg.Interval,
 		maxConcurrent: cfg.MaxConcurrent,
+		topPackages:   cfg.TopPackages,
 		enabled:       cfg.Enabled,
-		stopChan:      make(chan struct{}),
 	}
 
 	if cfg.Enabled {
@@ -78,15 +94,26 @@ func NewWorker(cfg Config) *Worker {
 	return worker
 }
 
-// Start begins the pre-warming worker
+// Start begins the pre-warming worker; it is a no-op when disabled or already started.
 func (w *Worker) Start(ctx context.Context) {
 	if !w.enabled {
 		log.Debug().Msg("Pre-warming worker is disabled, not starting")
 		return
 	}
+	if w.fetcher == nil || w.popularity == nil {
+		log.Warn().Msg("Pre-warming worker has no fetcher or popularity source, not starting")
+		return
+	}
 
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.cancel != nil {
+		return
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	w.cancel = cancel
 	w.wg.Add(1)
-	go w.run(ctx)
+	go w.run(runCtx)
 	log.Info().Msg("Pre-warming worker started")
 }
 
@@ -97,15 +124,11 @@ func (w *Worker) run(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Run immediately on start
 	w.prewarmPopularPackages(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info().Msg("Pre-warming worker stopping due to context cancellation")
-			return
-		case <-w.stopChan:
 			log.Info().Msg("Pre-warming worker stopped")
 			return
 		case <-ticker.C:
@@ -119,14 +142,14 @@ func (w *Worker) prewarmPopularPackages(ctx context.Context) {
 	log.Info().Msg("Starting pre-warming cycle")
 
 	// Get popular packages from analytics
-	popularPackages := w.analytics.GetTopPackages(100)
+	popularPackages := w.popularity.GetTopPackages(w.topPackages)
 	if len(popularPackages) == 0 {
 		log.Debug().Msg("No popular packages found for pre-warming")
 		return
 	}
 
 	// Get trending packages for additional candidates
-	trendingPackages := w.analytics.GetTrendingPackages(50)
+	trendingPackages := w.popularity.GetTrendingPackages(trendingPackages)
 
 	// Combine and deduplicate
 	packages := w.combinePackages(popularPackages, trendingPackages)
@@ -141,7 +164,7 @@ func (w *Worker) prewarmPopularPackages(ctx context.Context) {
 		workChan <- PackageInfo{
 			Registry: pkg.Registry,
 			Name:     pkg.Name,
-			Version:  "latest", // Pre-warm latest version
+			Version:  LatestVersion,
 			Priority: int(pkg.Downloads),
 		}
 	}
@@ -168,13 +191,13 @@ func (w *Worker) processPackages(ctx context.Context, workerID int, workChan <-c
 		case <-ctx.Done():
 			return
 		default:
-			w.prewarmPackage(ctx, pkg, workerID)
+			_ = w.prewarmPackage(ctx, pkg, workerID) // logged inside
 		}
 	}
 }
 
-// prewarmPackage fetches and caches a single package
-func (w *Worker) prewarmPackage(ctx context.Context, pkg PackageInfo, workerID int) {
+// prewarmPackage fetches a single package through the proxy path
+func (w *Worker) prewarmPackage(ctx context.Context, pkg PackageInfo, workerID int) error {
 	log.Debug().
 		Int("worker", workerID).
 		Str("registry", pkg.Registry).
@@ -182,60 +205,24 @@ func (w *Worker) prewarmPackage(ctx context.Context, pkg PackageInfo, workerID i
 		Str("version", pkg.Version).
 		Msg("Pre-warming package")
 
-	// Build URL based on registry
-	url := w.buildPackageURL(pkg)
-	if url == "" {
-		log.Warn().
-			Str("registry", pkg.Registry).
-			Str("package", pkg.Name).
-			Msg("Cannot build URL for registry")
-		return
-	}
-
-	// Fetch package from upstream
-	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	reqCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
-	body, statusCode, err := w.client.Get(reqCtx, url, nil)
-	if err != nil {
+	if err := w.fetcher.Fetch(reqCtx, pkg); err != nil {
 		log.Error().
 			Err(err).
+			Str("registry", pkg.Registry).
 			Str("package", pkg.Name).
-			Msg("Failed to fetch package for pre-warming")
-		return
-	}
-	defer func() { _ = body.Close() }() // #nosec G104 -- Cleanup, error not critical
-
-	if statusCode != 200 {
-		log.Warn().
-			Int("status", statusCode).
-			Str("package", pkg.Name).
-			Msg("Non-200 response for package")
-		return
+			Msg("Failed to pre-warm package")
+		return err
 	}
 
-	// Cache the package
-	// In a real implementation, this would read the response body and store it
 	log.Info().
+		Str("registry", pkg.Registry).
 		Str("package", pkg.Name).
 		Str("version", pkg.Version).
-		Msg("Successfully pre-warmed package")
-}
-
-// buildPackageURL builds the upstream URL for a package
-func (w *Worker) buildPackageURL(pkg PackageInfo) string {
-	// This is simplified - in reality, each registry has different URL patterns
-	switch pkg.Registry {
-	case "npm":
-		return "https://registry.npmjs.org/" + pkg.Name
-	case "pypi":
-		return "https://pypi.org/simple/" + pkg.Name + "/"
-	case "go":
-		// Go modules use different URL patterns
-		return "https://proxy.golang.org/" + pkg.Name + "/@latest"
-	default:
-		return ""
-	}
+		Msg("Pre-warmed package")
+	return nil
 }
 
 // combinePackages merges popular and trending packages, removing duplicates
@@ -262,22 +249,25 @@ func (w *Worker) combinePackages(popular, trending []analytics.PopularPackage) [
 	return result
 }
 
-// Stop gracefully stops the pre-warming worker
+// Stop stops the worker and waits for it; it is safe on a nil, disabled or never-started worker.
 func (w *Worker) Stop() {
-	if !w.enabled {
+	if w == nil {
 		return
 	}
-
-	log.Info().Msg("Stopping pre-warming worker")
-	close(w.stopChan)
+	w.mu.Lock()
+	cancel := w.cancel
+	w.mu.Unlock()
+	if cancel != nil {
+		log.Info().Msg("Stopping pre-warming worker")
+		cancel()
+	}
 	w.wg.Wait()
-	log.Info().Msg("Pre-warming worker stopped")
 }
 
 // TriggerPrewarm manually triggers a pre-warming cycle
 func (w *Worker) TriggerPrewarm(ctx context.Context) {
-	if !w.enabled {
-		log.Warn().Msg("Cannot trigger pre-warm: worker is disabled")
+	if !w.enabled || w.fetcher == nil || w.popularity == nil {
+		log.Warn().Msg("Cannot trigger pre-warm: worker is disabled or unconfigured")
 		return
 	}
 
@@ -287,8 +277,8 @@ func (w *Worker) TriggerPrewarm(ctx context.Context) {
 
 // PrewarmPackage pre-warms a specific package
 func (w *Worker) PrewarmPackage(ctx context.Context, registry, name, version string) error {
-	if !w.enabled {
-		log.Warn().Msg("Pre-warming worker is disabled")
+	if !w.enabled || w.fetcher == nil {
+		log.Warn().Msg("Pre-warming worker is disabled or unconfigured")
 		return nil
 	}
 
@@ -299,8 +289,7 @@ func (w *Worker) PrewarmPackage(ctx context.Context, registry, name, version str
 		Priority: 100,
 	}
 
-	w.prewarmPackage(ctx, pkg, 0)
-	return nil
+	return w.prewarmPackage(ctx, pkg, 0)
 }
 
 // GetStatus returns the current status of the pre-warming worker

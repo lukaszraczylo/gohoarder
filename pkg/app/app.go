@@ -60,6 +60,7 @@ type App struct {
 	analyticsEngine *analytics.Engine
 	wsServer        *websocket.Server
 	prewarmWorker   *prewarming.Worker
+	prewarmFetcher  *prewarming.ProxyFetcher
 	cdnMiddleware   *cdn.Middleware
 }
 
@@ -348,14 +349,14 @@ func (a *App) initializeComponents() error {
 	// Initialize pre-warming worker. Operator-controlled via cfg.Prewarming;
 	// defaults are baked into config.Default() so unset fields stay sane.
 	log.Info().Msg("Initializing pre-warming worker")
+	a.prewarmFetcher = prewarming.NewProxyFetcher()
 	a.prewarmWorker = prewarming.NewWorker(prewarming.Config{
 		Enabled:       a.config.Prewarming.Enabled,
 		Interval:      a.config.Prewarming.Interval,
 		MaxConcurrent: a.config.Prewarming.MaxConcurrent,
 		TopPackages:   a.config.Prewarming.TopPackages,
-		CacheManager:  a.cache,
-		Analytics:     a.analyticsEngine,
-		NetworkClient: a.networkClient,
+		Popularity:    a.analyticsEngine,
+		Fetcher:       a.prewarmFetcher,
 	})
 
 	// Initialize CDN middleware
@@ -536,7 +537,9 @@ func (a *App) setupServer() error {
 			SumDBURL:  sumDB,
 			CredStore: credStore,
 		})
-		goProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/go", goProxyHandler))
+		goProxyMounted := http.StripPrefix("/go", goProxyHandler)
+		a.prewarmFetcher.Mount("go", goProxyMounted)
+		goProxyWithCDN := a.cdnMiddleware.Handler(goProxyMounted)
 		if authEnabled {
 			a.app.All("/go/*", mwAuth, adaptor.HTTPHandler(goProxyWithCDN))
 		} else {
@@ -552,7 +555,9 @@ func (a *App) setupServer() error {
 		npmProxyHandler := npm.New(a.cache, a.networkClient, npm.Config{
 			Upstream: npmUpstream,
 		})
-		npmProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/npm", npmProxyHandler))
+		npmProxyMounted := http.StripPrefix("/npm", npmProxyHandler)
+		a.prewarmFetcher.Mount("npm", npmProxyMounted)
+		npmProxyWithCDN := a.cdnMiddleware.Handler(npmProxyMounted)
 		a.app.Use("/npm", func(c fiber.Ctx) error {
 			if canonical := npm.CanonicalPath(c.Path()); canonical != c.Path() {
 				c.Path(canonical)
@@ -574,7 +579,9 @@ func (a *App) setupServer() error {
 		pypiProxyHandler := pypi.New(a.cache, a.networkClient, pypi.Config{
 			Upstream: pypiUpstream,
 		})
-		pypiProxyWithCDN := a.cdnMiddleware.Handler(http.StripPrefix("/pypi", pypiProxyHandler))
+		pypiProxyMounted := http.StripPrefix("/pypi", pypiProxyHandler)
+		a.prewarmFetcher.Mount("pypi", pypiProxyMounted)
+		pypiProxyWithCDN := a.cdnMiddleware.Handler(pypiProxyMounted)
 		if authEnabled {
 			a.app.All("/pypi/*", mwAuth, adaptor.HTTPHandler(pypiProxyWithCDN))
 		} else {
@@ -631,6 +638,9 @@ func (a *App) startWorkers(ctx context.Context) {
 	if a.rescanWorker != nil {
 		go a.rescanWorker.Start(ctx)
 	}
+
+	// Start is a no-op unless prewarming.enabled is set.
+	a.prewarmWorker.Start(ctx)
 }
 
 func (a *App) Run() error {

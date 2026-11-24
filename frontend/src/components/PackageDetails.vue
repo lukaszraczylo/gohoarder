@@ -190,15 +190,13 @@ async function load() {
   report.value = null
   try {
     const encoded = `${registry.value}/${packageName.value}/${version.value}`
-    const [details, list] = await Promise.all([
+    const [details, single] = await Promise.all([
       axios.get<PackageReport>(`/api/packages/${encoded}/vulnerabilities`),
-      axios
-        .get<{ packages: Package[] }>(`/api/packages?registry=${encodeURIComponent(registry.value)}&q=${encodeURIComponent(packageName.value)}`)
-        .catch(() => null),
+      axios.get<Package>(`/api/packages/${encoded}`).catch(() => null),
       system.load(),
     ])
     report.value = details.data
-    row.value = list?.data.packages?.find((p) => p.name === packageName.value && p.version === version.value) ?? null
+    row.value = single?.data ?? null
   } catch (err: unknown) {
     const e = err as { response?: { data?: { error?: string } }; message?: string }
     error.value = e.response?.data?.error || e.message || 'Failed to load package details'

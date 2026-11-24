@@ -43,6 +43,12 @@ function respond(url: string) {
   if (url.endsWith('/vulnerabilities')) return { data: VULNERABILITY_REPORT }
   if (url.startsWith('/api/admin/bypasses')) return { data: { bypasses: BYPASSES } }
   if (url.includes('layout=rows')) return { data: serveRows(url, PACKAGES) }
+  const single = /^\/api\/packages\/([^/]+)\/(.+)\/([^/?]+)$/.exec(url)
+  if (single) {
+    const row = PACKAGES.find((p) => p.registry === single[1] && p.name === single[2] && p.version === single[3])
+    if (!row) throw Object.assign(new Error('not found'), { response: { status: 404 } })
+    return { data: row }
+  }
   if (url.startsWith('/api/packages')) return { data: { packages: PACKAGES } }
   throw new Error(`unexpected request: ${url}`)
 }
@@ -159,6 +165,15 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Bypass active')
     expect(wrapper.text()).toContain('No fix available')
+  })
+
+  it('PackageDetails reads its own row, not the grouped package list', async () => {
+    const { wrapper, problems } = await smoke(PackageDetails, '/package/npm/left-pad/1.3.0')
+    expect(problems).toEqual([])
+    const urls = vi.mocked(axios.get).mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain('/api/packages/npm/left-pad/1.3.0')
+    expect(urls.filter((u) => u.startsWith('/api/packages?'))).toEqual([])
+    expect(wrapper.text()).toContain('2 KB')
   })
 
   it('PackageDetails Inspectors tab shows one row per scanner', async () => {
@@ -381,6 +396,7 @@ describe('PyPI rows show the release version, not the file name', () => {
         return { data: { ...VULNERABILITY_REPORT, package: { release_version: '1.17.0' } } } as never
       }
       if (url.includes('layout=rows')) return { data: serveRows(url, [SIX as never]) } as never
+      if (url === `/api/packages/pypi/six/${FILE}`) return { data: SIX } as never
       if (url.startsWith('/api/packages')) return { data: { packages: [SIX] } } as never
       return respond(url) as never
     })

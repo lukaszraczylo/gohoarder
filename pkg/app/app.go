@@ -542,9 +542,9 @@ func (a *App) setupServer() error {
 		a.prewarmFetcher.Mount("go", goProxyMounted)
 		goProxyWithCDN := a.cdnMiddleware.Handler(goProxyMounted)
 		if authEnabled {
-			a.app.All("/go/*", mwAuth, adaptor.HTTPHandler(goProxyWithCDN))
+			a.app.All("/go/*", mwAuth, proxyHandler(goProxyWithCDN))
 		} else {
-			a.app.All("/go/*", adaptor.HTTPHandler(goProxyWithCDN))
+			a.app.All("/go/*", proxyHandler(goProxyWithCDN))
 		}
 	}
 
@@ -566,9 +566,9 @@ func (a *App) setupServer() error {
 			return c.Next()
 		})
 		if authEnabled {
-			a.app.All("/npm/*", mwAuth, adaptor.HTTPHandler(npmProxyWithCDN))
+			a.app.All("/npm/*", mwAuth, proxyHandler(npmProxyWithCDN))
 		} else {
-			a.app.All("/npm/*", adaptor.HTTPHandler(npmProxyWithCDN))
+			a.app.All("/npm/*", proxyHandler(npmProxyWithCDN))
 		}
 	}
 
@@ -584,9 +584,9 @@ func (a *App) setupServer() error {
 		a.prewarmFetcher.Mount("pypi", pypiProxyMounted)
 		pypiProxyWithCDN := a.cdnMiddleware.Handler(pypiProxyMounted)
 		if authEnabled {
-			a.app.All("/pypi/*", mwAuth, adaptor.HTTPHandler(pypiProxyWithCDN))
+			a.app.All("/pypi/*", mwAuth, proxyHandler(pypiProxyWithCDN))
 		} else {
-			a.app.All("/pypi/*", adaptor.HTTPHandler(pypiProxyWithCDN))
+			a.app.All("/pypi/*", proxyHandler(pypiProxyWithCDN))
 		}
 	}
 

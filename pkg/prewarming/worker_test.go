@@ -132,3 +132,57 @@ func TestPrewarmPackagePassesExplicitVersionAndReturnsError(t *testing.T) {
 	require.ErrorContains(t, err, "boom")
 	assert.Equal(t, "4.17.21", f.got["npm:lodash"].Version)
 }
+
+func drain(ch <-chan PackageInfo, want int) int {
+	n := 0
+	for n < want {
+		select {
+		case <-ch:
+			n++
+		case <-time.After(2 * time.Second):
+			return n
+		}
+	}
+	return n
+}
+
+func TestTriggerPrewarmOutlivesACancelledCallerContext(t *testing.T) {
+	f := newFakeFetcher()
+	w := NewWorker(Config{Enabled: true, Fetcher: f, Popularity: samplePopularity(), Interval: time.Hour})
+	w.Start(context.Background())
+	defer w.Stop()
+	require.Equal(t, 3, drain(f.calls, 3), "initial cycle")
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w.TriggerPrewarm(reqCtx)
+
+	assert.Equal(t, 3, drain(f.calls, 3), "a request context ending must not cancel the manual cycle")
+}
+
+func TestTriggerPrewarmWithoutStartIgnoresCallerCancellation(t *testing.T) {
+	f := newFakeFetcher()
+	w := NewWorker(Config{Enabled: true, Fetcher: f, Popularity: samplePopularity()})
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w.TriggerPrewarm(reqCtx)
+
+	assert.Equal(t, 3, drain(f.calls, 3))
+	w.wg.Wait()
+}
+
+func TestStopEndsAManualCycle(t *testing.T) {
+	f := newFakeFetcher()
+	w := NewWorker(Config{Enabled: true, Fetcher: f, Popularity: samplePopularity(), Interval: time.Hour})
+	w.Start(context.Background())
+	w.TriggerPrewarm(context.Background())
+
+	done := make(chan struct{})
+	go func() { w.Stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not wait for the manual cycle to end")
+	}
+}

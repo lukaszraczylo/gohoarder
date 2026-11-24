@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog/log"
 )
@@ -18,8 +20,7 @@ func (a *App) handlePrewarmingStatus(c fiber.Ctx) error {
 func (a *App) handlePrewarmingTrigger(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 
-	ctx := c.Context()
-	a.prewarmWorker.TriggerPrewarm(ctx)
+	a.prewarmWorker.TriggerPrewarm(context.Background())
 
 	log.Info().Msg("Pre-warming manually triggered via API")
 

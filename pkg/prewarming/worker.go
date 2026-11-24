@@ -43,6 +43,7 @@ type Worker struct {
 	popularity    Popularity
 	fetcher       Fetcher
 	cancel        context.CancelFunc
+	runCtx        context.Context
 	wg            sync.WaitGroup
 	mu            sync.Mutex
 	interval      time.Duration
@@ -112,6 +113,7 @@ func (w *Worker) Start(ctx context.Context) {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	w.cancel = cancel
+	w.runCtx = runCtx
 	w.wg.Add(1)
 	go w.run(runCtx)
 	log.Info().Msg("Pre-warming worker started")
@@ -264,7 +266,8 @@ func (w *Worker) Stop() {
 	w.wg.Wait()
 }
 
-// TriggerPrewarm manually triggers a pre-warming cycle
+// TriggerPrewarm runs one cycle in the background. The cycle outlives ctx, which is
+// usually a request context, and ends when the worker stops.
 func (w *Worker) TriggerPrewarm(ctx context.Context) {
 	if !w.enabled || w.fetcher == nil || w.popularity == nil {
 		log.Warn().Msg("Cannot trigger pre-warm: worker is disabled or unconfigured")
@@ -272,7 +275,17 @@ func (w *Worker) TriggerPrewarm(ctx context.Context) {
 	}
 
 	log.Info().Msg("Manual pre-warming triggered")
-	go w.prewarmPopularPackages(ctx)
+	w.mu.Lock()
+	cycleCtx := w.runCtx
+	w.mu.Unlock()
+	if cycleCtx == nil {
+		cycleCtx = context.WithoutCancel(ctx)
+	}
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.prewarmPopularPackages(cycleCtx)
+	}()
 }
 
 // PrewarmPackage pre-warms a specific package

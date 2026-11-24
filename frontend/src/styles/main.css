@@ -134,3 +134,8 @@ html {
     scroll-behavior: auto !important;
   }
 }
+
+/* The library's sort button bleeds 0.5rem past its cell, more than the workbench cell padding, so the last column adds a horizontal scrollbar. */
+[data-slot='table-head']:last-child {
+  padding-right: 0.5rem;
+}

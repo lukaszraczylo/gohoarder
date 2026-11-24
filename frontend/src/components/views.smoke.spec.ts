@@ -12,7 +12,7 @@ import Insights from './Insights.vue'
 import System from './System.vue'
 import VulnerabilityBadge from './VulnerabilityBadge.vue'
 import { __resetSystem } from '@/lib/system'
-import { usePackageStore } from '@/stores/packages'
+import { serveRows } from '@/test/rowsServer'
 import { __resetRealtimeSingleton, useRealtimeStore } from '@/stores/realtime'
 import {
   BYPASSES,
@@ -42,6 +42,7 @@ function respond(url: string) {
   if (url.startsWith('/api/stats')) return { data: { stats: STATS, registries: REGISTRIES } }
   if (url.endsWith('/vulnerabilities')) return { data: VULNERABILITY_REPORT }
   if (url.startsWith('/api/admin/bypasses')) return { data: { bypasses: BYPASSES } }
+  if (url.includes('layout=rows')) return { data: serveRows(url, PACKAGES) }
   if (url.startsWith('/api/packages')) return { data: { packages: PACKAGES } }
   throw new Error(`unexpected request: ${url}`)
 }
@@ -109,7 +110,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     const { wrapper, problems } = await smoke(PackageList, '/packages')
     expect(problems).toEqual([])
     expect(wrapper.find('h1').text()).toBe('Packages')
-    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('4 of 4')
+    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('1–4 of 4')
     const text = wrapper.text()
     for (const word of ['left-pad', 'requests', 'github.com/example/module', 'Held', 'Cleared', 'Bypassed', 'Awaiting scan']) {
       expect(text).toContain(word)
@@ -119,7 +120,7 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
   it('PackageList seeds the verdict filter from the URL', async () => {
     const { wrapper, problems } = await smoke(PackageList, '/packages?verdict=held')
     expect(problems).toEqual([])
-    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('1 of 4')
+    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('1–1 of 1')
     expect(wrapper.text()).toContain('left-pad')
     expect(wrapper.text()).not.toContain('requests')
   })
@@ -324,9 +325,10 @@ describe('view smoke tests (strict mode throw, fixture data)', () => {
     expect(nav.classes()).toContain('p-3')
   })
 
-  it('PackageList still fetches through the store on mount', async () => {
+  it('PackageList asks for one page of rows on mount', async () => {
     await smoke(PackageList, '/packages')
-    expect(usePackageStore().packages.length).toBe(PACKAGES.length)
+    await flushPromises()
+    expect(vi.mocked(axios.get)).toHaveBeenCalledWith(expect.stringContaining('/api/packages?layout=rows'))
   })
 })
 
@@ -347,7 +349,7 @@ describe('old URLs land on the new pages', () => {
 
   it('/packages/npm still seeds the registry filter', async () => {
     const { wrapper } = await smoke(PackageList, '/packages/npm', { registry: 'npm' })
-    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('2 of 4')
+    expect(wrapper.find('[data-testid="package-count"]').text()).toContain('1–2 of 2')
   })
 })
 
@@ -378,6 +380,7 @@ describe('PyPI rows show the release version, not the file name', () => {
       if (url.endsWith('/vulnerabilities')) {
         return { data: { ...VULNERABILITY_REPORT, package: { release_version: '1.17.0' } } } as never
       }
+      if (url.includes('layout=rows')) return { data: serveRows(url, [SIX as never]) } as never
       if (url.startsWith('/api/packages')) return { data: { packages: [SIX] } } as never
       return respond(url) as never
     })

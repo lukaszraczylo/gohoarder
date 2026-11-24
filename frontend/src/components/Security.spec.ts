@@ -5,6 +5,7 @@ import { flushPromises } from '@vue/test-utils'
 import Security from './Security.vue'
 import type { Package, VulnerabilityCounts } from '@/stores/packages'
 import { mountStrict } from '@/test/mountStrict'
+import { serveRows } from '@/test/rowsServer'
 import { createTestRouter } from '@/test/router'
 
 vi.mock('axios')
@@ -41,9 +42,13 @@ const NAMES = FIXTURE.map((p) => p.name)
 
 let restore: (() => void) | undefined
 
+function serve(packages: Package[]) {
+  vi.mocked(axios.get).mockImplementation(async (url: string) => ({ data: serveRows(url, packages) }) as never)
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
-  vi.mocked(axios.get).mockResolvedValue({ data: { packages: FIXTURE } })
+  serve(FIXTURE)
 })
 
 afterEach(() => {
@@ -82,9 +87,27 @@ describe('Security severity filter', () => {
     expect(router.currentRoute.value.query.severity).toBeUndefined()
   })
 
-  it('asks the server for every package, so a hold with no findings is not dropped', async () => {
+  it('asks the server for one page of the open tab, worst first', async () => {
     await open()
-    expect(axios.get).toHaveBeenCalledWith('/api/packages')
+    const url = vi.mocked(axios.get).mock.calls.map((c) => String(c[0])).find((u) => u.includes('layout=rows'))!
+    const params = new URL(url, 'http://x').searchParams
+    expect(Object.fromEntries(params)).toEqual({
+      layout: 'rows',
+      page: '1',
+      page_size: '25',
+      verdict: 'cleared',
+      severity: 'critical,high,moderate,low',
+      sort: 'risk',
+      order: 'desc',
+    })
+  })
+
+  it('sends the selected severities with the open tab', async () => {
+    const { wrapper } = await open()
+    await tile(wrapper, 'high').trigger('click')
+    await flushPromises()
+    const last = String(vi.mocked(axios.get).mock.calls[vi.mocked(axios.get).mock.calls.length - 1]![0])
+    expect(new URL(last, 'http://x').searchParams.get('severity')).toBe('high')
   })
 
   it('renders the four tiles as keyboard-operable buttons in severity order', async () => {
@@ -206,7 +229,7 @@ describe('Security severity filter', () => {
   })
 
   it('keeps the success state when nothing has findings, filter or not', async () => {
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [] } })
+    serve([])
     const { wrapper } = await open('/security?tab=allowed&severity=critical')
 
     expect(wrapper.text()).toContain('No package carries findings under the policy')
@@ -217,7 +240,7 @@ describe('Security severity filter', () => {
     const held = vulnerable('echo-blocked', { critical: 1 })
     held.vulnerabilities!.isBlocked = true
     held.vulnerabilities!.verdict = 'held'
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [...FIXTURE, held] } })
+    serve([...FIXTURE, held])
     const { wrapper } = await open('/blocked-packages?severity=critical')
 
     expect(wrapper.text()).toContain('echo-blocked')
@@ -227,10 +250,33 @@ describe('Security severity filter', () => {
   it('lists a held package that has no findings, such as a failed scan', async () => {
     const failed = vulnerable('foxtrot-failed', {})
     failed.vulnerabilities = { scanned: true, status: 'clean', isBlocked: true, verdict: 'held', reason: 'scan failed - fail closed' }
-    vi.mocked(axios.get).mockResolvedValue({ data: { packages: [failed] } })
+    serve([failed])
     const { wrapper } = await open('/security?tab=held')
 
     expect(wrapper.text()).toContain('foxtrot-failed')
     expect(wrapper.text()).toContain('scan failed - fail closed')
+  })
+
+  it('pages through the server and resets to page 1 when the filter changes', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => vulnerable(`pkg-${String(i).padStart(2, '0')}`, { critical: 1 }))
+    serve(many)
+    const { wrapper } = await open()
+    expect(wrapper.findAll('tbody tr')).toHaveLength(25)
+
+    await wrapper.get('nav[aria-label="Security pages"] button[aria-label*="ext"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('tbody tr')).toHaveLength(5)
+    expect(String(vi.mocked(axios.get).mock.calls[vi.mocked(axios.get).mock.calls.length - 1]![0])).toContain('page=2')
+
+    await tile(wrapper, 'critical').trigger('click')
+    await flushPromises()
+    expect(String(vi.mocked(axios.get).mock.calls[vi.mocked(axios.get).mock.calls.length - 1]![0])).toContain('page=1')
+  })
+
+  it('takes the tab counts from the server, not from the rows on screen', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => vulnerable(`pkg-${i}`, { low: 1 }))
+    serve(many)
+    const { wrapper } = await open()
+    expect(wrapper.findAll('[role="tab"]').map((t) => t.text())).toContain('Vulnerable but allowed (30)')
   })
 })

@@ -51,6 +51,7 @@
 @source "../../node_modules/@perfect-design/ui/dist/components/navigation/AppHeader/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/navigation/MobileNav/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/navigation/NavLink/*.js";
+@source "../../node_modules/@perfect-design/ui/dist/components/navigation/Pagination/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/navigation/SidebarNav/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/navigation/Tabs/*.js";
 @source "../../node_modules/@perfect-design/ui/dist/components/navigation/ThemeToggle/*.js";

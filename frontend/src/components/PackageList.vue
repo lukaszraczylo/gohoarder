@@ -11,36 +11,35 @@
       <FilterBar v-model="filterItems" :fields="filterFields" variant="compact" />
     </div>
 
-    <LoadingState v-if="loading && packages.length === 0" variant="table" label="Loading packages..." />
+    <LoadingState v-if="loading && !loaded" variant="table" label="Loading packages..." />
 
     <ErrorState v-else-if="error" variant="card" title="Could not load packages" :message="error" @retry="load()" />
 
     <Card v-else>
       <CardContent>
         <EmptyState
-          v-if="packages.length === 0"
+          v-if="total === 0 && !filtered"
           :icon="faBoxOpen"
           title="No packages cached yet"
           description="Packages will appear here once they are downloaded through the proxy."
         />
         <EmptyState
-          v-else-if="rows.length === 0"
+          v-else-if="total === 0"
           :icon="faMagnifyingGlass"
           title="No packages match"
           description="Change the search text or remove a filter."
         />
         <template v-else>
           <p class="m-0 mb-3 text-sm text-muted-foreground" data-testid="package-count">
-            {{ rows.length }} of {{ plural(packages.length, 'package version') }}
+            {{ rangeStart }}–{{ rangeEnd }} of {{ plural(total, 'package version') }}
           </p>
           <DataTable
             v-model:sort="sort"
-            v-model:page="page"
             label="Cached packages"
             layout="cards"
             density="compact"
             row-clickable
-            :page-size="PAGE_SIZE"
+            :loading="loading"
             :columns="columns"
             :rows="rows"
             @row-click="(row: Package) => (selected = row)"
@@ -60,6 +59,14 @@
               <span v-else class="text-muted-foreground">Never</span>
             </template>
           </DataTable>
+          <Pagination
+            v-if="total > PAGE_SIZE"
+            v-model:page="page"
+            class="mt-4"
+            :total="total"
+            :page-size="PAGE_SIZE"
+            aria-label="Package pages"
+          />
         </template>
       </CardContent>
     </Card>
@@ -79,8 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { storeToRefs } from 'pinia'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   Badge,
@@ -94,6 +100,7 @@ import {
   FilterBar,
   LoadingState,
   PageHeader,
+  Pagination,
   RelativeTime,
   SearchInput,
   useToastStore,
@@ -104,24 +111,27 @@ import {
 } from '@perfect-design/ui'
 import PackageQuickView from './parts/PackageQuickView.vue'
 import VerdictBadge from './parts/VerdictBadge.vue'
-import { usePackageStore, type Package } from '../stores/packages'
+import { usePackageStore, type ApiVerdict, type Package } from '../stores/packages'
 import { plural } from '@/lib/reason'
 import { displayVersion, formatBytes, formatNumber, withVersionPrefix } from '@/lib/format'
-import { filterPackages, packageRoute } from '@/lib/packages'
+import { packageRoute } from '@/lib/packages'
+import { usePackageRows, type RowQuery, type RowSort } from '@/lib/packageRows'
 import { faBoxOpen, faMagnifyingGlass, faRotateRight } from '@/lib/icons'
-import { VERDICT_OPTIONS, VERDICT_RANK, verdictOf, type Verdict } from '@/lib/verdict'
+import { VERDICT_OPTIONS, verdictOf } from '@/lib/verdict'
 
 const props = defineProps<{ registry?: string }>()
 
 const PAGE_SIZE = 25
+const SEARCH_DEBOUNCE_MS = 300
 const KNOWN_REGISTRIES = ['npm', 'go', 'pypi']
 
 const store = usePackageStore()
 const toasts = useToastStore()
 const route = useRoute()
 const router = useRouter()
-const { packages, loading, error } = storeToRefs(store)
+const { rows, total, loading, error, load: loadRows } = usePackageRows()
 
+const loaded = ref(false)
 const selected = ref<Package | null>(null)
 const showDeleteModal = ref(false)
 const packageToDelete = ref<Package | null>(null)
@@ -134,6 +144,13 @@ function queryText(key: string): string {
 }
 
 const query = ref(queryText('q'))
+const searchTerm = ref(query.value)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(query, (value) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => (searchTerm.value = value), SEARCH_DEBOUNCE_MS)
+})
+onUnmounted(() => clearTimeout(searchTimer))
 
 let nextFilterId = 0
 function filterItem(field: string, value: string): FilterItem {
@@ -149,7 +166,7 @@ const filterItems = ref<FilterItem[]>(
 )
 
 const registryOptions = computed(() => {
-  const seen = new Set([...KNOWN_REGISTRIES, ...packages.value.map((p) => p.registry)])
+  const seen = new Set([...KNOWN_REGISTRIES, ...rows.value.map((p) => p.registry), ...valuesOf('registry')])
   return [...seen].map((value) => ({ value, label: value }))
 })
 
@@ -162,20 +179,38 @@ function valuesOf(field: string): string[] {
   return filterItems.value.filter((f) => f.field === field).map((f) => String(f.value))
 }
 
-const rows = computed(() =>
-  filterPackages(packages.value, {
-    query: query.value,
-    registries: valuesOf('registry'),
-    verdicts: valuesOf('verdict') as Verdict[],
-  }),
-)
+const SORT_KEYS: Record<string, RowSort> = {
+  name: 'name',
+  version: 'version',
+  registry: 'registry',
+  size: 'size',
+  download_count: 'downloads',
+  last_accessed: 'last_accessed',
+  scanned: 'last_scanned',
+}
+
+const rowQuery = computed<RowQuery>(() => ({
+  q: searchTerm.value,
+  registry: valuesOf('registry')[0],
+  verdict: valuesOf('verdict')[0] as ApiVerdict | undefined,
+  sort: sort.value ? SORT_KEYS[sort.value.key] : undefined,
+  order: sort.value?.direction === 'desc' ? 'desc' : 'asc',
+  page: page.value,
+  pageSize: PAGE_SIZE,
+}))
+
+const filtered = computed(() => Boolean(searchTerm.value.trim() || valuesOf('registry').length || valuesOf('verdict').length))
+const rangeStart = computed(() => (total.value === 0 ? 0 : (page.value - 1) * PAGE_SIZE + 1))
+const rangeEnd = computed(() => Math.min(page.value * PAGE_SIZE, total.value))
+
+// A new search, filter or sort starts again from the first page.
+watch([searchTerm, filterItems, sort], () => (page.value = 1))
 
 // The URL mirrors the filters so a reload or a shared link restores the view.
-watch([query, filterItems], () => {
-  page.value = 1
+watch([searchTerm, filterItems], () => {
   const { q: _q, registry: _r, verdict: _v, ...rest } = route.query
   const next: Record<string, string> = {}
-  if (query.value.trim()) next.q = query.value.trim()
+  if (searchTerm.value.trim()) next.q = searchTerm.value.trim()
   const [registry] = valuesOf('registry')
   const [verdict] = valuesOf('verdict')
   if (registry) next.registry = registry
@@ -190,14 +225,16 @@ const columns: DataTableColumn<Package>[] = [
   { key: 'size', header: 'Size', sortable: true, numeric: true },
   { key: 'download_count', header: 'Downloads', sortable: true, numeric: true },
   { key: 'last_accessed', header: 'Last accessed', sortable: true, accessor: (p) => Date.parse(p.last_accessed) || 0 },
-  { key: 'verdict', header: 'Verdict', sortable: true, accessor: (p) => VERDICT_RANK[verdictOf(p)] },
+  { key: 'verdict', header: 'Verdict' },
   { key: 'scanned', header: 'Last scanned', sortable: true, accessor: (p) => Date.parse(p.vulnerabilities?.scannedAt ?? '') || 0 },
 ]
 
 async function load() {
-  await store.fetchPackages()
+  await loadRows(rowQuery.value)
+  loaded.value = true
 }
 
+watch(rowQuery, load)
 onMounted(load)
 
 function confirmDelete(pkg: Package) {

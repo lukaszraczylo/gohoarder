@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -107,6 +108,25 @@ func TestSystemLeaksNoSecrets(t *testing.T) {
 	_, body := getJSON(t, a, "/api/system")
 	for _, banned := range []string{secret, "/srv/private", "token", "dsn", "password"} {
 		if strings.Contains(strings.ToLower(body), strings.ToLower(banned)) {
+			t.Errorf("/api/system exposes %q: %s", banned, body)
+		}
+	}
+}
+
+func TestSystemUpstreamsKeepOnlySchemeAndHost(t *testing.T) {
+	a := newTestApp(t, func(c *config.Config) {
+		c.Handlers.NPM.UpstreamRegistry = fmt.Sprintf("https://%s:%s@npm.example.com:8443/private/path?token=abc", "deploy", "s3cret")
+		c.Handlers.PyPI.UpstreamURL = "not a url"
+	})
+	out, body := getJSON(t, a, "/api/system")
+	if got := jsonAt(out, "upstreams", "npm"); got != "https://npm.example.com:8443" {
+		t.Errorf("npm upstream = %v", got)
+	}
+	if got := jsonAt(out, "upstreams", "pypi"); got != "" {
+		t.Errorf("unparseable upstream = %v, want empty", got)
+	}
+	for _, banned := range []string{"s3cret", "deploy", "private/path", "abc"} {
+		if strings.Contains(body, banned) {
 			t.Errorf("/api/system exposes %q: %s", banned, body)
 		}
 	}

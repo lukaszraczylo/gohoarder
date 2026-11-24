@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -33,6 +34,15 @@ func scannerSwitches(s config.ScannersConfig) []scannerSwitch {
 		{pipaudit.ScannerName, s.PipAudit.Enabled},
 		{ghsa.ScannerName, s.GHSA.Enabled},
 	}
+}
+
+// originOnly keeps scheme and host, so credentials, paths and queries in an upstream URL never leave the server.
+func originOnly(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func seconds(d time.Duration) int64 { return int64(d / time.Second) }
@@ -98,6 +108,11 @@ func (a *App) handleSystem(c fiber.Ctx) error {
 				"concurrency":   concurrency,
 				"on_access":     sec.RescanOnAccess,
 			},
+		},
+		"upstreams": fiber.Map{
+			"go":   originOnly(a.config.Handlers.Go.UpstreamProxy),
+			"npm":  originOnly(a.config.Handlers.NPM.UpstreamRegistry),
+			"pypi": originOnly(a.config.Handlers.PyPI.UpstreamURL),
 		},
 		"cache": fiber.Map{
 			"max_size":    a.config.Cache.MaxSizeBytes,

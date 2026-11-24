@@ -32,6 +32,10 @@ data:
       severity_threshold: medium
       block_on_vulnerability: false
       rescan_interval: 24h
+      rescan_active_window: 0s
+      rescan_concurrency: 1
+      rescan_on_access: false
+      scan_wait_timeout: 30s
 
     handlers:
       npm:

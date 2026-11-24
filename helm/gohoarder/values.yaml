@@ -395,6 +395,10 @@ security:
   blockOnSeverity: "high"  # none, low, medium, high, critical
   scanOnDownload: true
   rescanInterval: "24h"
+  rescanActiveWindow: "0s"  # rescan only packages requested within this window; 0 = all
+  rescanConcurrency: 1  # scans run in parallel per rescan cycle
+  rescanOnAccess: false  # rescan a stale cache hit before serving it
+  scanWaitTimeout: "30s"  # how long a first download waits for its scan
   updateDbOnStartup: false
 
   blockThresholds:

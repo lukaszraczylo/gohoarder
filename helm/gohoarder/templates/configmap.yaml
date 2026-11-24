@@ -89,6 +89,10 @@ data:
       block_on_severity: {{ .Values.security.blockOnSeverity | quote }}
       scan_on_download: {{ .Values.security.scanOnDownload }}
       rescan_interval: {{ .Values.security.rescanInterval | quote }}
+      rescan_active_window: {{ .Values.security.rescanActiveWindow | quote }}
+      rescan_concurrency: {{ .Values.security.rescanConcurrency }}
+      rescan_on_access: {{ .Values.security.rescanOnAccess }}
+      scan_wait_timeout: {{ .Values.security.scanWaitTimeout | quote }}
       update_db_on_startup: {{ .Values.security.updateDbOnStartup }}
       block_thresholds:
         critical: {{ .Values.security.blockThresholds.critical }}

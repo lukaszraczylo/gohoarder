@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
@@ -132,7 +133,7 @@ func TestScanAuditsTheModuleItself(t *testing.T) {
 
 	env, err := os.ReadFile(filepath.Join(rec, "env")) // #nosec G304 -- test temp dir
 	require.NoError(t, err)
-	assert.Equal(t, "-mod=mod|local\n", string(env))
+	assert.Equal(t, "-mod=mod -modcacherw|local\n", string(env))
 
 	assert.Equal(t, []string{"-json", "-scan", "module"}, scannertest.Args(t, args))
 
@@ -142,6 +143,32 @@ func TestScanAuditsTheModuleItself(t *testing.T) {
 	assert.Contains(t, imports, `_ "golang.org/x/text/language"`)
 	assert.NotContains(t, imports, "/cmd/gotext\"", "package main cannot be imported")
 	assert.NotContains(t, imports, "/internal", "internal packages cannot be imported")
+}
+
+func TestScanRemovesTheModulesItDownloaded(t *testing.T) {
+	rec := t.TempDir()
+	// Like go, the fake leaves the module cache read-only unless GOFLAGS has -modcacherw.
+	scannertest.Script(t, "go", fmt.Sprintf(`
+[ -n "$GOMODCACHE" ] || exit 1
+mkdir -p "$GOMODCACHE/example.com/dep@v1.0.0"
+touch "$GOMODCACHE/example.com/dep@v1.0.0/dep.go"
+case "$GOFLAGS" in *-modcacherw*) ;; *) chmod 0555 "$GOMODCACHE/example.com/dep@v1.0.0" ;; esac
+echo "$GOMODCACHE" > %q/go
+echo "github.com/google/uuid uuid 12 0 "`, rec))
+	scannertest.Script(t, "govulncheck", fmt.Sprintf(`
+echo "$GOMODCACHE" > %q/govulncheck
+cat %q`, rec, abs(t, "google-uuid-v1.6.0.stream")))
+
+	res, err := New(config.GovulncheckConfig{}).Scan(context.Background(), "go", "github.com/google/uuid/@v/v1.6.0.zip", "v1.6.0", module(t))
+
+	require.NoError(t, err)
+	require.Equal(t, metadata.ScanStatusClean, res.Status)
+	listCache, err := os.ReadFile(filepath.Join(rec, "go")) // #nosec G304 -- test temp dir
+	require.NoError(t, err)
+	scanCache, err := os.ReadFile(filepath.Join(rec, "govulncheck")) // #nosec G304 -- test temp dir
+	require.NoError(t, err)
+	assert.Equal(t, string(listCache), string(scanCache), "govulncheck reads the modules go list downloaded")
+	assert.NoDirExists(t, strings.TrimSpace(string(listCache)), "the scan keeps no downloaded modules")
 }
 
 func TestScanCleanModule(t *testing.T) {

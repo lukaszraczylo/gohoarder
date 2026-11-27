@@ -83,14 +83,21 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
+	defer func() {
+		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
+			log.Warn().Err(rmErr).Str("scanner", ScannerName).Str("dir", tmpDir).Msg("Cannot remove scan directory")
+		}
+	}()
 
 	// govulncheck never reports advisories against the main module of the tree it scans, so
 	// scanning the module's own source reports a vulnerable module clean. The module is
 	// scanned as a dependency of a wrapper module instead, and the wrapper imports its
 	// packages because module-mode scanning only considers modules that provide an import.
 	// Resolving the module reaches the module proxy.
-	env := append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local", "GOWORK=off")
+	// The dependency tree goes to a module cache inside tmpDir, so the scan keeps nothing on disk;
+	// -modcacherw leaves that cache writable, or RemoveAll cannot delete it.
+	env := append(os.Environ(), "GOFLAGS=-mod=mod -modcacherw", "GOTOOLCHAIN=local", "GOWORK=off",
+		"GOMODCACHE="+filepath.Join(tmpDir, "modcache"))
 	goMod := fmt.Sprintf("module gohoarder.audit\n\nrequire %s %s\n", module, version)
 	if err = os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write go.mod: %w", err)

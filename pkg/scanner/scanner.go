@@ -99,6 +99,7 @@ type Manager struct {
 	broadcaster   events.Broadcaster
 	retryTimers   map[string]*time.Timer
 	fileSource    FileSource
+	freeBytes     func(path string) (uint64, error)
 	stopCh        chan struct{}
 	inflight      map[string]int
 	scanners      []Scanner
@@ -216,6 +217,7 @@ func New(cfg config.SecurityConfig, metadataStore metadata.MetadataStore) (*Mana
 		metadataStore: metadataStore,
 		retryTimers:   make(map[string]*time.Timer),
 		inflight:      make(map[string]int),
+		freeBytes:     diskFree,
 		stopCh:        make(chan struct{}),
 	}
 
@@ -331,7 +333,14 @@ func (m *Manager) scan(ctx context.Context, registry, packageName, version strin
 	scannerNames := make([]string, 0)
 	var infraFailures, otherFailures int
 
-	for _, scanner := range m.scanners {
+	scanners := m.scanners
+	if err := m.checkDiskSpace(); err != nil {
+		log.Warn().Err(err).Str("package", packageName).Msg("Deferring security scan")
+		infraFailures++
+		scanners = nil
+	}
+
+	for _, scanner := range scanners {
 		// Skip scanners that don't support this registry
 		if !m.shouldRunScanner(scanner.Name(), registry) {
 			log.Debug().

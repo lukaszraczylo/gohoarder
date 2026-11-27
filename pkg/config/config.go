@@ -184,6 +184,7 @@ type SecurityConfig struct {
 	RescanConcurrency  int                     `mapstructure:"rescan_concurrency" json:"rescan_concurrency"`     // scans run in parallel per rescan cycle; <1 = 1
 	ScanRetryInterval  time.Duration           `mapstructure:"scan_retry_interval" json:"scan_retry_interval"`   // wait before retrying a scan that failed on infrastructure; 0 = 5m
 	ScanWaitTimeout    time.Duration           `mapstructure:"scan_wait_timeout" json:"scan_wait_timeout"`       // how long a first download waits for its scan; 0 = 30s
+	MinFreeBytes       int64                   `mapstructure:"min_free_bytes" json:"min_free_bytes"`             // defer scans while the temp dir has less free space; 0 = off
 	FailClosed         bool                    `mapstructure:"fail_closed" json:"fail_closed"`                   // refuse packages whose scan failed on infrastructure
 	Enabled            bool                    `mapstructure:"enabled" json:"enabled"`
 	ScanOnDownload     bool                    `mapstructure:"scan_on_download" json:"scan_on_download"`

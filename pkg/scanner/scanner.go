@@ -99,6 +99,7 @@ type Manager struct {
 	broadcaster   events.Broadcaster
 	retryTimers   map[string]*time.Timer
 	fileSource    FileSource
+	stopCh        chan struct{}
 	inflight      map[string]int
 	scanners      []Scanner
 	config        config.SecurityConfig
@@ -113,10 +114,13 @@ func (m *Manager) Enabled() bool {
 	return m.enabled
 }
 
-// Stop cancels pending scan retries.
+// Stop cancels pending scan retries and background database refreshes.
 func (m *Manager) Stop() {
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
+	if !m.stopped && m.stopCh != nil {
+		close(m.stopCh)
+	}
 	m.stopped = true
 	for key, timer := range m.retryTimers {
 		timer.Stop()
@@ -212,6 +216,7 @@ func New(cfg config.SecurityConfig, metadataStore metadata.MetadataStore) (*Mana
 		metadataStore: metadataStore,
 		retryTimers:   make(map[string]*time.Timer),
 		inflight:      make(map[string]int),
+		stopCh:        make(chan struct{}),
 	}
 
 	if !cfg.Enabled {
@@ -252,6 +257,8 @@ func New(cfg config.SecurityConfig, metadataStore metadata.MetadataStore) (*Mana
 				log.Warn().Err(err).Msg("Failed to update Grype database on startup")
 			}
 		}
+		// Scans never update the database, so without this loop it ages past grype's limit.
+		go grypeScanner.RefreshDatabase(manager.stopCh, cfg.Scanners.Grype.DBUpdateInterval, !cfg.UpdateDBOnStartup)
 	}
 
 	// Initialize govulncheck scanner

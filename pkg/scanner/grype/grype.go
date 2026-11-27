@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lukaszraczylo/gohoarder/pkg/config"
@@ -26,6 +28,7 @@ const ScannerName = "grype"
 type Scanner struct {
 	version scanver.Cache
 	config  config.GrypeConfig
+	dbMu    sync.Mutex
 }
 
 // New creates a new Grype scanner
@@ -54,6 +57,8 @@ func (s *Scanner) Scan(ctx context.Context, registry, packageName, version strin
 		target = filePath
 	}
 	cmd := exec.CommandContext(ctx, "grype", target, "-o", "json", "-q") // #nosec G204 -- target is a purl or the stored artifact path
+	// Concurrent scans each downloading the database filled the disk; RefreshDatabase owns updates.
+	cmd.Env = append(os.Environ(), "GRYPE_DB_AUTO_UPDATE=false")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
@@ -116,10 +121,17 @@ func (s *Scanner) Health(ctx context.Context) error {
 	return nil
 }
 
-// UpdateDatabase updates Grype's vulnerability database
+// UpdateDatabase updates Grype's vulnerability database. Calls are serialised, and the
+// download outlives a cancelled ctx so it never leaves a half-written database behind.
 func (s *Scanner) UpdateDatabase(ctx context.Context) error {
-	log.Info().Str("scanner", ScannerName).Msg("Updating Grype database")
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
 
+	log.Info().Str("scanner", ScannerName).Msg("Updating Grype database")
+	removeAbandonedDownloads(time.Now().Add(-abandonedAfter))
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dbUpdateTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "grype", "db", "update")
 	output, err := cmd.CombinedOutput()
 	if err != nil {

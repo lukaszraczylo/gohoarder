@@ -236,8 +236,9 @@ type StaticConfig struct {
 
 // GrypeConfig contains Grype scanner configuration
 type GrypeConfig struct {
-	Enabled bool          `mapstructure:"enabled" json:"enabled"`
-	Timeout time.Duration `mapstructure:"timeout" json:"timeout"`
+	Enabled          bool          `mapstructure:"enabled" json:"enabled"`
+	Timeout          time.Duration `mapstructure:"timeout" json:"timeout"`
+	DBUpdateInterval time.Duration `mapstructure:"db_update_interval" json:"db_update_interval"` // must stay under grype's 120h max database age; 0 = 6h
 }
 
 // GovulncheckConfig contains govulncheck scanner configuration
@@ -424,8 +425,9 @@ func Default() *Config {
 					BlockSuspicious: false,
 				},
 				Grype: GrypeConfig{
-					Enabled: false,
-					Timeout: 5 * time.Minute,
+					Enabled:          false,
+					Timeout:          5 * time.Minute,
+					DBUpdateInterval: 6 * time.Hour,
 				},
 				Govulncheck: GovulncheckConfig{
 					Enabled: false,

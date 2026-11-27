@@ -15,7 +15,7 @@
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@fontsource/ibm-plex-sans": "5.3.0",
     "@fortawesome/free-solid-svg-icons": "7.3.1",
-    "@perfect-design/ui": "0.3.10",
+    "@perfect-design/ui": "0.3.11",
     "axios": "^1.20.0",
     "pinia": "^4.0.0",
     "vue": "^3.5.26",

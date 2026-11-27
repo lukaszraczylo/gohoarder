@@ -23,8 +23,8 @@ importers:
         specifier: 7.3.1
         version: 7.3.1
       '@perfect-design/ui':
-        specifier: 0.3.10
-        version: 0.3.10(pinia@4.1.0(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.46(typescript@6.0.3)))(tailwindcss@4.3.5)(vue@3.5.46(typescript@6.0.3))
+        specifier: 0.3.11
+        version: 0.3.11(pinia@4.1.0(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.46(typescript@6.0.3)))(tailwindcss@4.3.5)(vue@3.5.46(typescript@6.0.3))
       axios:
         specifier: ^1.20.0
         version: 1.21.1(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
@@ -353,8 +353,8 @@ packages:
   '@oxc-project/types@0.156.0':
     resolution: {integrity: sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==}
 
-  '@perfect-design/ui@0.3.10':
-    resolution: {integrity: sha512-nFpY8dK6braHsRPVdX3bUCrkPNfwiUj2KfvUfLdFRFlfBRaqrkNGx2QkmNu/L0rdNe6JQj6Mvdrb+LnC/sFg8Q==}
+  '@perfect-design/ui@0.3.11':
+    resolution: {integrity: sha512-vu7liBjd6ZndJWio3gt1EHmOVi1VAcPQ/v+8xQRLvrIH9Bd43ZYsgsh+JITpBRmagYyAxPjo1zFU7ma/I6lVmg==}
     peerDependencies:
       pinia: ^3.0.0 || ^4.0.0
       tailwindcss: ^4.1.0
@@ -1967,7 +1967,7 @@ snapshots:
 
   '@oxc-project/types@0.156.0': {}
 
-  '@perfect-design/ui@0.3.10(pinia@4.1.0(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.46(typescript@6.0.3)))(tailwindcss@4.3.5)(vue@3.5.46(typescript@6.0.3))':
+  '@perfect-design/ui@0.3.11(pinia@4.1.0(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.46(typescript@6.0.3)))(tailwindcss@4.3.5)(vue@3.5.46(typescript@6.0.3))':
     dependencies:
       pinia: 4.1.0(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.46(typescript@6.0.3))
       reka-ui: 2.11.0(vue@3.5.46(typescript@6.0.3))
